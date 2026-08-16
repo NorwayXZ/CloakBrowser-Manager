@@ -19,6 +19,7 @@ from backend.browser_manager import (
     _normalize_proxy,
     _playwright_proxy,
     _sync_profile_locale,
+    _sync_session_restore,
     _validate_proxy,
     BrowserManager,
     RunningProfile,
@@ -263,6 +264,7 @@ async def test_native_launch_skips_vnc_and_display(monkeypatch, tmp_path: Path):
     assert "env" not in options
     assert "viewport" not in options
     assert "--use-angle=swiftshader" not in options["args"]
+    assert "--restore-last-session" in options["args"]
     assert "--remote-debugging-address=127.0.0.1" in options["args"]
 
 
@@ -293,6 +295,31 @@ async def test_system_chrome_native_window_uses_resizable_viewport(monkeypatch, 
     assert options["no_viewport"] is True
     assert "viewport" not in options
     assert options["chromium_sandbox"] is True
+
+
+@pytest.mark.asyncio
+async def test_native_system_chrome_keeps_restored_tabs(monkeypatch, tmp_path: Path):
+    from backend import browser_manager as module
+
+    blank_page = MagicMock(url="about:blank")
+    blank_page.goto = AsyncMock()
+    blank_page.bring_to_front = AsyncMock()
+    restored_page = MagicMock(url="https://example.com/")
+    context = MagicMock(pages=[blank_page, restored_page])
+    context.add_init_script = AsyncMock()
+    manager = BrowserManager(RuntimeConfig("macos", "native", "native-window", tmp_path))
+    manager._wait_for_cdp = AsyncMock()
+    launch = AsyncMock(return_value=context)
+    monkeypatch.setattr(module, "_launch_system_chrome_persistent_context_async", launch)
+
+    await manager.launch({
+        **_launch_profile(tmp_path),
+        "browser_engine": "system_chrome",
+    })
+
+    assert "--restore-last-session" in launch.await_args.kwargs["args"]
+    blank_page.goto.assert_not_awaited()
+    blank_page.bring_to_front.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -501,6 +528,34 @@ def test_sync_profile_locale_updates_chrome_preferences(tmp_path: Path):
 
     local_state = json.loads((tmp_path / "Local State").read_text())
     assert local_state["intl"]["app_locale"] == "en-US"
+
+
+def test_sync_session_restore_updates_chrome_preferences(tmp_path: Path):
+    _init_profile_defaults(tmp_path)
+    _sync_session_restore(tmp_path)
+
+    prefs_path = tmp_path / "Default" / "Preferences"
+    prefs = json.loads(prefs_path.read_text())
+    assert prefs["session"]["restore_on_startup"] == 1
+
+
+def test_sync_session_restore_preserves_existing_preferences(tmp_path: Path):
+    _init_profile_defaults(tmp_path)
+    prefs_path = tmp_path / "Default" / "Preferences"
+    prefs = json.loads(prefs_path.read_text())
+    prefs["session"] = {
+        "restore_on_startup": 5,
+        "startup_urls": ["https://example.com"],
+    }
+    prefs_path.write_text(json.dumps(prefs))
+
+    _sync_session_restore(tmp_path)
+
+    updated = json.loads(prefs_path.read_text())
+    assert updated["session"] == {
+        "restore_on_startup": 1,
+        "startup_urls": ["https://example.com"],
+    }
 
 
 def test_build_locale_timezone_env_sets_process_time_and_language():

@@ -27,9 +27,11 @@ logger = logging.getLogger("cloakbrowser.manager.browser")
 
 BROWSER_ENGINE_ENV = "CLOAKBROWSER_MANAGER_ENGINE"
 SYSTEM_CHROME_IGNORE_DEFAULT_ARGS = ["--enable-automation", "--enable-unsafe-swiftshader"]
+SESSION_RESTORE_ARG = "--restore-last-session"
 SYSTEM_CHROME_BASE_ARGS = [
     "--disable-blink-features=AutomationControlled",
     "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+    SESSION_RESTORE_ARG,
 ]
 NATIVE_START_PAGE_TEMPLATE = "http://127.0.0.1:8080/profile/{profile_id}/start"
 BLANK_PAGE_URLS = {
@@ -135,6 +137,20 @@ def _sync_webrtc_policy(user_data_dir: Path) -> None:
             "multiple_routes_enabled": False,
             "nonproxied_udp_enabled": False,
         }
+    _write_json_file(prefs_path, prefs)
+
+
+def _sync_session_restore(user_data_dir: Path) -> None:
+    """Keep Chrome's last tabs available when a persistent profile restarts."""
+    default_dir = user_data_dir / "Default"
+    default_dir.mkdir(parents=True, exist_ok=True)
+    prefs_path = default_dir / "Preferences"
+    prefs = _read_json_file(prefs_path)
+    session = prefs.setdefault("session", {})
+    if isinstance(session, dict):
+        session["restore_on_startup"] = 1
+    else:
+        prefs["session"] = {"restore_on_startup": 1}
     _write_json_file(prefs_path, prefs)
 
 
@@ -257,9 +273,11 @@ async def _launch_system_chrome_persistent_context_async(
 
 
 async def _open_native_start_page(context: Any, profile_id: str) -> None:
-    """Replace the initial blank tab with the local profile information page."""
+    """Open the local profile page only when no real tab was restored."""
     try:
         pages = list(getattr(context, "pages", []) or [])
+        if any(str(getattr(page, "url", "") or "") not in BLANK_PAGE_URLS for page in pages):
+            return
         page = pages[0] if pages else await context.new_page()
         if str(getattr(page, "url", "") or "") not in BLANK_PAGE_URLS:
             return
@@ -1190,6 +1208,7 @@ class BrowserManager:
                     (user_data_dir / lock_file).unlink(missing_ok=True)
 
             _init_profile_defaults(user_data_dir)
+            _sync_session_restore(user_data_dir)
 
             if display is not None and ws_port is not None:
                 await self.vnc.start_vnc(
@@ -1270,6 +1289,8 @@ class BrowserManager:
                     extra_args.append(f"--lang={resolved_locale}")
                 if resolved_locale and not any(arg.startswith("--accept-lang") for arg in user_launch_args):
                     extra_args.append(f"--accept-lang={_accept_language_value(resolved_locale)}")
+                if SESSION_RESTORE_ARG not in extra_args:
+                    extra_args.append(SESSION_RESTORE_ARG)
             extra_args += user_launch_args
             extra_args.append("--remote-debugging-address=127.0.0.1")
 
