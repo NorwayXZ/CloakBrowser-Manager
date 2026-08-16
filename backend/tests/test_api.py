@@ -181,6 +181,35 @@ def test_launch_invalid_proxy_400(app_client: TestClient):
     assert "ftp" in resp.json()["detail"]
 
 
+def test_launch_defaults_to_manual_mode(app_client: TestClient):
+    create = app_client.post("/api/profiles", json={"name": "Manual"})
+    pid = create.json()["id"]
+    running = RunningProfile(pid, None, None, launch_mode="manual")
+    main.browser_mgr.launch = AsyncMock(return_value=running)
+
+    resp = app_client.post(f"/api/profiles/{pid}/launch")
+
+    assert resp.status_code == 200
+    main.browser_mgr.launch.assert_awaited_once()
+    assert main.browser_mgr.launch.await_args.kwargs["launch_mode"] == "manual"
+    assert resp.json()["cdp_url"] is None
+    assert resp.json()["launch_mode"] == "manual"
+
+
+def test_launch_accepts_debug_mode(app_client: TestClient):
+    create = app_client.post("/api/profiles", json={"name": "Debug"})
+    pid = create.json()["id"]
+    running = RunningProfile(pid, MagicMock(), 53123, launch_mode="debug")
+    main.browser_mgr.launch = AsyncMock(return_value=running)
+
+    resp = app_client.post(f"/api/profiles/{pid}/launch", json={"launch_mode": "debug"})
+
+    assert resp.status_code == 200
+    assert main.browser_mgr.launch.await_args.kwargs["launch_mode"] == "debug"
+    assert resp.json()["cdp_url"] == f"/api/profiles/{pid}/cdp"
+    assert resp.json()["launch_mode"] == "debug"
+
+
 def test_launch_failure_500(app_client: TestClient):
     """Generic exception from browser_mgr.launch should map to 500."""
     create = app_client.post("/api/profiles", json={"name": "Crash"})

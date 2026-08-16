@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 from .runtime import HostOS, RuntimeMode, ViewerMode
 
 BrowserEngine = Literal["auto", "system_chrome", "cloakbrowser"]
+LaunchMode = Literal["manual", "debug"]
 
 
 class ProfileCreate(BaseModel):
@@ -115,6 +116,7 @@ class ProfileResponse(BaseModel):
     viewer_mode: ViewerMode = "vnc"
     vnc_ws_port: int | None = None
     cdp_url: str | None = None
+    launch_mode: LaunchMode | None = None
 
 
 class LaunchResponse(BaseModel):
@@ -126,6 +128,11 @@ class LaunchResponse(BaseModel):
     display: str | None = None
     cdp_url: str | None = None
     browser_engine: str | None = None
+    launch_mode: LaunchMode = "debug"
+
+
+class LaunchRequest(BaseModel):
+    launch_mode: LaunchMode = "manual"
 
 
 class StatusResponse(BaseModel):
@@ -163,6 +170,7 @@ class ProfileStatusResponse(BaseModel):
     display: str | None = None
     cdp_url: str | None = None
     browser_engine: str | None = None
+    launch_mode: LaunchMode | None = None
 
 
 class ClipboardRequest(BaseModel):

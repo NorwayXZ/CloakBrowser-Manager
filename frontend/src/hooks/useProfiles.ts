@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, type Profile, type ProfileCreateData } from "../lib/api";
+import { api, type LaunchMode, type Profile, type ProfileCreateData } from "../lib/api";
 
 export function useProfiles() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -64,9 +64,9 @@ export function useProfiles() {
   );
 
   const launch = useCallback(
-    async (id: string) => {
+    async (id: string, launchMode: LaunchMode = "manual") => {
       try {
-        const result = await api.launchProfile(id);
+        const result = await api.launchProfile(id, launchMode);
         await refresh();
         return result;
       } catch (err) {

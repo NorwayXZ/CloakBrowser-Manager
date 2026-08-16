@@ -79,7 +79,17 @@ describe("api.launchProfile", () => {
     mockFetch.mockResolvedValueOnce(jsonResponse(result));
     const data = await api.launchProfile("1");
     expect(data.vnc_ws_port).toBe(6100);
-    expect(mockFetch.mock.calls[0][0]).toBe("/api/profiles/1/launch");
+    const [url, options] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/profiles/1/launch");
+    expect(options.method).toBe("POST");
+    expect(JSON.parse(options.body)).toEqual({ launch_mode: "manual" });
+  });
+
+  it("can request debug launch mode", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ profile_id: "1", status: "running" }));
+    await api.launchProfile("1", "debug");
+    const [, options] = mockFetch.mock.calls[0];
+    expect(JSON.parse(options.body)).toEqual({ launch_mode: "debug" });
   });
 });
 

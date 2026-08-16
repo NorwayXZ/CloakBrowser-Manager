@@ -24,7 +24,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 import starlette.requests
@@ -38,6 +38,7 @@ from .xray_runtime import is_xray_link, start_xray_proxy
 from .models import (
     AuthAccountUpdate,
     ClipboardRequest,
+    LaunchRequest,
     LaunchResponse,
     LoginRequest,
     ProfileCreate,
@@ -699,7 +700,10 @@ async def delete_profile(profile_id: str):
 
 
 @app.post("/api/profiles/{profile_id}/launch", response_model=LaunchResponse)
-async def launch_profile(profile_id: str):
+async def launch_profile(
+    profile_id: str,
+    req: LaunchRequest | None = Body(default=None),
+):
     profile = db.get_profile(profile_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
@@ -707,7 +711,10 @@ async def launch_profile(profile_id: str):
         raise HTTPException(status_code=409, detail="Profile is already running")
 
     try:
-        running = await browser_mgr.launch(profile)
+        running = await browser_mgr.launch(
+            profile,
+            launch_mode=(req.launch_mode if req else "manual"),
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
@@ -721,8 +728,13 @@ async def launch_profile(profile_id: str):
         viewer_mode=browser_mgr.runtime.viewer_mode,
         vnc_ws_port=running.ws_port,
         display=f":{running.display}" if running.display is not None else None,
-        cdp_url=f"/api/profiles/{profile_id}/cdp",
+        cdp_url=(
+            f"/api/profiles/{profile_id}/cdp"
+            if running.cdp_port is not None
+            else None
+        ),
         browser_engine=running.browser_engine,
+        launch_mode=running.launch_mode,
     )
 
 
@@ -1267,6 +1279,8 @@ async def cdp_info(profile_id: str):
     running = browser_mgr.running.get(profile_id)
     if not running:
         raise HTTPException(status_code=404, detail="Profile not running")
+    if running.cdp_port is None:
+        raise HTTPException(status_code=409, detail="CDP unavailable in manual launch mode")
     return {
         "cdp_url": f"/api/profiles/{profile_id}/cdp",
         "usage": "playwright.chromium.connect_over_cdp('http://<host>/api/profiles/"
@@ -1281,6 +1295,8 @@ async def cdp_json_version(profile_id: str, request: Request):
     running = browser_mgr.running.get(profile_id)
     if not running:
         raise HTTPException(status_code=404, detail="Profile not running")
+    if running.cdp_port is None:
+        raise HTTPException(status_code=409, detail="CDP unavailable in manual launch mode")
 
     try:
         async with httpx.AsyncClient() as client:
@@ -1308,6 +1324,8 @@ async def cdp_json_list(profile_id: str, request: Request):
     running = browser_mgr.running.get(profile_id)
     if not running:
         raise HTTPException(status_code=404, detail="Profile not running")
+    if running.cdp_port is None:
+        raise HTTPException(status_code=409, detail="CDP unavailable in manual launch mode")
 
     try:
         async with httpx.AsyncClient() as client:
@@ -1400,6 +1418,9 @@ async def cdp_proxy(websocket: WebSocket, profile_id: str):
     if not running:
         await websocket.close(code=4004, reason="Profile not running")
         return
+    if running.cdp_port is None:
+        await websocket.close(code=4005, reason="CDP unavailable in manual launch mode")
+        return
 
     await websocket.accept()
 
@@ -1427,6 +1448,9 @@ async def cdp_page_proxy(websocket: WebSocket, profile_id: str, path: str):
     running = browser_mgr.running.get(profile_id)
     if not running:
         await websocket.close(code=4004, reason="Profile not running")
+        return
+    if running.cdp_port is None:
+        await websocket.close(code=4005, reason="CDP unavailable in manual launch mode")
         return
 
     await websocket.accept()

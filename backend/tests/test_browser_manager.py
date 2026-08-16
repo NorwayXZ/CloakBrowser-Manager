@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import subprocess
 from pathlib import Path
@@ -15,6 +16,7 @@ from backend.browser_manager import (
     _build_fingerprint_init_script,
     _build_worker_fingerprint_patch,
     _init_profile_defaults,
+    _launch_system_chrome_manual_process,
     _launch_system_chrome_persistent_context_async,
     _normalize_proxy,
     _playwright_proxy,
@@ -269,32 +271,147 @@ async def test_native_launch_skips_vnc_and_display(monkeypatch, tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_system_chrome_native_window_uses_resizable_viewport(monkeypatch, tmp_path: Path):
+async def test_system_chrome_native_window_uses_direct_chrome_launch(monkeypatch, tmp_path: Path):
+    from backend import browser_manager as module
     import playwright.async_api
+
+    class FakeProcess:
+        returncode: int | None = None
+
+        def __init__(self) -> None:
+            self.terminated = False
+            self.killed = False
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.terminated = True
+            self.returncode = 0
+
+        def kill(self):
+            self.killed = True
+            self.returncode = -9
+
+        def wait(self, timeout=None):
+            self.returncode = 0 if self.returncode is None else self.returncode
+            return self.returncode
 
     context = MagicMock()
     context.close = AsyncMock()
+    browser = MagicMock(contexts=[context])
+    browser.close = AsyncMock()
     chromium = MagicMock()
-    chromium.launch_persistent_context = AsyncMock(return_value=context)
+    chromium.connect_over_cdp = AsyncMock(return_value=browser)
     playwright_runtime = MagicMock(chromium=chromium)
     playwright_runtime.stop = AsyncMock()
     playwright_controller = MagicMock()
     playwright_controller.start = AsyncMock(return_value=playwright_runtime)
+    fake_process = FakeProcess()
+    popen_calls = []
+
+    def fake_popen(command, **kwargs):
+        popen_calls.append((command, kwargs))
+        return fake_process
+
+    monkeypatch.setattr(
+        module,
+        "_resolve_system_chrome_executable",
+        lambda: Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+    )
+    monkeypatch.setattr(module.subprocess, "Popen", fake_popen)
     monkeypatch.setattr(
         playwright.async_api,
         "async_playwright",
         MagicMock(return_value=playwright_controller),
     )
 
-    await _launch_system_chrome_persistent_context_async(
+    returned = await _launch_system_chrome_persistent_context_async(
         user_data_dir=tmp_path / "profile",
         headless=False,
+        args=["--restore-last-session", "--remote-debugging-port=53123"],
     )
 
-    options = chromium.launch_persistent_context.await_args.kwargs
-    assert options["no_viewport"] is True
-    assert "viewport" not in options
-    assert options["chromium_sandbox"] is True
+    assert returned is context
+    chromium.connect_over_cdp.assert_awaited_once_with("http://127.0.0.1:53123")
+    command = popen_calls[0][0]
+    assert command[0].endswith("Google Chrome")
+    assert f"--user-data-dir={tmp_path / 'profile'}" in command
+    assert "--remote-debugging-port=53123" in command
+    assert "--remote-debugging-address=127.0.0.1" in command
+    assert "--no-first-run" in command
+    assert "--no-default-browser-check" in command
+    assert not any("--remote-debugging-pipe" in arg for arg in command)
+    assert not any("AutomationControlled" in arg for arg in command)
+
+    await context.close()
+
+    browser.close.assert_awaited_once()
+    playwright_runtime.stop.assert_awaited_once()
+    assert fake_process.terminated is True
+
+
+def test_system_chrome_manual_process_has_no_cdp_flags(monkeypatch, tmp_path: Path):
+    from backend import browser_manager as module
+
+    popen_calls = []
+    fake_process = MagicMock()
+
+    def fake_popen(command, **kwargs):
+        popen_calls.append((command, kwargs))
+        return fake_process
+
+    monkeypatch.setattr(
+        module,
+        "_resolve_system_chrome_executable",
+        lambda: Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+    )
+    monkeypatch.setattr(module.subprocess, "Popen", fake_popen)
+
+    returned = _launch_system_chrome_manual_process(
+        user_data_dir=tmp_path / "profile",
+        args=["--restore-last-session"],
+        proxy="socks5://127.0.0.1:1080",
+        locale="zh-TW",
+        start_url="http://127.0.0.1:8080/profile/profile-1/start",
+    )
+
+    assert returned is fake_process
+    command = popen_calls[0][0]
+    assert command[0].endswith("Google Chrome")
+    assert f"--user-data-dir={tmp_path / 'profile'}" in command
+    assert "--remote-debugging-address=127.0.0.1" not in command
+    assert not any(arg.startswith("--remote-debugging-port") for arg in command)
+    assert "--proxy-server=socks5://127.0.0.1:1080" in command
+    assert "--lang=zh-TW" in command
+    assert command[-1] == "http://127.0.0.1:8080/profile/profile-1/start"
+
+
+@pytest.mark.asyncio
+async def test_system_chrome_manual_launch_does_not_reserve_cdp(monkeypatch, tmp_path: Path):
+    from backend import browser_manager as module
+
+    fake_process = MagicMock()
+    manager = BrowserManager(RuntimeConfig("macos", "native", "native-window", tmp_path))
+
+    async def idle_watch(*_args, **_kwargs):
+        await asyncio.sleep(60)
+
+    monkeypatch.setattr(module, "_launch_system_chrome_manual_process", MagicMock(return_value=fake_process))
+    monkeypatch.setattr(manager, "_watch_process", idle_watch)
+
+    running = await manager.launch({
+        **_launch_profile(tmp_path),
+        "browser_engine": "system_chrome",
+    })
+
+    assert running.context is None
+    assert running.cdp_port is None
+    assert running.launch_mode == "manual"
+    assert running.browser_process is fake_process
+    assert manager._cdp_ports == set()
+
+    await manager.stop("profile-1")
 
 
 @pytest.mark.asyncio
@@ -315,7 +432,7 @@ async def test_native_system_chrome_keeps_restored_tabs(monkeypatch, tmp_path: P
     await manager.launch({
         **_launch_profile(tmp_path),
         "browser_engine": "system_chrome",
-    })
+    }, launch_mode="debug")
 
     assert "--restore-last-session" in launch.await_args.kwargs["args"]
     blank_page.goto.assert_not_awaited()
@@ -339,7 +456,7 @@ async def test_native_system_chrome_replaces_blank_start_page(monkeypatch, tmp_p
     await manager.launch({
         **_launch_profile(tmp_path),
         "browser_engine": "system_chrome",
-    })
+    }, launch_mode="debug")
 
     page.goto.assert_awaited_once_with(
         "http://127.0.0.1:8080/profile/profile-1/start",
@@ -593,6 +710,7 @@ def test_timezone_patch_keeps_invalid_dates_native(mode: str):
 const patch = {json.dumps(script)};
 eval(patch);
 const value = new Date(NaN);
+value.getTime = () => 0;
 console.log(JSON.stringify({{
   toString: value.toString(),
   toDateString: value.toDateString(),

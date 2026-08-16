@@ -28,6 +28,8 @@ const mockApi = api as {
 const fakeProfile = {
   id: "abc-123",
   name: "Test",
+  browser_engine: "system_chrome",
+  device_profile: null,
   fingerprint_seed: 12345,
   proxy: null,
   timezone: null,
@@ -55,6 +57,7 @@ const fakeProfile = {
   viewer_mode: "vnc" as const,
   vnc_ws_port: null,
   cdp_url: null,
+  launch_mode: null,
 };
 
 beforeEach(() => {
@@ -119,6 +122,24 @@ describe("useProfiles", () => {
     });
 
     expect(result.current.profiles).toHaveLength(0);
+  });
+
+  it("passes launch mode to api", async () => {
+    mockApi.launchProfile.mockResolvedValue({ profile_id: "abc-123", status: "running" });
+    mockApi.listProfiles.mockResolvedValue([{
+      ...fakeProfile,
+      status: "running",
+      launch_mode: "debug",
+    }]);
+
+    const { result } = renderHook(() => useProfiles());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.launch("abc-123", "debug");
+    });
+
+    expect(mockApi.launchProfile).toHaveBeenCalledWith("abc-123", "debug");
   });
 
   it("sets error on fetch failure", async () => {

@@ -6,6 +6,7 @@ export type HostOS = "windows" | "macos" | "linux";
 export type RuntimeMode = "native" | "docker";
 export type ViewerMode = "native-window" | "vnc";
 export type BrowserEngine = "auto" | "system_chrome" | "cloakbrowser";
+export type LaunchMode = "manual" | "debug";
 
 export interface Profile {
   id: string;
@@ -41,6 +42,7 @@ export interface Profile {
   viewer_mode: ViewerMode;
   vnc_ws_port: number | null;
   cdp_url: string | null;
+  launch_mode: LaunchMode | null;
 }
 
 export interface ProfileCreateData {
@@ -79,6 +81,7 @@ export interface LaunchResult {
   display: string | null;
   cdp_url: string | null;
   browser_engine: string | null;
+  launch_mode: LaunchMode;
 }
 
 export interface SystemStatus {
@@ -220,8 +223,11 @@ export const api = {
   deleteProfile: (id: string) =>
     request<{ ok: boolean }>(`/api/profiles/${id}`, { method: "DELETE" }),
 
-  launchProfile: (id: string) =>
-    request<LaunchResult>(`/api/profiles/${id}/launch`, { method: "POST" }),
+  launchProfile: (id: string, launchMode: LaunchMode = "manual") =>
+    request<LaunchResult>(`/api/profiles/${id}/launch`, {
+      method: "POST",
+      body: JSON.stringify({ launch_mode: launchMode }),
+    }),
 
   stopProfile: (id: string) =>
     request<{ ok: boolean }>(`/api/profiles/${id}/stop`, { method: "POST" }),

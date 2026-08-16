@@ -1,0 +1,86 @@
+#!/bin/sh
+set -eu
+
+ROOT="/Users/norwayx/Documents/New project/CloakBrowser-Manager"
+URL="http://127.0.0.1:8080"
+STATUS_URL="$URL/api/status"
+LOG_DIR="$HOME/Library/Logs/CloakBrowser Manager"
+LOG_FILE="$LOG_DIR/cloak.log"
+
+is_running() {
+    curl -fsS --max-time 1 "$STATUS_URL" >/dev/null 2>&1
+}
+
+wait_for_port_closed() {
+    i=0
+    while [ "$i" -lt 30 ]; do
+        if ! lsof -nP -iTCP:8080 -sTCP:LISTEN >/dev/null 2>&1; then
+            return 0
+        fi
+        i=$((i + 1))
+        sleep 1
+    done
+    return 1
+}
+
+start_manager() {
+    if is_running; then
+        open "$URL"
+        return 0
+    fi
+
+    if lsof -nP -iTCP:8080 -sTCP:LISTEN >/dev/null 2>&1; then
+        echo "[error] 8080 is already in use" >&2
+        return 1
+    fi
+
+    mkdir -p "$LOG_DIR"
+    exec "$ROOT/run-macos.sh"
+}
+
+stop_manager() {
+    pid="$(lsof -tiTCP:8080 -sTCP:LISTEN 2>/dev/null | head -n 1 || true)"
+    if [ -z "$pid" ]; then
+        echo "Manager is not running"
+        return 0
+    fi
+
+    kill -INT "$pid" 2>/dev/null || true
+    if wait_for_port_closed; then
+        echo "Manager stopped"
+        return 0
+    fi
+
+    kill -TERM "$pid" 2>/dev/null || true
+    if wait_for_port_closed; then
+        echo "Manager stopped"
+        return 0
+    fi
+
+    echo "[error] Could not stop Manager" >&2
+    return 1
+}
+
+case "${1:-start}" in
+    start)
+        start_manager
+        ;;
+    stop)
+        stop_manager
+        ;;
+    status)
+        if is_running; then
+            echo "running"
+        else
+            echo "stopped"
+        fi
+        ;;
+    restart)
+        stop_manager
+        exec "$ROOT/run-macos.sh"
+        ;;
+    *)
+        echo "Usage: cloak [start|stop|status|restart]" >&2
+        exit 1
+        ;;
+esac

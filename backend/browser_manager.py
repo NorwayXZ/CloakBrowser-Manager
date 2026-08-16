@@ -6,10 +6,14 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 import socket
+import subprocess
+import sys
 import time
 import urllib.request
 from dataclasses import dataclass
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -26,10 +30,9 @@ from .xray_runtime import XrayProcess, is_xray_link, parse_xray_link, start_xray
 logger = logging.getLogger("cloakbrowser.manager.browser")
 
 BROWSER_ENGINE_ENV = "CLOAKBROWSER_MANAGER_ENGINE"
-SYSTEM_CHROME_IGNORE_DEFAULT_ARGS = ["--enable-automation", "--enable-unsafe-swiftshader"]
+SYSTEM_CHROME_PATH_ENV = "CLOAKBROWSER_SYSTEM_CHROME_PATH"
 SESSION_RESTORE_ARG = "--restore-last-session"
 SYSTEM_CHROME_BASE_ARGS = [
-    "--disable-blink-features=AutomationControlled",
     "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
     SESSION_RESTORE_ARG,
 ]
@@ -195,6 +198,253 @@ def _build_locale_timezone_env(
     return {**os.environ, **env_updates}
 
 
+def _has_chrome_arg(args: list[str], flag: str) -> bool:
+    return any(arg == flag or arg.startswith(f"{flag}=") for arg in args)
+
+
+def _append_chrome_arg_once(args: list[str], flag: str, value: str | None = None) -> None:
+    if _has_chrome_arg(args, flag):
+        return
+    args.append(flag if value is None else f"{flag}={value}")
+
+
+def _format_proxy_endpoint(parsed: Any) -> str:
+    host = parsed.hostname or ""
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    return f"{parsed.scheme}://{host}:{parsed.port}"
+
+
+def _chrome_proxy_args(proxy: str | None) -> list[str]:
+    if not proxy:
+        return []
+    parsed = urlparse(proxy)
+    if not parsed.scheme or not parsed.hostname or not parsed.port:
+        return []
+    proxy_host = parsed.hostname
+    rules = f"MAP * ~NOTFOUND , EXCLUDE {proxy_host}"
+    return [
+        f"--proxy-server={_format_proxy_endpoint(parsed)}",
+        "--proxy-bypass-list=127.0.0.1;localhost;[::1]",
+        f"--host-resolver-rules={rules}",
+    ]
+
+
+def _extract_remote_debugging_port(args: list[str]) -> int | None:
+    for arg in args:
+        if arg.startswith("--remote-debugging-port="):
+            raw = arg.split("=", 1)[1]
+            return int(raw)
+    return None
+
+
+def _resolve_system_chrome_executable() -> Path:
+    configured = os.environ.get(SYSTEM_CHROME_PATH_ENV)
+    if configured:
+        path = Path(configured).expanduser()
+        if path.exists():
+            return path
+        raise RuntimeError(f"{SYSTEM_CHROME_PATH_ENV} points to a missing file: {path}")
+
+    candidates: list[Path] = []
+    if os.name == "nt":
+        for base in (
+            os.environ.get("PROGRAMFILES"),
+            os.environ.get("PROGRAMFILES(X86)"),
+            os.environ.get("LOCALAPPDATA"),
+        ):
+            if base:
+                candidates.append(
+                    Path(base) / "Google" / "Chrome" / "Application" / "chrome.exe"
+                )
+        for name in ("chrome.exe", "chrome"):
+            found = shutil.which(name)
+            if found:
+                candidates.append(Path(found))
+    elif sys.platform == "darwin":
+        candidates.extend([
+            Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+            Path.home() / "Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        ])
+        for name in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser"):
+            found = shutil.which(name)
+            if found:
+                candidates.append(Path(found))
+    else:
+        for name in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser"):
+            found = shutil.which(name)
+            if found:
+                candidates.append(Path(found))
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    raise RuntimeError(
+        "Google Chrome was not found. Install Chrome or set "
+        f"{SYSTEM_CHROME_PATH_ENV} to the Chrome executable path."
+    )
+
+
+def _build_system_chrome_command_args(
+    *,
+    user_data_dir: str | os.PathLike[str],
+    cdp_port: int | None,
+    headless: bool,
+    proxy: str | None,
+    args: list[str] | None,
+    user_agent: str | None,
+    viewport: Any,
+    locale: str | None,
+) -> list[str]:
+    chrome_args = [f"--user-data-dir={os.fspath(user_data_dir)}"]
+    chrome_args.extend(args or [])
+
+    if cdp_port is not None:
+        _append_chrome_arg_once(chrome_args, "--remote-debugging-address", "127.0.0.1")
+        _append_chrome_arg_once(chrome_args, "--remote-debugging-port", str(cdp_port))
+    _append_chrome_arg_once(chrome_args, "--no-first-run")
+    _append_chrome_arg_once(chrome_args, "--no-default-browser-check")
+
+    if headless:
+        _append_chrome_arg_once(chrome_args, "--headless", "new")
+        if viewport and isinstance(viewport, dict):
+            width = viewport.get("width")
+            height = viewport.get("height")
+            if width and height:
+                _append_chrome_arg_once(chrome_args, "--window-size", f"{width},{height}")
+
+    if proxy and not _has_chrome_arg(chrome_args, "--proxy-server"):
+        chrome_args.extend(_chrome_proxy_args(proxy))
+    if user_agent:
+        _append_chrome_arg_once(chrome_args, "--user-agent", user_agent)
+    if locale:
+        _append_chrome_arg_once(chrome_args, "--lang", locale)
+        _append_chrome_arg_once(chrome_args, "--accept-lang", _accept_language_value(locale))
+
+    return chrome_args
+
+
+def _chrome_popen_kwargs(env: dict[str, str] | None = None) -> dict[str, Any]:
+    popen_kwargs: dict[str, Any] = {
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "env": env or os.environ.copy(),
+    }
+    if os.name == "nt":
+        popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    else:
+        popen_kwargs["start_new_session"] = True
+    return popen_kwargs
+
+
+def _has_restorable_chrome_session(user_data_dir: Path) -> bool:
+    default_dir = user_data_dir / "Default"
+    session_candidates = [
+        default_dir / "Current Session",
+        default_dir / "Current Tabs",
+        default_dir / "Last Session",
+        default_dir / "Last Tabs",
+    ]
+    sessions_dir = default_dir / "Sessions"
+    if sessions_dir.exists():
+        session_candidates.extend(sessions_dir.glob("Session_*"))
+        session_candidates.extend(sessions_dir.glob("Tabs_*"))
+
+    for path in session_candidates:
+        try:
+            if path.is_file() and path.stat().st_size > 0:
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def _launch_system_chrome_manual_process(
+    *,
+    user_data_dir: str | os.PathLike[str],
+    headless: bool = False,
+    proxy: str | None = None,
+    args: list[str] | None = None,
+    user_agent: str | None = None,
+    viewport: Any = None,
+    locale: str | None = None,
+    env: dict[str, str] | None = None,
+    start_url: str | None = None,
+    **_: Any,
+) -> subprocess.Popen[Any]:
+    """Launch installed Chrome without opening a DevTools/CDP control channel."""
+    if headless:
+        raise ValueError("Manual system Chrome launch does not support headless mode")
+
+    chrome_path = _resolve_system_chrome_executable()
+    chrome_args = _build_system_chrome_command_args(
+        user_data_dir=user_data_dir,
+        cdp_port=None,
+        headless=headless,
+        proxy=proxy,
+        args=args,
+        user_agent=user_agent,
+        viewport=viewport,
+        locale=locale,
+    )
+    if start_url:
+        chrome_args.append(start_url)
+    return subprocess.Popen(
+        [os.fspath(chrome_path), *chrome_args],
+        **_chrome_popen_kwargs(env),
+    )
+
+
+async def _terminate_process_async(process: subprocess.Popen[Any] | None) -> None:
+    if process is None:
+        return
+    if process.poll() is not None:
+        try:
+            await asyncio.to_thread(process.wait, 0)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        return
+    try:
+        process.terminate()
+    except OSError:
+        return
+    try:
+        await asyncio.to_thread(process.wait, 5)
+    except subprocess.TimeoutExpired:
+        try:
+            process.kill()
+        except OSError:
+            return
+        try:
+            await asyncio.to_thread(process.wait, 5)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+
+async def _connect_over_cdp_when_ready(
+    playwright_runtime: Any,
+    cdp_port: int,
+    process: subprocess.Popen[Any],
+    *,
+    timeout: float | None = None,
+) -> Any:
+    timeout = CDP_READY_TIMEOUT if timeout is None else timeout
+    endpoint = f"http://127.0.0.1:{cdp_port}"
+    deadline = time.monotonic() + timeout
+    last_error: Exception | None = None
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            raise RuntimeError(
+                f"System Chrome exited before CDP became ready (code {process.returncode})"
+            )
+        try:
+            return await playwright_runtime.chromium.connect_over_cdp(endpoint)
+        except Exception as exc:
+            last_error = exc
+            await asyncio.sleep(0.2)
+    raise TimeoutError(f"System Chrome CDP endpoint was not ready at {endpoint}") from last_error
+
+
 async def _launch_system_chrome_persistent_context_async(
     *,
     user_data_dir: str | os.PathLike[str],
@@ -211,54 +461,77 @@ async def _launch_system_chrome_persistent_context_async(
     human_preset: str = "default",
     **_: Any,
 ) -> Any:
-    """Launch the user's installed Chrome with native BrowserContext overrides."""
+    """Launch installed Chrome as a normal process, then attach over CDP."""
     from playwright.async_api import async_playwright
 
-    context_kwargs: dict[str, Any] = {
-        "user_data_dir": os.fspath(user_data_dir),
-        "channel": "chrome",
-        "headless": headless,
-        "args": args or [],
-        "ignore_default_args": SYSTEM_CHROME_IGNORE_DEFAULT_ARGS,
-        "chromium_sandbox": True,
-    }
-    if viewport is None and not headless:
-        context_kwargs["no_viewport"] = True
-    elif viewport is not None:
-        context_kwargs["viewport"] = viewport
-    proxy_settings = _playwright_proxy(proxy)
-    if proxy_settings:
-        context_kwargs["proxy"] = proxy_settings
-    if user_agent:
-        context_kwargs["user_agent"] = user_agent
-    if locale:
-        context_kwargs["locale"] = locale
-    if timezone:
-        context_kwargs["timezone_id"] = timezone
-    if color_scheme:
-        context_kwargs["color_scheme"] = color_scheme
-    if env:
-        context_kwargs["env"] = env
+    raw_args = args or []
+    cdp_port = _extract_remote_debugging_port(raw_args)
+    if cdp_port is None:
+        raise ValueError("System Chrome launch requires --remote-debugging-port")
 
+    chrome_path = _resolve_system_chrome_executable()
+    chrome_args = _build_system_chrome_command_args(
+        user_data_dir=user_data_dir,
+        cdp_port=cdp_port,
+        headless=headless,
+        proxy=proxy,
+        args=raw_args,
+        user_agent=user_agent,
+        viewport=viewport,
+        locale=locale,
+    )
+
+    process: subprocess.Popen[Any] | None = None
     pw = await async_playwright().start()
+    browser: Any | None = None
     try:
-        context = await pw.chromium.launch_persistent_context(**context_kwargs)
+        process = subprocess.Popen(
+            [os.fspath(chrome_path), *chrome_args],
+            **_chrome_popen_kwargs(env),
+        )
+        browser = await _connect_over_cdp_when_ready(pw, cdp_port, process)
+        if not browser.contexts:
+            raise RuntimeError("System Chrome did not expose a default browser context")
+        context = browser.contexts[0]
     except Exception:
+        if browser is not None:
+            try:
+                await browser.close()
+            except Exception:
+                pass
+        await _terminate_process_async(process)
         await pw.stop()
         raise
 
     original_close = context.close
+    closed = False
 
     async def close_with_cleanup(*, reason: str | None = None) -> None:
+        nonlocal closed
+        if closed:
+            return
+        closed = True
         try:
-            if reason is None:
-                await original_close()
-            else:
-                await original_close(reason=reason)
+            try:
+                if reason is None:
+                    await original_close()
+                else:
+                    await original_close(reason=reason)
+            except Exception as exc:
+                logger.debug("Native Chrome context close failed: %s", exc)
+            if browser is not None:
+                try:
+                    await browser.close()
+                except Exception as exc:
+                    logger.debug("Native Chrome CDP close failed: %s", exc)
         finally:
+            await _terminate_process_async(process)
             await pw.stop()
 
     context.close = close_with_cleanup
+    context._cloak_browser_process = process
+    context._cloak_browser = browser
+    context._cloak_playwright = pw
 
     if humanize:
         try:
@@ -457,7 +730,14 @@ def _build_worker_fingerprint_patch(payload: dict[str, Any]) -> str:
                 const originalToLocaleString = Date.prototype.toLocaleString;
                 const originalToLocaleDateString = Date.prototype.toLocaleDateString;
                 const originalToLocaleTimeString = Date.prototype.toLocaleTimeString;
-                const isValidDate = (date) => Number.isFinite(date.getTime());
+                const originalGetTime = Date.prototype.getTime;
+                const isValidDate = (date) => {
+                    try {
+                        return Number.isFinite(originalGetTime.call(date));
+                    } catch (_) {
+                        return false;
+                    }
+                };
 
                 patchIntlConstructor('DateTimeFormat', (nextOptions) => {
                     if (!nextOptions.timeZone) nextOptions.timeZone = timezone;
@@ -523,11 +803,15 @@ def _build_worker_fingerprint_patch(payload: dict[str, Any]) -> str:
                     if (!isValidDate(date)) {
                         return null;
                     }
-                    return Object.fromEntries(
-                        englishPartsFormatter.formatToParts(date)
-                            .filter((part) => part.type !== 'literal')
-                            .map((part) => [part.type, part.value])
-                    );
+                    try {
+                        return Object.fromEntries(
+                            englishPartsFormatter.formatToParts(date)
+                                .filter((part) => part.type !== 'literal')
+                                .map((part) => [part.type, part.value])
+                        );
+                    } catch (_) {
+                        return null;
+                    }
                 };
                 const gmtOffsetFor = (date) => {
                     const offset = offsetFor(date);
@@ -830,7 +1114,14 @@ def _build_fingerprint_init_script(
                 const originalToLocaleString = Date.prototype.toLocaleString;
                 const originalToLocaleDateString = Date.prototype.toLocaleDateString;
                 const originalToLocaleTimeString = Date.prototype.toLocaleTimeString;
-                const isValidDate = (date) => Number.isFinite(date.getTime());
+                const originalGetTime = Date.prototype.getTime;
+                const isValidDate = (date) => {{
+                    try {{
+                        return Number.isFinite(originalGetTime.call(date));
+                    }} catch (_) {{
+                        return false;
+                    }}
+                }};
 
                 patchIntlConstructor('DateTimeFormat', (nextOptions) => {{
                     if (!nextOptions.timeZone) nextOptions.timeZone = timezone;
@@ -896,11 +1187,15 @@ def _build_fingerprint_init_script(
                     if (!isValidDate(date)) {{
                         return null;
                     }}
-                    return Object.fromEntries(
-                        englishPartsFormatter.formatToParts(date)
-                            .filter((part) => part.type !== 'literal')
-                            .map((part) => [part.type, part.value])
-                    );
+                    try {{
+                        return Object.fromEntries(
+                            englishPartsFormatter.formatToParts(date)
+                                .filter((part) => part.type !== 'literal')
+                                .map((part) => [part.type, part.value])
+                        );
+                    }} catch (_) {{
+                        return null;
+                    }}
                 }};
                 const gmtOffsetFor = (date) => {{
                     const offset = offsetFor(date);
@@ -1125,16 +1420,19 @@ CDP_READY_TIMEOUT = 10.0
 @dataclass
 class RunningProfile:
     profile_id: str
-    context: Any  # Playwright BrowserContext
-    cdp_port: int
+    context: Any | None  # Playwright BrowserContext when debug/CDP is enabled
+    cdp_port: int | None
+    browser_process: subprocess.Popen[Any] | None = None
     display: int | None = None
     ws_port: int | None = None
     effective_timezone: str | None = None
     effective_locale: str | None = None
     proxy_geo: dict[str, Any] | None = None
     browser_engine: str = "cloakbrowser"
+    launch_mode: str = "debug"
     proxy_bridge: HttpProxyBridge | None = None
     xray_process: XrayProcess | None = None
+    monitor_task: asyncio.Task | None = None
 
 
 class BrowserManager:
@@ -1180,9 +1478,10 @@ class BrowserManager:
             return "system_chrome"
         return "cloakbrowser"
 
-    async def launch(self, profile: dict[str, Any]) -> RunningProfile:
+    async def launch(self, profile: dict[str, Any], launch_mode: str = "manual") -> RunningProfile:
         """Launch a browser instance using the configured host runtime."""
         profile_id = profile["id"]
+        requested_launch_mode = "debug" if launch_mode == "debug" else "manual"
 
         async with self._lock:
             if profile_id in self.running or profile_id in self._launching:
@@ -1193,6 +1492,7 @@ class BrowserManager:
         ws_port: int | None = None
         cdp_port: int | None = None
         context: Any | None = None
+        browser_process: subprocess.Popen[Any] | None = None
         proxy_bridge: HttpProxyBridge | None = None
         xray_process: XrayProcess | None = None
         try:
@@ -1234,6 +1534,7 @@ class BrowserManager:
             if proxy:
                 _validate_proxy(proxy)
 
+            browser_engine = self._browser_engine(profile)
             browser_proxy = proxy
             if proxy and is_xray_link(proxy):
                 xray_process = await start_xray_proxy(
@@ -1247,15 +1548,19 @@ class BrowserManager:
                     profile_id,
                     browser_proxy,
                 )
-            elif proxy and urlparse(proxy).scheme == "socks5" and (
-                urlparse(proxy).username or urlparse(proxy).password
-            ):
-                proxy_bridge = HttpProxyBridge(proxy)
-                browser_proxy = await proxy_bridge.start()
-                logger.info(
-                    "Using local proxy bridge for authenticated SOCKS5 profile %s",
-                    profile_id,
-                )
+            elif proxy:
+                parsed_proxy = urlparse(proxy)
+                needs_auth_bridge = bool(parsed_proxy.username or parsed_proxy.password)
+                if needs_auth_bridge and (
+                    parsed_proxy.scheme == "socks5"
+                    or browser_engine == "system_chrome"
+                ):
+                    proxy_bridge = HttpProxyBridge(proxy)
+                    browser_proxy = await proxy_bridge.start()
+                    logger.info(
+                        "Using local proxy bridge for authenticated proxy profile %s",
+                        profile_id,
+                    )
 
             resolved_timezone = profile.get("timezone") or None
             resolved_locale = profile.get("locale") or None
@@ -1276,7 +1581,6 @@ class BrowserManager:
                 except Exception as exc:
                     logger.warning("GeoIP lookup failed for %s: %s", profile_id, exc)
 
-            browser_engine = self._browser_engine(profile)
             _sync_profile_locale(user_data_dir, resolved_locale)
             if browser_engine == "system_chrome" and proxy:
                 _sync_webrtc_policy(user_data_dir)
@@ -1292,7 +1596,6 @@ class BrowserManager:
                 if SESSION_RESTORE_ARG not in extra_args:
                     extra_args.append(SESSION_RESTORE_ARG)
             extra_args += user_launch_args
-            extra_args.append("--remote-debugging-address=127.0.0.1")
 
             launch_env = _build_locale_timezone_env(
                 locale=resolved_locale,
@@ -1321,81 +1624,102 @@ class BrowserManager:
                     "height": profile.get("screen_height", 1080) - 133,
                 }
 
-            last_cdp_error: Exception | None = None
-            for attempt in range(1, CDP_START_ATTEMPTS + 1):
-                cdp_port = self._reserve_cdp_port()
-                launch_options["args"] = [
-                    *extra_args,
-                    f"--remote-debugging-port={cdp_port}",
-                ]
-                try:
-                    launcher = (
-                        _launch_system_chrome_persistent_context_async
-                        if browser_engine == "system_chrome"
-                        else launch_persistent_context_async
-                    )
-                    context = await launcher(**launch_options)
-                    await self._wait_for_cdp(cdp_port)
-                    break
-                except asyncio.CancelledError:
-                    if context is not None:
-                        await self._close_context(context, profile_id)
-                    self._release_cdp_port(cdp_port)
-                    context = None
-                    cdp_port = None
-                    raise
-                except Exception as exc:
-                    last_cdp_error = exc
-                    if context is not None:
-                        await self._close_context(context, profile_id)
-                    self._release_cdp_port(cdp_port)
-                    context = None
-                    cdp_port = None
-                    logger.warning(
-                        "Browser/CDP startup attempt %d/%d failed for %s: %s",
-                        attempt,
-                        CDP_START_ATTEMPTS,
-                        profile_id,
-                        exc,
-                    )
-            else:
-                raise RuntimeError(
-                    f"Unable to start verified CDP for profile {profile_id}"
-                ) from last_cdp_error
-
-            if context is None or cdp_port is None:
-                raise RuntimeError(f"Browser startup did not complete for profile {profile_id}")
-
-            # Capture copied text so the Manager clipboard endpoint can read it.
-            clipboard_init_js = """
-                window.__clipboardText = '';
-                document.addEventListener('copy', () => {
-                    const sel = window.getSelection();
-                    if (sel) window.__clipboardText = sel.toString();
-                });
-                document.addEventListener('keydown', (e) => {
-                    if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !e.altKey && !e.shiftKey) {
-                        const sel = window.getSelection();
-                        if (sel && sel.toString()) window.__clipboardText = sel.toString();
-                    }
-                });
-            """
-            init_scripts = [clipboard_init_js]
-            fingerprint_init_js = _build_fingerprint_init_script(
-                locale=resolved_locale,
-                timezone=resolved_timezone,
-                platform=profile.get("platform"),
+            use_manual_system_chrome = (
+                requested_launch_mode == "manual"
+                and self.runtime.runtime_mode == "native"
+                and browser_engine == "system_chrome"
+                and display is None
+                and not bool(profile.get("headless", False))
             )
-            if fingerprint_init_js:
-                init_scripts.append(fingerprint_init_js)
-            for script in init_scripts:
-                await context.add_init_script(script)
-            for page in context.pages:
-                for script in init_scripts:
+
+            effective_launch_mode = "manual" if use_manual_system_chrome else "debug"
+
+            if use_manual_system_chrome:
+                start_url = None
+                if not _has_restorable_chrome_session(user_data_dir):
+                    start_url = NATIVE_START_PAGE_TEMPLATE.format(profile_id=profile_id)
+                browser_process = _launch_system_chrome_manual_process(
+                    **launch_options,
+                    start_url=start_url,
+                )
+            else:
+                debug_args = [*extra_args, "--remote-debugging-address=127.0.0.1"]
+                last_cdp_error: Exception | None = None
+                for attempt in range(1, CDP_START_ATTEMPTS + 1):
+                    cdp_port = self._reserve_cdp_port()
+                    launch_options["args"] = [
+                        *debug_args,
+                        f"--remote-debugging-port={cdp_port}",
+                    ]
                     try:
-                        await page.evaluate(script)
+                        launcher = (
+                            _launch_system_chrome_persistent_context_async
+                            if browser_engine == "system_chrome"
+                            else launch_persistent_context_async
+                        )
+                        context = await launcher(**launch_options)
+                        await self._wait_for_cdp(cdp_port)
+                        break
+                    except asyncio.CancelledError:
+                        if context is not None:
+                            await self._close_context(context, profile_id)
+                        self._release_cdp_port(cdp_port)
+                        context = None
+                        cdp_port = None
+                        raise
                     except Exception as exc:
-                        logger.debug("Init script failed on existing page: %s", exc)
+                        last_cdp_error = exc
+                        if context is not None:
+                            await self._close_context(context, profile_id)
+                        self._release_cdp_port(cdp_port)
+                        context = None
+                        cdp_port = None
+                        logger.warning(
+                            "Browser/CDP startup attempt %d/%d failed for %s: %s",
+                            attempt,
+                            CDP_START_ATTEMPTS,
+                            profile_id,
+                            exc,
+                        )
+                else:
+                    raise RuntimeError(
+                        f"Unable to start verified CDP for profile {profile_id}"
+                    ) from last_cdp_error
+
+                if context is None or cdp_port is None:
+                    raise RuntimeError(f"Browser startup did not complete for profile {profile_id}")
+
+                # Capture copied text so the Manager clipboard endpoint can read it.
+                clipboard_init_js = """
+                    window.__clipboardText = '';
+                    document.addEventListener('copy', () => {
+                        const sel = window.getSelection();
+                        if (sel) window.__clipboardText = sel.toString();
+                    });
+                    document.addEventListener('keydown', (e) => {
+                        if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !e.altKey && !e.shiftKey) {
+                            const sel = window.getSelection();
+                            if (sel && sel.toString()) window.__clipboardText = sel.toString();
+                        }
+                    });
+                """
+                init_scripts = [clipboard_init_js]
+                fingerprint_init_js = _build_fingerprint_init_script(
+                    locale=resolved_locale,
+                    timezone=resolved_timezone,
+                    platform=profile.get("platform"),
+                )
+                if fingerprint_init_js:
+                    init_scripts.append(fingerprint_init_js)
+                for script in init_scripts:
+                    await context.add_init_script(script)
+                for page in context.pages:
+                    for script in init_scripts:
+                        try:
+                            await page.evaluate(script)
+                        except Exception as exc:
+                            logger.debug("Init script failed on existing page: %s", exc)
+                browser_process = getattr(context, "_cloak_browser_process", None)
 
             running = RunningProfile(
                 profile_id=profile_id,
@@ -1407,13 +1731,21 @@ class BrowserManager:
                 effective_locale=resolved_locale,
                 proxy_geo=proxy_geo,
                 browser_engine=browser_engine,
+                launch_mode=effective_launch_mode,
                 proxy_bridge=proxy_bridge,
                 xray_process=xray_process,
+                browser_process=browser_process,
             )
-            context.on(
-                "close",
-                lambda *_: asyncio.ensure_future(self._on_browser_closed(profile_id)),
-            )
+            if context is not None:
+                context.on(
+                    "close",
+                    lambda *_: asyncio.ensure_future(self._on_browser_closed(profile_id)),
+                )
+            elif browser_process is not None:
+                running.monitor_task = asyncio.create_task(
+                    self._watch_process(profile_id, browser_process),
+                    name=f"cloakbrowser-watch-{profile_id}",
+                )
 
             async with self._lock:
                 self.running[profile_id] = running
@@ -1423,16 +1755,18 @@ class BrowserManager:
                 self.runtime.runtime_mode == "native"
                 and browser_engine == "system_chrome"
                 and not bool(profile.get("headless", False))
+                and context is not None
             ):
                 await _open_native_start_page(context, profile_id)
 
             logger.info(
-                "Launched profile %s (runtime=%s, display=%s, ws_port=%s, cdp_port=%d)",
+                "Launched profile %s (runtime=%s, mode=%s, display=%s, ws_port=%s, cdp_port=%s)",
                 profile_id,
                 self.runtime.runtime_mode,
+                effective_launch_mode,
                 f":{display}" if display is not None else "native",
                 ws_port,
-                cdp_port,
+                cdp_port if cdp_port is not None else "none",
             )
             return running
 
@@ -1441,6 +1775,8 @@ class BrowserManager:
                 self._launching.discard(profile_id)
             if context is not None:
                 await self._close_context(context, profile_id)
+            elif browser_process is not None:
+                await _terminate_process_async(browser_process)
             if proxy_bridge is not None:
                 await proxy_bridge.close()
             if xray_process is not None:
@@ -1457,21 +1793,40 @@ class BrowserManager:
         except Exception as exc:
             logger.warning("Error closing context for %s: %s", profile_id, exc)
 
+    async def _watch_process(self, profile_id: str, process: subprocess.Popen[Any]) -> None:
+        try:
+            await asyncio.to_thread(process.wait)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.debug("Process watcher failed for %s: %s", profile_id, exc)
+            return
+        await self._on_browser_closed(profile_id)
+
     async def _dispose_running(
         self,
         running: RunningProfile,
         *,
         close_context: bool,
     ) -> None:
-        if close_context:
+        if (
+            running.monitor_task is not None
+            and running.monitor_task is not asyncio.current_task()
+        ):
+            running.monitor_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await running.monitor_task
+        if close_context and running.context is not None:
             await self._close_context(running.context, running.profile_id)
+        await _terminate_process_async(running.browser_process)
         if running.proxy_bridge is not None:
             await running.proxy_bridge.close()
         if running.xray_process is not None:
             await running.xray_process.close()
         if running.display is not None:
             await self.vnc.stop_vnc(running.display)
-        self._release_cdp_port(running.cdp_port)
+        if running.cdp_port is not None:
+            self._release_cdp_port(running.cdp_port)
 
     async def _on_browser_closed(self, profile_id: str):
         """Release resources after a browser crash or user-initiated close."""
@@ -1503,6 +1858,12 @@ class BrowserManager:
             if isinstance(running_engine, str)
             else self._browser_engine(profile)
         )
+        running_launch_mode = getattr(running, "launch_mode", None) if running else None
+        launch_mode = (
+            running_launch_mode
+            if running_launch_mode in {"manual", "debug"}
+            else ("debug" if running else None)
+        )
         status = {
             "status": "running" if running else "stopped",
             "runtime_mode": self.runtime.runtime_mode,
@@ -1514,7 +1875,12 @@ class BrowserManager:
                 else None
             ),
             "browser_engine": browser_engine,
-            "cdp_url": f"/api/profiles/{profile_id}/cdp" if running else None,
+            "cdp_url": (
+                f"/api/profiles/{profile_id}/cdp"
+                if running and running.cdp_port is not None
+                else None
+            ),
+            "launch_mode": launch_mode,
         }
         return status
 
@@ -1524,6 +1890,8 @@ class BrowserManager:
         running = self.running.get(profile_id)
         if not running:
             raise RuntimeError(f"Profile {profile_id} is not running")
+        if running.context is None or running.cdp_port is None:
+            raise RuntimeError("日常启动未开启调试连接；请停止后使用“调试启动”再运行指纹自检")
 
         expected_locale = running.effective_locale or profile.get("locale")
         expected_timezone = running.effective_timezone or profile.get("timezone")

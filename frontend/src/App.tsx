@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { KeyRound, Lock, PanelLeftClose, PanelLeft } from "lucide-react";
 import { useProfiles } from "./hooks/useProfiles";
-import { api, setOnUnauthorized, type ProfileCreateData } from "./lib/api";
+import { api, setOnUnauthorized, type LaunchMode, type ProfileCreateData } from "./lib/api";
 import { ProfileList } from "./components/ProfileList";
 import { ProfileForm } from "./components/ProfileForm";
 import { ProfileViewer } from "./components/ProfileViewer";
@@ -155,16 +155,24 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
     setView("empty");
   }, [selectedId, remove]);
 
-  const handleLaunch = useCallback(async () => {
+  const handleLaunchWithMode = useCallback(async (launchMode: LaunchMode) => {
     if (!selectedId) return;
     if (view === "edit" && editDraft) {
       const saved = await update(selectedId, editDraft);
       if (!saved) return;
       setEditDraft(null);
     }
-    const result = await launch(selectedId);
+    const result = await launch(selectedId, launchMode);
     if (result) setView("view");
   }, [editDraft, launch, selectedId, update, view]);
+
+  const handleLaunch = useCallback(async () => {
+    await handleLaunchWithMode("manual");
+  }, [handleLaunchWithMode]);
+
+  const handleDebugLaunch = useCallback(async () => {
+    await handleLaunchWithMode("debug");
+  }, [handleLaunchWithMode]);
 
   const handleStop = useCallback(async () => {
     if (!selectedId) return;
@@ -225,15 +233,22 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
             {selected && (
               <FingerprintReportButton
                 profileId={selected.id}
-                disabled={selected.status !== "running"}
+                disabled={selected.status !== "running" || !selected.cdp_url}
+                disabledReason={
+                  selected.status !== "running"
+                    ? "先启动浏览器"
+                    : "日常启动未开启调试连接；请停止后用调试启动"
+                }
               />
             )}
             {selected && (
               <LaunchButton
                 status={selected.status}
                 onLaunch={handleLaunch}
+                onDebugLaunch={handleDebugLaunch}
                 onStop={handleStop}
                 launchLabel={view === "edit" ? "保存并启动" : "启动"}
+                showDebugLaunch={selected.browser_engine !== "cloakbrowser"}
               />
             )}
             {authRequired && (
@@ -311,6 +326,7 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
                 profileName={selected.name}
                 cdpUrl={selected.cdp_url}
                 browserEngine={selected.browser_engine}
+                launchMode={selected.launch_mode}
               />
             )
           )}

@@ -5,6 +5,7 @@ import { api, type FingerprintIssue, type FingerprintReport } from "../lib/api";
 interface FingerprintReportButtonProps {
   profileId: string;
   disabled?: boolean;
+  disabledReason?: string;
 }
 
 function valueText(value: unknown) {
@@ -20,7 +21,11 @@ function issueLabel(issue: FingerprintIssue) {
   return `${scope} · ${issue.signal}`;
 }
 
-export function FingerprintReportButton({ profileId, disabled }: FingerprintReportButtonProps) {
+export function FingerprintReportButton({
+  profileId,
+  disabled,
+  disabledReason = "先启动浏览器",
+}: FingerprintReportButtonProps) {
   const [loading, setLoading] = useState(false);
   const [report, setReport] = useState<FingerprintReport | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -50,7 +55,7 @@ export function FingerprintReportButton({ profileId, disabled }: FingerprintRepo
         onClick={runReport}
         disabled={disabled || loading}
         className="btn-secondary flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
-        title={disabled ? "先启动浏览器" : "运行指纹自检"}
+        title={disabled ? disabledReason : "运行指纹自检"}
       >
         {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Activity className="h-3.5 w-3.5" />}
         <span>{loading ? "检测中..." : "指纹自检"}</span>

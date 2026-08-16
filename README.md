@@ -55,7 +55,7 @@ Open [http://127.0.0.1:8080](http://127.0.0.1:8080), create a profile, and click
 - Proxy testing
 - Apple Silicon profile presets
 - Fingerprint report
-- Playwright/Puppeteer API via CDP
+- Manual native launch by default; optional debug launch with Playwright/Puppeteer CDP
 - Optional authentication for local use
 - Powered by CloakBrowser
 
@@ -94,7 +94,7 @@ npm run dev
 
 ## Automation API
 
-Every running profile exposes a CDP (Chrome DevTools Protocol) endpoint.
+Profiles launched with **Debug Launch** expose a CDP (Chrome DevTools Protocol) endpoint. The default launch mode opens native Chrome without CDP.
 
 ```python
 from playwright.async_api import async_playwright
