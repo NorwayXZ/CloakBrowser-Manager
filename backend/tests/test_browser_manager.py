@@ -12,7 +12,9 @@ from backend.browser_manager import (
     _accept_language_value,
     _build_locale_timezone_env,
     _init_profile_defaults,
+    _launch_system_chrome_persistent_context_async,
     _normalize_proxy,
+    _playwright_proxy,
     _sync_profile_locale,
     _validate_proxy,
     BrowserManager,
@@ -47,6 +49,11 @@ def test_normalize_already_https():
 
 def test_normalize_already_socks5():
     assert _normalize_proxy("socks5://host:1080") == "socks5://host:1080"
+
+
+def test_normalize_preserves_xray_share_link():
+    link = "vless://11111111-1111-1111-1111-111111111111@example.com:443"
+    assert _normalize_proxy(link) == link
 
 
 def test_normalize_host_port_user_pass():
@@ -88,6 +95,10 @@ def test_validate_valid_with_auth():
     _validate_proxy("http://user:pass@proxy.com:8080")  # should not raise
 
 
+def test_validate_vless_share_link():
+    _validate_proxy("vless://11111111-1111-1111-1111-111111111111@example.com:443")
+
+
 def test_validate_bad_scheme():
     with pytest.raises(ValueError, match="Invalid proxy scheme 'ftp'"):
         _validate_proxy("ftp://host:80")
@@ -101,6 +112,15 @@ def test_validate_no_hostname():
 def test_validate_no_port():
     with pytest.raises(ValueError, match="missing port"):
         _validate_proxy("http://host")
+
+
+def test_playwright_proxy_bypasses_manager_loopback():
+    settings = _playwright_proxy("http://proxy.example:8080")
+
+    assert settings == {
+        "server": "http://proxy.example:8080",
+        "bypass": "127.0.0.1,localhost,[::1]",
+    }
 
 
 # ── _build_fingerprint_args ──────────────────────────────────────────────────
@@ -241,6 +261,61 @@ async def test_native_launch_skips_vnc_and_display(monkeypatch, tmp_path: Path):
     assert "viewport" not in options
     assert "--use-angle=swiftshader" not in options["args"]
     assert "--remote-debugging-address=127.0.0.1" in options["args"]
+
+
+@pytest.mark.asyncio
+async def test_system_chrome_native_window_uses_resizable_viewport(monkeypatch, tmp_path: Path):
+    import playwright.async_api
+
+    context = MagicMock()
+    context.close = AsyncMock()
+    chromium = MagicMock()
+    chromium.launch_persistent_context = AsyncMock(return_value=context)
+    playwright_runtime = MagicMock(chromium=chromium)
+    playwright_runtime.stop = AsyncMock()
+    playwright_controller = MagicMock()
+    playwright_controller.start = AsyncMock(return_value=playwright_runtime)
+    monkeypatch.setattr(
+        playwright.async_api,
+        "async_playwright",
+        MagicMock(return_value=playwright_controller),
+    )
+
+    await _launch_system_chrome_persistent_context_async(
+        user_data_dir=tmp_path / "profile",
+        headless=False,
+    )
+
+    options = chromium.launch_persistent_context.await_args.kwargs
+    assert options["no_viewport"] is True
+    assert "viewport" not in options
+    assert options["chromium_sandbox"] is True
+
+
+@pytest.mark.asyncio
+async def test_native_system_chrome_replaces_blank_start_page(monkeypatch, tmp_path: Path):
+    from backend import browser_manager as module
+
+    page = MagicMock(url="about:blank")
+    page.goto = AsyncMock()
+    page.bring_to_front = AsyncMock()
+    context = MagicMock(pages=[page])
+    context.add_init_script = AsyncMock()
+    manager = BrowserManager(RuntimeConfig("macos", "native", "native-window", tmp_path))
+    manager._wait_for_cdp = AsyncMock()
+    launch = AsyncMock(return_value=context)
+    monkeypatch.setattr(module, "_launch_system_chrome_persistent_context_async", launch)
+
+    await manager.launch({
+        **_launch_profile(tmp_path),
+        "browser_engine": "system_chrome",
+    })
+
+    page.goto.assert_awaited_once_with(
+        "http://127.0.0.1:8080/profile/profile-1/start",
+        wait_until="domcontentloaded",
+    )
+    page.bring_to_front.assert_awaited_once()
 
 
 @pytest.mark.asyncio

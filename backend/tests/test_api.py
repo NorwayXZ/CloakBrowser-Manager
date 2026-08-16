@@ -70,6 +70,19 @@ def test_get_profile_not_found(app_client: TestClient):
     assert resp.status_code == 404
 
 
+def test_profile_start_page(app_client: TestClient):
+    create = app_client.post("/api/profiles", json={"name": "Start Page"})
+    profile_id = create.json()["id"]
+
+    resp = app_client.get(f"/profile/{profile_id}/start")
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/html")
+    assert "Start Page" in resp.text
+    assert "代理出口 IP" in resp.text
+    assert "Whoer" in resp.text
+
+
 def test_update_profile(app_client: TestClient):
     create = app_client.post("/api/profiles", json={"name": "Original"})
     pid = create.json()["id"]

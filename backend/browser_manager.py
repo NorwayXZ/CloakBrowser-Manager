@@ -21,6 +21,7 @@ from .proxy_geo import fetch_proxy_geo
 from .proxy_bridge import HttpProxyBridge
 from .runtime import RuntimeConfig, resolve_runtime
 from .vnc_manager import VNCManager
+from .xray_runtime import XrayProcess, is_xray_link, parse_xray_link, start_xray_proxy
 
 logger = logging.getLogger("cloakbrowser.manager.browser")
 
@@ -30,6 +31,13 @@ SYSTEM_CHROME_BASE_ARGS = [
     "--disable-blink-features=AutomationControlled",
     "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
 ]
+NATIVE_START_PAGE_TEMPLATE = "http://127.0.0.1:8080/profile/{profile_id}/start"
+BLANK_PAGE_URLS = {
+    "",
+    "about:blank",
+    "chrome://newtab/",
+    "chrome://new-tab-page/",
+}
 
 
 def _read_json_file(path: Path) -> dict[str, Any]:
@@ -138,6 +146,7 @@ def _playwright_proxy(proxy: str | None) -> dict[str, str] | None:
         return None
     settings: dict[str, str] = {
         "server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}",
+        "bypass": "127.0.0.1,localhost,[::1]",
     }
     if parsed.username:
         settings["username"] = unquote(parsed.username)
@@ -195,8 +204,12 @@ async def _launch_system_chrome_persistent_context_async(
         "headless": headless,
         "args": args or [],
         "ignore_default_args": SYSTEM_CHROME_IGNORE_DEFAULT_ARGS,
-        "viewport": viewport,
+        "chromium_sandbox": True,
     }
+    if viewport is None and not headless:
+        context_kwargs["no_viewport"] = True
+    elif viewport is not None:
+        context_kwargs["viewport"] = viewport
     proxy_settings = _playwright_proxy(proxy)
     if proxy_settings:
         context_kwargs["proxy"] = proxy_settings
@@ -241,6 +254,25 @@ async def _launch_system_chrome_persistent_context_async(
             logger.debug("Humanize patch skipped for system Chrome: %s", exc)
 
     return context
+
+
+async def _open_native_start_page(context: Any, profile_id: str) -> None:
+    """Replace the initial blank tab with the local profile information page."""
+    try:
+        pages = list(getattr(context, "pages", []) or [])
+        page = pages[0] if pages else await context.new_page()
+        if str(getattr(page, "url", "") or "") not in BLANK_PAGE_URLS:
+            return
+        await page.goto(
+            NATIVE_START_PAGE_TEMPLATE.format(profile_id=profile_id),
+            wait_until="domcontentloaded",
+        )
+        try:
+            await page.bring_to_front()
+        except Exception:
+            pass
+    except Exception as exc:
+        logger.warning("Could not open native start page for %s: %s", profile_id, exc)
 
 
 def _build_worker_fingerprint_patch(payload: dict[str, Any]) -> str:
@@ -860,14 +892,24 @@ def _build_fingerprint_init_script(
 
 
 def _normalize_proxy(raw: str) -> str:
-    """Convert common proxy formats to http://user:pass@host:port.
+    """Convert common proxy formats while preserving Xray share links.
 
     Accepts:
       - http://user:pass@host:port  (already valid)
       - host:port:user:pass
       - host:port
+      - ss://, vmess://, vless://, trojan:// (Xray share links)
     """
-    if raw.startswith(("http://", "https://", "socks5://")):
+    raw = raw.strip()
+    if raw.lower().startswith((
+        "http://",
+        "https://",
+        "socks5://",
+        "ss://",
+        "vmess://",
+        "vless://",
+        "trojan://",
+    )):
         return raw
     parts = raw.split(":")
     if len(parts) == 4:
@@ -879,13 +921,17 @@ def _normalize_proxy(raw: str) -> str:
 
 
 def _validate_proxy(url: str) -> None:
-    """Validate that a normalized proxy URL has scheme, host, and port."""
+    """Validate a direct proxy URL or a supported Xray share link."""
     from urllib.parse import urlparse
 
     parsed = urlparse(url)
+    if parsed.scheme.lower() in {"ss", "vmess", "vless", "trojan"}:
+        parse_xray_link(url)
+        return
     if parsed.scheme not in ("http", "https", "socks5"):
         raise ValueError(
-            f"Invalid proxy scheme '{parsed.scheme}'. Must be http, https, or socks5."
+            "Invalid proxy scheme "
+            f"'{parsed.scheme}'. Must be http, https, socks5, ss, vmess, vless, or trojan."
         )
     if not parsed.hostname:
         raise ValueError(f"Proxy URL missing hostname: {url}")
@@ -998,6 +1044,7 @@ class RunningProfile:
     proxy_geo: dict[str, Any] | None = None
     browser_engine: str = "cloakbrowser"
     proxy_bridge: HttpProxyBridge | None = None
+    xray_process: XrayProcess | None = None
 
 
 class BrowserManager:
@@ -1057,6 +1104,7 @@ class BrowserManager:
         cdp_port: int | None = None
         context: Any | None = None
         proxy_bridge: HttpProxyBridge | None = None
+        xray_process: XrayProcess | None = None
         try:
             if self.runtime.viewer_mode == "vnc":
                 display, ws_port = await self.vnc.allocate()
@@ -1095,12 +1143,35 @@ class BrowserManager:
             if proxy:
                 _validate_proxy(proxy)
 
+            browser_proxy = proxy
+            if proxy and is_xray_link(proxy):
+                xray_process = await start_xray_proxy(
+                    proxy,
+                    user_data_dir=user_data_dir,
+                    data_dir=self.runtime.data_dir,
+                )
+                browser_proxy = xray_process.browser_proxy
+                logger.info(
+                    "Using Xray local SOCKS5 for profile %s: %s",
+                    profile_id,
+                    browser_proxy,
+                )
+            elif proxy and urlparse(proxy).scheme == "socks5" and (
+                urlparse(proxy).username or urlparse(proxy).password
+            ):
+                proxy_bridge = HttpProxyBridge(proxy)
+                browser_proxy = await proxy_bridge.start()
+                logger.info(
+                    "Using local proxy bridge for authenticated SOCKS5 profile %s",
+                    profile_id,
+                )
+
             resolved_timezone = profile.get("timezone") or None
             resolved_locale = profile.get("locale") or None
             proxy_geo: dict[str, Any] | None = None
-            if proxy and profile.get("geoip"):
+            if browser_proxy and profile.get("geoip"):
                 try:
-                    geo = await fetch_proxy_geo(proxy)
+                    geo = await fetch_proxy_geo(browser_proxy)
                     proxy_geo = geo
                     resolved_timezone = geo.get("timezone") or resolved_timezone
                     resolved_locale = geo.get("suggested_locale") or resolved_locale
@@ -1113,17 +1184,6 @@ class BrowserManager:
                     )
                 except Exception as exc:
                     logger.warning("GeoIP lookup failed for %s: %s", profile_id, exc)
-
-            browser_proxy = proxy
-            if proxy and urlparse(proxy).scheme == "socks5" and (
-                urlparse(proxy).username or urlparse(proxy).password
-            ):
-                proxy_bridge = HttpProxyBridge(proxy)
-                browser_proxy = await proxy_bridge.start()
-                logger.info(
-                    "Using local proxy bridge for authenticated SOCKS5 profile %s",
-                    profile_id,
-                )
 
             browser_engine = self._browser_engine(profile)
             _sync_profile_locale(user_data_dir, resolved_locale)
@@ -1255,6 +1315,7 @@ class BrowserManager:
                 proxy_geo=proxy_geo,
                 browser_engine=browser_engine,
                 proxy_bridge=proxy_bridge,
+                xray_process=xray_process,
             )
             context.on(
                 "close",
@@ -1264,6 +1325,13 @@ class BrowserManager:
             async with self._lock:
                 self.running[profile_id] = running
                 self._launching.discard(profile_id)
+
+            if (
+                self.runtime.runtime_mode == "native"
+                and browser_engine == "system_chrome"
+                and not bool(profile.get("headless", False))
+            ):
+                await _open_native_start_page(context, profile_id)
 
             logger.info(
                 "Launched profile %s (runtime=%s, display=%s, ws_port=%s, cdp_port=%d)",
@@ -1282,6 +1350,8 @@ class BrowserManager:
                 await self._close_context(context, profile_id)
             if proxy_bridge is not None:
                 await proxy_bridge.close()
+            if xray_process is not None:
+                await xray_process.close()
             if cdp_port is not None:
                 self._release_cdp_port(cdp_port)
             if display is not None:
@@ -1304,6 +1374,8 @@ class BrowserManager:
             await self._close_context(running.context, running.profile_id)
         if running.proxy_bridge is not None:
             await running.proxy_bridge.close()
+        if running.xray_process is not None:
+            await running.xray_process.close()
         if running.display is not None:
             await self.vnc.stop_vnc(running.display)
         self._release_cdp_port(running.cdp_port)

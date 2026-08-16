@@ -16,8 +16,9 @@
 ## 本地使用
 
 ```bash
-Windows: run-windows.bat
-macOS:   ./run-macos.sh
+Windows: install-windows.bat / run-windows.bat
+macOS:   ./install-macos.sh / ./run-macos.sh
+卸载:     uninstall-windows.bat / ./uninstall-macos.sh
 ```
 
 首次启动会创建本地 Python 环境，安装依赖，构建前端，然后打开：
@@ -25,6 +26,8 @@ macOS:   ./run-macos.sh
 ```text
 http://127.0.0.1:8080
 ```
+
+详细安装、卸载、备份和迁移说明见 [本地安装文档](docs/local-install-uninstall.zh-CN.md)。
 
 Windows 配置会保存在：
 
@@ -37,6 +40,8 @@ macOS 配置会保存在：
 ```text
 ~/Library/Application Support/CloakBrowser Manager
 ```
+
+每个画像的浏览器用户数据在上述目录的 `profiles/<profile-id>/` 中；CloakBrowser 二进制缓存默认在 macOS 的 `~/.cloakbrowser`、Windows 的 `%USERPROFILE%\.cloakbrowser`。不要把这两个位置混淆。
 
 ## 使用建议
 

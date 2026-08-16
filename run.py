@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
@@ -44,6 +45,51 @@ def _load_setup_state() -> dict[str, str]:
 def _run(command: list[str], cwd: Path = ROOT) -> None:
     print(f"[setup] {' '.join(command)}", flush=True)
     subprocess.run(command, cwd=cwd, check=True)
+
+
+def _manager_data_dir() -> Path:
+    from backend.runtime import resolve_runtime
+
+    return resolve_runtime().data_dir
+
+
+def _remove_path(path: Path) -> None:
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path, ignore_errors=True)
+    else:
+        path.unlink(missing_ok=True)
+
+
+def _cleanup_installation(*, purge_data: bool) -> None:
+    targets = [
+        VENV_DIR,
+        VENV_DIR / ".manager-setup.json",
+        FRONTEND_DIR / "node_modules",
+        FRONTEND_DIR / "dist",
+        FRONTEND_DIR / ".vite",
+        FRONTEND_DIR / ".cache",
+        ROOT / ".pytest_cache",
+        ROOT / "__pycache__",
+        ROOT / "backend" / "__pycache__",
+        ROOT / "frontend" / "__pycache__",
+    ]
+    for target in targets:
+        if target.exists():
+            print(f"[remove] {target}", flush=True)
+            _remove_path(target)
+
+    if purge_data:
+        data_dir = _manager_data_dir()
+        if data_dir.exists():
+            print(f"[remove] {data_dir}", flush=True)
+            _remove_path(data_dir)
+
+
+def _print_data_locations() -> None:
+    data_dir = _manager_data_dir()
+    print(f"[info] Manager data directory: {data_dir}", flush=True)
+    print(f"[info] Profiles database: {data_dir / 'profiles.db'}", flush=True)
+    print(f"[info] Profile folders: {data_dir / 'profiles'}", flush=True)
 
 
 def _ensure_environment() -> Path:
@@ -115,6 +161,29 @@ def _open_when_ready() -> None:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(add_help=True)
+    parser.add_argument(
+        "--uninstall",
+        action="store_true",
+        help="Remove the local runtime files while keeping browser profile data",
+    )
+    parser.add_argument(
+        "--purge-data",
+        action="store_true",
+        help="Also remove the Manager profile data directory",
+    )
+    args = parser.parse_args()
+
+    if args.uninstall:
+        try:
+            _cleanup_installation(purge_data=args.purge_data)
+            _print_data_locations()
+        except (OSError, RuntimeError) as exc:
+            print(f"[error] {exc}", file=sys.stderr, flush=True)
+            return 1
+        print("[done] CloakBrowser Manager uninstalled", flush=True)
+        return 0
+
     try:
         python = _ensure_environment()
     except (OSError, RuntimeError, subprocess.CalledProcessError) as exc:
@@ -129,6 +198,7 @@ def main() -> int:
 
     env = {**os.environ, "CLOAKBROWSER_MANAGER_RUNTIME": "native"}
     print(f"[start] CloakBrowser Manager: {SERVER_URL}", flush=True)
+    _print_data_locations()
     threading.Thread(target=_open_when_ready, daemon=True).start()
     process = subprocess.Popen(
         [

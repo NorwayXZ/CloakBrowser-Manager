@@ -31,11 +31,15 @@ Each profile is an isolated CloakBrowser instance with its own fingerprint, prox
 Clone the repository, then start the platform launcher:
 
 ```text
+Install: install-windows.bat / ./install-macos.sh
 Windows: run-windows.bat
 macOS:   ./run-macos.sh
+Uninstall: uninstall-windows.bat / ./uninstall-macos.sh
 ```
 
 The first run creates a local Python environment, installs dependencies, builds the React UI, starts Manager on `127.0.0.1:8080`, and opens it in your default browser. Profiles are stored in `%LOCALAPPDATA%\CloakBrowser Manager` on Windows and `~/Library/Application Support/CloakBrowser Manager` on macOS.
+
+One-click install/uninstall wrappers and full data-location notes are in [docs/local-install-uninstall.zh-CN.md](docs/local-install-uninstall.zh-CN.md).
 
 Open [http://127.0.0.1:8080](http://127.0.0.1:8080), create a profile, and click Launch.
 

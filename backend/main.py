@@ -10,6 +10,7 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import html
 import json
 import logging
 import os
@@ -24,14 +25,16 @@ from urllib.parse import urlparse
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 import starlette.requests
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from . import database as db
 from .browser_manager import BrowserManager, _normalize_proxy, _validate_proxy
+from .proxy_bridge import HttpProxyBridge
 from .proxy_geo import fetch_proxy_geo
+from .xray_runtime import is_xray_link, start_xray_proxy
 from .models import (
     AuthAccountUpdate,
     ClipboardRequest,
@@ -756,6 +759,162 @@ async def get_fingerprint_report(profile_id: str):
         raise HTTPException(status_code=500, detail="指纹自检失败") from exc
 
 
+@app.get("/profile/{profile_id}/start", response_class=HTMLResponse, include_in_schema=False)
+async def profile_start_page(profile_id: str):
+    """Show proxy and browser time details when a native profile opens."""
+    profile = db.get_profile(profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    running = browser_mgr.running.get(profile_id)
+    geo = running.proxy_geo if running and running.proxy_geo else {}
+    effective_timezone = (
+        running.effective_timezone if running else None
+    ) or profile.get("timezone") or geo.get("timezone") or "未设置"
+    effective_locale = (
+        running.effective_locale if running else None
+    ) or profile.get("locale") or geo.get("suggested_locale") or "未设置"
+
+    profile_name = html.escape(str(profile.get("name") or "未命名画像"))
+    ip = html.escape(str(geo.get("ip") or "未获取"))
+    location = html.escape(
+        " / ".join(
+            str(value)
+            for value in (geo.get("country"), geo.get("region"), geo.get("city"))
+            if value
+        )
+        or "地区信息未获取"
+    )
+    ip_timezone = html.escape(str(geo.get("timezone") or "未获取"))
+    browser_timezone = html.escape(str(effective_timezone))
+    browser_locale = html.escape(str(effective_locale))
+    browser_engine = html.escape(
+        str(running.browser_engine if running else profile.get("browser_engine") or "auto")
+    )
+    proxy_state = "已配置" if profile.get("proxy") else "未配置"
+    status = "运行中" if running else "未启动"
+    source = html.escape(str(geo.get("source") or "Manager"))
+
+    return HTMLResponse(
+        f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{profile_name} · CloakBrowser 起始页</title>
+  <style>
+    :root {{
+      color-scheme: dark;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #101417;
+      color: #edf2f4;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      min-width: 320px;
+      background: #101417;
+    }}
+    main {{ width: min(1120px, calc(100% - 40px)); margin: 0 auto; padding: 48px 0 64px; }}
+    header {{ display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 28px; }}
+    .eyebrow {{ color: #76e4a3; font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }}
+    h1 {{ margin: 8px 0 0; font-size: clamp(30px, 5vw, 56px); line-height: 1; }}
+    .subtitle {{ margin: 12px 0 0; color: #9aa8ad; }}
+    .status {{ border: 1px solid rgba(118, 228, 163, .32); border-radius: 999px; color: #76e4a3; padding: 8px 12px; white-space: nowrap; font-size: 13px; }}
+    .hero, .panel {{ border: 1px solid #293338; background: #192023; border-radius: 10px; }}
+    .hero {{ padding: 28px; margin-bottom: 16px; }}
+    .label {{ color: #9aa8ad; font-size: 13px; }}
+    .ip {{ margin: 8px 0; color: #76e4a3; font-size: clamp(34px, 7vw, 72px); font-weight: 750; }}
+    .location {{ color: #dce5e8; font-size: 16px; }}
+    .grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }}
+    .panel {{ padding: 20px; }}
+    .panel h2 {{ margin: 0 0 16px; font-size: 16px; }}
+    dl {{ display: grid; grid-template-columns: minmax(120px, .7fr) minmax(0, 1.3fr); gap: 12px 16px; margin: 0; }}
+    dt {{ color: #8c9aa0; font-size: 13px; }}
+    dd {{ margin: 0; color: #f2f6f7; overflow-wrap: anywhere; }}
+    .muted {{ color: #8c9aa0; font-size: 12px; margin-top: 12px; }}
+    .actions {{ display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }}
+    a {{ border: 1px solid #3a494f; border-radius: 7px; color: #dce5e8; padding: 10px 14px; text-decoration: none; font-size: 13px; }}
+    a:hover {{ border-color: #76e4a3; color: #76e4a3; }}
+    @media (max-width: 700px) {{
+      main {{ width: min(100% - 24px, 1120px); padding-top: 28px; }}
+      header {{ align-items: flex-start; flex-direction: column; }}
+      .grid {{ grid-template-columns: 1fr; }}
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <div class="eyebrow">CloakBrowser Manager</div>
+        <h1>{profile_name}</h1>
+        <p class="subtitle">启动信息页：先确认代理出口、时间和语言是否一致。</p>
+      </div>
+      <div class="status">{html.escape(status)}</div>
+    </header>
+
+    <section class="hero">
+      <div class="label">代理出口 IP</div>
+      <div class="ip">{ip}</div>
+      <div class="location">{location}</div>
+      <div class="muted">IP 信息来源：{source}</div>
+    </section>
+
+    <div class="grid">
+      <section class="panel">
+        <h2>IP 地区与浏览器设置</h2>
+        <dl>
+          <dt>IP 时区</dt><dd>{ip_timezone}</dd>
+          <dt>浏览器时区</dt><dd id="browser-timezone">{browser_timezone}</dd>
+          <dt>浏览器语言</dt><dd id="browser-locale">{browser_locale}</dd>
+          <dt>浏览器引擎</dt><dd>{browser_engine}</dd>
+          <dt>代理状态</dt><dd>{proxy_state}</dd>
+        </dl>
+      </section>
+
+      <section class="panel">
+        <h2>当前浏览器实际信息</h2>
+        <dl>
+          <dt>浏览器时间</dt><dd id="browser-time">读取中...</dd>
+          <dt>语言列表</dt><dd id="browser-languages">读取中...</dd>
+          <dt>屏幕尺寸</dt><dd id="screen-size">读取中...</dd>
+          <dt>页面视口</dt><dd id="viewport-size">读取中...</dd>
+          <dt>设备像素比</dt><dd id="device-scale">读取中...</dd>
+        </dl>
+      </section>
+    </div>
+
+    <div class="actions">
+      <a href="https://whoer.net/" target="_blank" rel="noreferrer">打开 Whoer 检查</a>
+      <a href="https://pixelscan.net/fingerprint-check" target="_blank" rel="noreferrer">打开 Pixelscan 检查</a>
+      <a href="/">返回 Manager</a>
+    </div>
+  </main>
+  <script>
+    const updateBrowserValues = () => {{
+      document.querySelector("#browser-time").textContent = new Date().toString();
+      document.querySelector("#browser-timezone").textContent =
+        Intl.DateTimeFormat().resolvedOptions().timeZone || "未读取";
+      document.querySelector("#browser-locale").textContent =
+        navigator.language || "未读取";
+      document.querySelector("#browser-languages").textContent =
+        (navigator.languages || []).join(", ") || "未读取";
+      document.querySelector("#screen-size").textContent =
+        `${{screen.width}} × ${{screen.height}}`;
+      document.querySelector("#viewport-size").textContent =
+        `${{window.innerWidth}} × ${{window.innerHeight}}`;
+      document.querySelector("#device-scale").textContent =
+        String(window.devicePixelRatio || 1);
+    }};
+    updateBrowserValues();
+    window.setInterval(updateBrowserValues, 1000);
+  </script>
+</body>
+</html>"""
+    )
+
+
 # ── System Status ─────────────────────────────────────────────────────────────
 
 
@@ -793,10 +952,31 @@ async def test_proxy(req: ProxyTestRequest):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"代理格式无效：{exc}") from exc
 
+    xray_process = None
+    proxy_bridge = None
+    effective_proxy = proxy
+    test_dir = db.DATA_DIR / "proxy-tests" / secrets.token_hex(8)
     try:
-        data = await fetch_proxy_geo(proxy)
+        if is_xray_link(proxy):
+            xray_process = await start_xray_proxy(
+                proxy,
+                user_data_dir=test_dir,
+                data_dir=browser_mgr.runtime.data_dir,
+            )
+            effective_proxy = xray_process.browser_proxy
+        elif urlparse(proxy).scheme == "socks5" and (
+            urlparse(proxy).username or urlparse(proxy).password
+        ):
+            proxy_bridge = HttpProxyBridge(proxy)
+            effective_proxy = await proxy_bridge.start()
+        data = await fetch_proxy_geo(effective_proxy)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"代理测试失败：{exc}") from exc
+    finally:
+        if proxy_bridge is not None:
+            await proxy_bridge.close()
+        if xray_process is not None:
+            await xray_process.close()
 
     return ProxyTestResponse(**data)
 

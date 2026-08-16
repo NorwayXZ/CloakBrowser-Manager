@@ -117,25 +117,30 @@ const GPU_PRESETS: Record<string, { vendor: string; renderer: string }> = {
   },
 };
 
+type ProxyKind = "direct" | "xray";
 type ProxyScheme = "http" | "https" | "socks5";
 type EditableBrowserEngine = "system_chrome" | "cloakbrowser";
 
 interface ProxyParts {
+  kind: ProxyKind;
   scheme: ProxyScheme;
   host: string;
   port: string;
   username: string;
   password: string;
+  raw: string;
 }
 
 const PROXY_SCHEMES: ProxyScheme[] = ["http", "https", "socks5"];
 
 const DEFAULT_PROXY_PARTS: ProxyParts = {
+  kind: "direct",
   scheme: "http",
   host: "",
   port: "",
   username: "",
   password: "",
+  raw: "",
 };
 
 function createDefaultForm(): ProfileCreateData {
@@ -160,17 +165,28 @@ function parseProxy(raw?: string | null): ProxyParts {
   const value = raw?.trim();
   if (!value) return { ...DEFAULT_PROXY_PARTS };
 
+  const scheme = value.split(":", 1)[0]?.toLowerCase();
+  if (scheme && ["ss", "vmess", "vless", "trojan"].includes(scheme)) {
+    return {
+      ...DEFAULT_PROXY_PARTS,
+      kind: "xray",
+      raw: value,
+    };
+  }
+
   if (value.includes("://")) {
     try {
       const url = new URL(value);
-      const scheme = url.protocol.replace(":", "");
-      if (isProxyScheme(scheme)) {
+      const directScheme = url.protocol.replace(":", "");
+      if (isProxyScheme(directScheme)) {
         return {
-          scheme,
+          kind: "direct",
+          scheme: directScheme,
           host: url.hostname,
           port: url.port,
           username: decodeURIComponent(url.username),
           password: decodeURIComponent(url.password),
+          raw: "",
         };
       }
     } catch {
@@ -182,16 +198,26 @@ function parseProxy(raw?: string | null): ProxyParts {
   if (parts.length === 4) {
     const [host, port, username, password] = parts;
     return {
+      kind: "direct",
       scheme: "http",
       host: host ?? "",
       port: port ?? "",
       username: username ?? "",
       password: password ?? "",
+      raw: "",
     };
   }
   if (parts.length === 2) {
     const [host, port] = parts;
-    return { scheme: "http", host: host ?? "", port: port ?? "", username: "", password: "" };
+    return {
+      kind: "direct",
+      scheme: "http",
+      host: host ?? "",
+      port: port ?? "",
+      username: "",
+      password: "",
+      raw: "",
+    };
   }
 
   return { ...DEFAULT_PROXY_PARTS, host: value };
@@ -321,7 +347,19 @@ export function ProfileForm({ profile, onSave, onDelete, onCancel, onDraftChange
   const updateProxyPart = <K extends keyof ProxyParts>(key: K, value: ProxyParts[K]) => {
     const next = { ...proxyParts, [key]: value };
     setProxyParts(next);
-    set("proxy", buildProxy(next));
+    set("proxy", next.kind === "xray" ? (next.raw.trim() || null) : buildProxy(next));
+    setProxyTest(null);
+    setProxyTestError(null);
+  };
+
+  const updateProxyKind = (kind: ProxyKind) => {
+    const next = {
+      ...proxyParts,
+      kind,
+      raw: kind === "xray" ? proxyParts.raw : "",
+    };
+    setProxyParts(next);
+    set("proxy", kind === "xray" ? (next.raw.trim() || null) : buildProxy(next));
     setProxyTest(null);
     setProxyTestError(null);
   };
@@ -666,57 +704,84 @@ export function ProfileForm({ profile, onSave, onDelete, onCancel, onDraftChange
         <section>
           <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">网络与地区</h3>
           <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="label">代理协议</label>
-                <select
-                  className="input"
-                  value={proxyParts.scheme}
-                  onChange={(e) => updateProxyPart("scheme", e.target.value as ProxyScheme)}
-                >
-                  <option value="http">HTTP</option>
-                  <option value="https">HTTPS</option>
-                  <option value="socks5">SOCKS5</option>
-                </select>
-              </div>
-              <div>
-                <label className="label">主机</label>
-                <input
-                  className="input"
-                  value={proxyParts.host}
-                  onChange={(e) => updateProxyPart("host", e.target.value)}
-                  placeholder="proxy.example.com"
-                />
-              </div>
-              <div>
-                <label className="label">端口</label>
-                <input
-                  className="input no-spin"
-                  value={proxyParts.port}
-                  onChange={(e) => updateProxyPart("port", e.target.value)}
-                  placeholder="1080"
-                />
-              </div>
-              <div>
-                <label className="label">账号</label>
-                <input
-                  className="input"
-                  value={proxyParts.username}
-                  onChange={(e) => updateProxyPart("username", e.target.value)}
-                  placeholder="可选"
-                />
-              </div>
-              <div>
-                <label className="label">密码</label>
-                <input
-                  className="input"
-                  type="password"
-                  value={proxyParts.password}
-                  onChange={(e) => updateProxyPart("password", e.target.value)}
-                  placeholder="可选"
-                />
-              </div>
+            <div>
+              <label className="label">代理类型</label>
+              <select
+                className="input"
+                value={proxyParts.kind}
+                onChange={(e) => updateProxyKind(e.target.value as ProxyKind)}
+              >
+                <option value="direct">HTTP / HTTPS / SOCKS5</option>
+                <option value="xray">Xray 代理链接</option>
+              </select>
             </div>
+            {proxyParts.kind === "xray" ? (
+              <div className="space-y-2">
+                <label className="label">代理链接</label>
+                <textarea
+                  className="input min-h-24 resize-y font-mono text-xs"
+                  value={proxyParts.raw}
+                  onChange={(e) => updateProxyPart("raw", e.target.value)}
+                  placeholder="粘贴 ss://、vmess://、vless:// 或 trojan:// 链接"
+                  spellCheck={false}
+                />
+                <p className="text-xs text-gray-500">
+                  启动时会自动下载官方 Xray 核心，并为这个配置创建独立的本机 SOCKS5 通道。
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">代理协议</label>
+                  <select
+                    className="input"
+                    value={proxyParts.scheme}
+                    onChange={(e) => updateProxyPart("scheme", e.target.value as ProxyScheme)}
+                  >
+                    <option value="http">HTTP</option>
+                    <option value="https">HTTPS</option>
+                    <option value="socks5">SOCKS5</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="label">主机</label>
+                  <input
+                    className="input"
+                    value={proxyParts.host}
+                    onChange={(e) => updateProxyPart("host", e.target.value)}
+                    placeholder="proxy.example.com"
+                  />
+                </div>
+                <div>
+                  <label className="label">端口</label>
+                  <input
+                    className="input no-spin"
+                    value={proxyParts.port}
+                    onChange={(e) => updateProxyPart("port", e.target.value)}
+                    placeholder="1080"
+                  />
+                </div>
+                <div>
+                  <label className="label">账号</label>
+                  <input
+                    className="input"
+                    value={proxyParts.username}
+                    onChange={(e) => updateProxyPart("username", e.target.value)}
+                    placeholder="可选"
+                  />
+                </div>
+                <div>
+                  <label className="label">密码</label>
+                  <input
+                    className="input"
+                    type="password"
+                    value={proxyParts.password}
+                    onChange={(e) => updateProxyPart("password", e.target.value)}
+                    placeholder="可选"
+                  />
+                </div>
+              </div>
+            )}
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
