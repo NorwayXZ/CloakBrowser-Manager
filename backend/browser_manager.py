@@ -18,6 +18,7 @@ from cloakbrowser import launch_persistent_context_async
 
 from .fingerprint_report import analyze_fingerprint, run_fingerprint_probe
 from .proxy_geo import fetch_proxy_geo
+from .proxy_bridge import HttpProxyBridge
 from .runtime import RuntimeConfig, resolve_runtime
 from .vnc_manager import VNCManager
 
@@ -996,6 +997,7 @@ class RunningProfile:
     effective_locale: str | None = None
     proxy_geo: dict[str, Any] | None = None
     browser_engine: str = "cloakbrowser"
+    proxy_bridge: HttpProxyBridge | None = None
 
 
 class BrowserManager:
@@ -1011,12 +1013,23 @@ class BrowserManager:
     def _browser_engine(self, profile: dict[str, Any] | None = None) -> str:
         profile_engine = str((profile or {}).get("browser_engine") or "auto").strip().lower()
         if profile_engine in {"chrome", "system-chrome", "system_chrome"}:
+            if self.runtime.runtime_mode == "docker":
+                logger.info(
+                    "Profile requested system Chrome in Docker; using CloakBrowser runtime"
+                )
+                return "cloakbrowser"
             return "system_chrome"
         if profile_engine in {"cloak", "cloakbrowser", "cloak-browser"}:
             return "cloakbrowser"
 
         configured = os.environ.get(BROWSER_ENGINE_ENV, "auto").strip().lower()
         if configured in {"chrome", "system-chrome", "system_chrome"}:
+            if self.runtime.runtime_mode == "docker":
+                logger.info(
+                    "%s requests system Chrome in Docker; using CloakBrowser runtime",
+                    BROWSER_ENGINE_ENV,
+                )
+                return "cloakbrowser"
             return "system_chrome"
         if configured in {"cloak", "cloakbrowser", "cloak-browser"}:
             return "cloakbrowser"
@@ -1043,6 +1056,7 @@ class BrowserManager:
         ws_port: int | None = None
         cdp_port: int | None = None
         context: Any | None = None
+        proxy_bridge: HttpProxyBridge | None = None
         try:
             if self.runtime.viewer_mode == "vnc":
                 display, ws_port = await self.vnc.allocate()
@@ -1100,6 +1114,17 @@ class BrowserManager:
                 except Exception as exc:
                     logger.warning("GeoIP lookup failed for %s: %s", profile_id, exc)
 
+            browser_proxy = proxy
+            if proxy and urlparse(proxy).scheme == "socks5" and (
+                urlparse(proxy).username or urlparse(proxy).password
+            ):
+                proxy_bridge = HttpProxyBridge(proxy)
+                browser_proxy = await proxy_bridge.start()
+                logger.info(
+                    "Using local proxy bridge for authenticated SOCKS5 profile %s",
+                    profile_id,
+                )
+
             browser_engine = self._browser_engine(profile)
             _sync_profile_locale(user_data_dir, resolved_locale)
             if browser_engine == "system_chrome" and proxy:
@@ -1125,7 +1150,7 @@ class BrowserManager:
             launch_options: dict[str, Any] = {
                 "user_data_dir": profile["user_data_dir"],
                 "headless": bool(profile.get("headless", False)),
-                "proxy": proxy,
+                "proxy": browser_proxy,
                 "args": extra_args,
                 "timezone": resolved_timezone,
                 "locale": resolved_locale,
@@ -1229,6 +1254,7 @@ class BrowserManager:
                 effective_locale=resolved_locale,
                 proxy_geo=proxy_geo,
                 browser_engine=browser_engine,
+                proxy_bridge=proxy_bridge,
             )
             context.on(
                 "close",
@@ -1254,6 +1280,8 @@ class BrowserManager:
                 self._launching.discard(profile_id)
             if context is not None:
                 await self._close_context(context, profile_id)
+            if proxy_bridge is not None:
+                await proxy_bridge.close()
             if cdp_port is not None:
                 self._release_cdp_port(cdp_port)
             if display is not None:
@@ -1274,6 +1302,8 @@ class BrowserManager:
     ) -> None:
         if close_context:
             await self._close_context(running.context, running.profile_id)
+        if running.proxy_bridge is not None:
+            await running.proxy_bridge.close()
         if running.display is not None:
             await self.vnc.stop_vnc(running.display)
         self._release_cdp_port(running.cdp_port)

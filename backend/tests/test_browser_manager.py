@@ -162,6 +162,12 @@ def test_native_build_args_do_not_force_software_gl():
     assert "--use-angle=swiftshader" not in args
 
 
+def test_docker_system_chrome_profile_uses_cloakbrowser_runtime():
+    manager = BrowserManager(DOCKER_RUNTIME)
+
+    assert manager._browser_engine({"browser_engine": "system_chrome"}) == "cloakbrowser"
+
+
 # ── launch_args appended to extra_args ────────────────────────────────────────
 
 
