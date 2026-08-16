@@ -8,6 +8,7 @@ ADMIN_USERNAME="${ADMIN_USERNAME:-admin}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-}"
 AUTH_TOKEN="${AUTH_TOKEN:-}"
 SESSION_SECRET="${SESSION_SECRET:-}"
+MANAGER_PORT="${MANAGER_PORT:-8080}"
 
 usage() {
   cat <<'USAGE'
@@ -23,9 +24,10 @@ Options:
   --username NAME       Initial admin username (default: admin)
   --password PASSWORD   Initial admin password (generated if omitted)
   --auth-token TOKEN    Optional API bearer token
+  --port PORT           Local manager port (default: 8080)
 
 Environment variables with the same names are also supported:
-  CLOAK_DOMAIN, INSTALL_DIR, REPO_URL, ADMIN_USERNAME, ADMIN_PASSWORD, AUTH_TOKEN
+  CLOAK_DOMAIN, INSTALL_DIR, REPO_URL, ADMIN_USERNAME, ADMIN_PASSWORD, AUTH_TOKEN, MANAGER_PORT
 USAGE
 }
 
@@ -53,6 +55,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --auth-token)
       AUTH_TOKEN="${2:-}"
+      shift 2
+      ;;
+    --port)
+      MANAGER_PORT="${2:-}"
       shift 2
       ;;
     -h|--help)
@@ -104,6 +110,19 @@ install_base_packages() {
   fi
 }
 
+install_certbot_packages() {
+  if command_exists apt-get; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y nginx certbot python3-certbot-nginx
+  elif command_exists dnf; then
+    dnf install -y nginx certbot python3-certbot-nginx
+  elif command_exists yum; then
+    yum install -y nginx certbot python3-certbot-nginx
+  else
+    echo "Could not install Certbot automatically on this distribution." >&2
+    return 1
+  fi
+}
+
 install_docker() {
   if command_exists docker; then
     return
@@ -122,6 +141,10 @@ open_firewall() {
     firewall-cmd --permanent --add-service=https
     firewall-cmd --reload
   fi
+}
+
+nginx_is_active_proxy() {
+  command_exists nginx && ss -ltnp 2>/dev/null | grep -E ':(80|443)\b' | grep -q nginx
 }
 
 sync_repo() {
@@ -160,6 +183,7 @@ ADMIN_USERNAME=${ADMIN_USERNAME}
 ADMIN_PASSWORD=${ADMIN_PASSWORD}
 AUTH_TOKEN=${AUTH_TOKEN}
 SESSION_SECRET=${SESSION_SECRET}
+MANAGER_PORT=${MANAGER_PORT}
 CLOAKBROWSER_MANAGER_ENGINE=cloakbrowser
 EOF
   chmod 600 .env
@@ -169,7 +193,69 @@ EOF
 
 start_stack() {
   cd "${INSTALL_DIR}"
-  docker compose -f docker-compose.prod.yml up -d --build
+  if nginx_is_active_proxy; then
+    docker compose -f docker-compose.prod.yml up -d --build manager
+  else
+    COMPOSE_PROFILES=caddy docker compose -f docker-compose.prod.yml up -d --build
+  fi
+}
+
+configure_nginx_proxy() {
+  if ! nginx_is_active_proxy; then
+    return
+  fi
+
+  install_certbot_packages || true
+
+  local conf_path
+  if [[ -d /etc/nginx/sites-available && -d /etc/nginx/sites-enabled ]]; then
+    conf_path="/etc/nginx/sites-available/cloakbrowser-manager.conf"
+  else
+    conf_path="/etc/nginx/conf.d/cloakbrowser-manager.conf"
+  fi
+
+  cat > "${conf_path}" <<EOF
+map \$http_upgrade \$cloakbrowser_connection_upgrade {
+  default upgrade;
+  '' close;
+}
+
+server {
+  listen 80;
+  listen [::]:80;
+  server_name ${CLOAK_DOMAIN};
+
+  client_max_body_size 50m;
+
+  location / {
+    proxy_pass http://127.0.0.1:${MANAGER_PORT};
+    proxy_http_version 1.1;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    proxy_set_header Upgrade \$http_upgrade;
+    proxy_set_header Connection \$cloakbrowser_connection_upgrade;
+    proxy_read_timeout 86400;
+  }
+}
+EOF
+
+  if [[ "${conf_path}" == /etc/nginx/sites-available/* ]]; then
+    ln -sf "${conf_path}" /etc/nginx/sites-enabled/cloakbrowser-manager.conf
+  fi
+
+  nginx -t
+  systemctl reload nginx
+
+  if command_exists certbot; then
+    certbot --nginx \
+      -d "${CLOAK_DOMAIN}" \
+      --non-interactive \
+      --agree-tos \
+      --register-unsafely-without-email \
+      --redirect || echo "Certbot failed; HTTP reverse proxy is still configured."
+  fi
 }
 
 install_base_packages
@@ -178,6 +264,7 @@ open_firewall
 sync_repo
 write_env_if_needed
 start_stack
+configure_nginx_proxy
 
 echo
 echo "CloakBrowser Manager is starting."
