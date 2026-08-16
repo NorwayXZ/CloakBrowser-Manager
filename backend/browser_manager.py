@@ -433,9 +433,13 @@ def _build_worker_fingerprint_patch(payload: dict[str, Any]) -> str:
             if (timezone) {
                 const OriginalDateTimeFormat = Intl.DateTimeFormat;
                 const originalGetTimezoneOffset = Date.prototype.getTimezoneOffset;
+                const originalToString = Date.prototype.toString;
+                const originalToDateString = Date.prototype.toDateString;
+                const originalToTimeString = Date.prototype.toTimeString;
                 const originalToLocaleString = Date.prototype.toLocaleString;
                 const originalToLocaleDateString = Date.prototype.toLocaleDateString;
                 const originalToLocaleTimeString = Date.prototype.toLocaleTimeString;
+                const isValidDate = (date) => Number.isFinite(date.getTime());
 
                 patchIntlConstructor('DateTimeFormat', (nextOptions) => {
                     if (!nextOptions.timeZone) nextOptions.timeZone = timezone;
@@ -453,6 +457,9 @@ def _build_worker_fingerprint_patch(payload: dict[str, Any]) -> str:
                 });
 
                 const offsetFor = (date) => {
+                    if (!isValidDate(date)) {
+                        return originalGetTimezoneOffset.call(date);
+                    }
                     try {
                         const parts = Object.fromEntries(
                             offsetFormatter.formatToParts(date)
@@ -494,11 +501,16 @@ def _build_worker_fingerprint_patch(payload: dict[str, Any]) -> str:
                     timeZoneName: 'long',
                 });
 
-                const partsFor = (date) => Object.fromEntries(
-                    englishPartsFormatter.formatToParts(date)
-                        .filter((part) => part.type !== 'literal')
-                        .map((part) => [part.type, part.value])
-                );
+                const partsFor = (date) => {
+                    if (!isValidDate(date)) {
+                        return null;
+                    }
+                    return Object.fromEntries(
+                        englishPartsFormatter.formatToParts(date)
+                            .filter((part) => part.type !== 'literal')
+                            .map((part) => [part.type, part.value])
+                    );
+                };
                 const gmtOffsetFor = (date) => {
                     const offset = offsetFor(date);
                     const sign = offset <= 0 ? '+' : '-';
@@ -516,11 +528,23 @@ def _build_worker_fingerprint_patch(payload: dict[str, Any]) -> str:
                     }
                 };
                 const nativeLikeDateString = (date) => {
+                    if (!isValidDate(date)) {
+                        return originalToDateString.call(date);
+                    }
                     const p = partsFor(date);
+                    if (!p) {
+                        return originalToDateString.call(date);
+                    }
                     return `${p.weekday} ${p.month} ${p.day} ${p.year}`;
                 };
                 const nativeLikeTimeString = (date) => {
+                    if (!isValidDate(date)) {
+                        return originalToTimeString.call(date);
+                    }
                     const p = partsFor(date);
+                    if (!p) {
+                        return originalToTimeString.call(date);
+                    }
                     const hour = p.hour === '24' ? '00' : p.hour;
                     return `${hour}:${p.minute}:${p.second} ${gmtOffsetFor(date)} (${timezoneNameFor(date)})`;
                 };
@@ -532,19 +556,31 @@ def _build_worker_fingerprint_patch(payload: dict[str, Any]) -> str:
                     return nativeLikeTimeString(this);
                 }, 'toTimeString');
                 Date.prototype.toString = markNative(function toString() {
+                    if (!isValidDate(this)) {
+                        return originalToString.call(this);
+                    }
                     return `${nativeLikeDateString(this)} ${nativeLikeTimeString(this)}`;
                 }, 'toString');
                 Date.prototype.toLocaleString = markNative(function toLocaleString(locales, options) {
+                    if (!isValidDate(this)) {
+                        return originalToLocaleString.call(this, locales, options);
+                    }
                     const nextOptions = Object.assign({}, options || {});
                     if (!nextOptions.timeZone) nextOptions.timeZone = timezone;
                     return originalToLocaleString.call(this, defaultLocales(locales), nextOptions);
                 }, 'toLocaleString');
                 Date.prototype.toLocaleDateString = markNative(function toLocaleDateString(locales, options) {
+                    if (!isValidDate(this)) {
+                        return originalToLocaleDateString.call(this, locales, options);
+                    }
                     const nextOptions = Object.assign({}, options || {});
                     if (!nextOptions.timeZone) nextOptions.timeZone = timezone;
                     return originalToLocaleDateString.call(this, defaultLocales(locales), nextOptions);
                 }, 'toLocaleDateString');
                 Date.prototype.toLocaleTimeString = markNative(function toLocaleTimeString(locales, options) {
+                    if (!isValidDate(this)) {
+                        return originalToLocaleTimeString.call(this, locales, options);
+                    }
                     const nextOptions = Object.assign({}, options || {});
                     if (!nextOptions.timeZone) nextOptions.timeZone = timezone;
                     return originalToLocaleTimeString.call(this, defaultLocales(locales), nextOptions);
@@ -770,9 +806,13 @@ def _build_fingerprint_init_script(
 
             if (timezone) {{
                 const originalGetTimezoneOffset = Date.prototype.getTimezoneOffset;
+                const originalToString = Date.prototype.toString;
+                const originalToDateString = Date.prototype.toDateString;
+                const originalToTimeString = Date.prototype.toTimeString;
                 const originalToLocaleString = Date.prototype.toLocaleString;
                 const originalToLocaleDateString = Date.prototype.toLocaleDateString;
                 const originalToLocaleTimeString = Date.prototype.toLocaleTimeString;
+                const isValidDate = (date) => Number.isFinite(date.getTime());
 
                 patchIntlConstructor('DateTimeFormat', (nextOptions) => {{
                     if (!nextOptions.timeZone) nextOptions.timeZone = timezone;
@@ -790,6 +830,9 @@ def _build_fingerprint_init_script(
                 }});
 
                 const offsetFor = (date) => {{
+                    if (!isValidDate(date)) {{
+                        return originalGetTimezoneOffset.call(date);
+                    }}
                     try {{
                         const parts = Object.fromEntries(
                             offsetFormatter.formatToParts(date)
@@ -831,11 +874,16 @@ def _build_fingerprint_init_script(
                     timeZoneName: 'long',
                 }});
 
-                const partsFor = (date) => Object.fromEntries(
-                    englishPartsFormatter.formatToParts(date)
-                        .filter((part) => part.type !== 'literal')
-                        .map((part) => [part.type, part.value])
-                );
+                const partsFor = (date) => {{
+                    if (!isValidDate(date)) {{
+                        return null;
+                    }}
+                    return Object.fromEntries(
+                        englishPartsFormatter.formatToParts(date)
+                            .filter((part) => part.type !== 'literal')
+                            .map((part) => [part.type, part.value])
+                    );
+                }};
                 const gmtOffsetFor = (date) => {{
                     const offset = offsetFor(date);
                     const sign = offset <= 0 ? '+' : '-';
@@ -853,11 +901,23 @@ def _build_fingerprint_init_script(
                     }}
                 }};
                 const nativeLikeDateString = (date) => {{
+                    if (!isValidDate(date)) {{
+                        return originalToDateString.call(date);
+                    }}
                     const p = partsFor(date);
+                    if (!p) {{
+                        return originalToDateString.call(date);
+                    }}
                     return `${{p.weekday}} ${{p.month}} ${{p.day}} ${{p.year}}`;
                 }};
                 const nativeLikeTimeString = (date) => {{
+                    if (!isValidDate(date)) {{
+                        return originalToTimeString.call(date);
+                    }}
                     const p = partsFor(date);
+                    if (!p) {{
+                        return originalToTimeString.call(date);
+                    }}
                     const hour = p.hour === '24' ? '00' : p.hour;
                     return `${{hour}}:${{p.minute}}:${{p.second}} ${{gmtOffsetFor(date)}} (${{timezoneNameFor(date)}})`;
                 }};
@@ -869,19 +929,31 @@ def _build_fingerprint_init_script(
                     return nativeLikeTimeString(this);
                 }}, 'toTimeString');
                 Date.prototype.toString = markNative(function toString() {{
+                    if (!isValidDate(this)) {{
+                        return originalToString.call(this);
+                    }}
                     return `${{nativeLikeDateString(this)}} ${{nativeLikeTimeString(this)}}`;
                 }}, 'toString');
                 Date.prototype.toLocaleString = markNative(function toLocaleString(locales, options) {{
+                    if (!isValidDate(this)) {{
+                        return originalToLocaleString.call(this, locales, options);
+                    }}
                     const nextOptions = Object.assign({{}}, options || {{}});
                     if (!nextOptions.timeZone) nextOptions.timeZone = timezone;
                     return originalToLocaleString.call(this, defaultLocales(locales), nextOptions);
                 }}, 'toLocaleString');
                 Date.prototype.toLocaleDateString = markNative(function toLocaleDateString(locales, options) {{
+                    if (!isValidDate(this)) {{
+                        return originalToLocaleDateString.call(this, locales, options);
+                    }}
                     const nextOptions = Object.assign({{}}, options || {{}});
                     if (!nextOptions.timeZone) nextOptions.timeZone = timezone;
                     return originalToLocaleDateString.call(this, defaultLocales(locales), nextOptions);
                 }}, 'toLocaleDateString');
                 Date.prototype.toLocaleTimeString = markNative(function toLocaleTimeString(locales, options) {{
+                    if (!isValidDate(this)) {{
+                        return originalToLocaleTimeString.call(this, locales, options);
+                    }}
                     const nextOptions = Object.assign({{}}, options || {{}});
                     if (!nextOptions.timeZone) nextOptions.timeZone = timezone;
                     return originalToLocaleTimeString.call(this, defaultLocales(locales), nextOptions);

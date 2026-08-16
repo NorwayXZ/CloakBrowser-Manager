@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -11,6 +12,8 @@ import pytest
 from backend.browser_manager import (
     _accept_language_value,
     _build_locale_timezone_env,
+    _build_fingerprint_init_script,
+    _build_worker_fingerprint_patch,
     _init_profile_defaults,
     _launch_system_chrome_persistent_context_async,
     _normalize_proxy,
@@ -512,6 +515,49 @@ def test_build_locale_timezone_env_sets_process_time_and_language():
     assert env["LANG"] == "en_US.UTF-8"
     assert env["LC_ALL"] == "en_US.UTF-8"
     assert env["LANGUAGE"] == "en_US:en"
+
+
+@pytest.mark.parametrize("mode", ["init", "worker"])
+def test_timezone_patch_keeps_invalid_dates_native(mode: str):
+    if mode == "init":
+        script = _build_fingerprint_init_script(
+            locale=None,
+            timezone="America/New_York",
+            platform="macos",
+        )
+    else:
+        script = _build_worker_fingerprint_patch({
+            "locale": None,
+            "languages": [],
+            "timezone": "America/New_York",
+            "platform": "macos",
+        })
+
+    assert script is not None
+    node_code = f"""
+const patch = {json.dumps(script)};
+eval(patch);
+const value = new Date(NaN);
+console.log(JSON.stringify({{
+  toString: value.toString(),
+  toDateString: value.toDateString(),
+  toTimeString: value.toTimeString(),
+  toLocaleString: value.toLocaleString(),
+}}));
+"""
+    result = subprocess.run(
+        ["node", "-"],
+        input=node_code,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    assert json.loads(result.stdout) == {
+        "toString": "Invalid Date",
+        "toDateString": "Invalid Date",
+        "toTimeString": "Invalid Date",
+        "toLocaleString": "Invalid Date",
+    }
 
 
 def test_init_idempotent(tmp_path: Path):
