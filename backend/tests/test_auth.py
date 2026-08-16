@@ -41,6 +41,24 @@ def client_auth(tmp_db, monkeypatch):
         yield client
 
 
+@pytest.fixture()
+def client_password_auth(tmp_db, monkeypatch):
+    """TestClient with admin username/password auth enabled."""
+    from backend import database as db
+    from backend import main
+
+    monkeypatch.setattr(main, "AUTH_TOKEN", None)
+    db.set_setting("auth.username", "admin")
+    db.set_setting("auth.password_hash", main._hash_password("correct-password"))
+    monkeypatch.setattr(main.browser_mgr.vnc, "validate_available", MagicMock())
+    monkeypatch.setattr(main.browser_mgr, "cleanup_stale", AsyncMock())
+    monkeypatch.setattr(main.browser_mgr, "cleanup_all", AsyncMock())
+    monkeypatch.setattr(main.browser_mgr.vnc, "cleanup_stale", AsyncMock())
+
+    with TestClient(main.app) as client:
+        yield client
+
+
 # ── Group A: AUTH_TOKEN not set ──────────────────────────────────────────────
 
 
@@ -118,6 +136,56 @@ def test_login_correct_sets_cookie(client_auth: TestClient):
 def test_login_wrong_token_401(client_auth: TestClient):
     resp = client_auth.post("/api/auth/login", json={"token": "wrong"})
     assert resp.status_code == 401
+
+
+def test_password_login_sets_signed_cookie(client_password_auth: TestClient):
+    resp = client_password_auth.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": "correct-password"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["username"] == "admin"
+    assert "auth_token" in resp.cookies
+    assert resp.cookies["auth_token"] != "correct-password"
+
+
+def test_password_login_wrong_password_401(client_password_auth: TestClient):
+    resp = client_password_auth.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": "wrong-password"},
+    )
+    assert resp.status_code == 401
+
+
+def test_update_auth_account_changes_username_and_password(client_password_auth: TestClient):
+    login = client_password_auth.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": "correct-password"},
+    )
+    assert login.status_code == 200
+
+    resp = client_password_auth.put(
+        "/api/auth/account",
+        json={
+            "current_password": "correct-password",
+            "username": "owner",
+            "new_password": "new-password-123",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["username"] == "owner"
+
+    old_login = client_password_auth.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": "correct-password"},
+    )
+    assert old_login.status_code == 401
+
+    new_login = client_password_auth.post(
+        "/api/auth/login",
+        json={"username": "owner", "password": "new-password-123"},
+    )
+    assert new_login.status_code == 200
 
 
 def test_logout_clears_cookie(client_auth: TestClient):

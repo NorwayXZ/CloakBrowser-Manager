@@ -56,11 +56,11 @@ export function ProfileViewer({ profileId, cdpUrl, clipboardSync: initialClipboa
         });
 
         rfb.addEventListener("securityfailure", (e: any) => {
-          setError(`Security failure: ${e.detail.reason}`);
+          setError(`安全校验失败：${e.detail.reason}`);
         });
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to connect");
+          setError(err instanceof Error ? err.message : "连接失败");
         }
       }
     }
@@ -232,7 +232,7 @@ export function ProfileViewer({ profileId, cdpUrl, clipboardSync: initialClipboa
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-center">
-          <p className="text-red-400 text-sm mb-2">Connection failed</p>
+          <p className="text-red-400 text-sm mb-2">连接失败</p>
           <p className="text-gray-500 text-xs">{error}</p>
         </div>
       </div>
@@ -246,7 +246,7 @@ export function ProfileViewer({ profileId, cdpUrl, clipboardSync: initialClipboa
         <div className="flex items-center gap-2">
           <span className={`h-2 w-2 rounded-full ${connected ? "bg-emerald-400" : "bg-yellow-400 animate-pulse"}`} />
           <span className="text-xs text-gray-400">
-            {connected ? "Connected" : "Connecting..."}
+            {connected ? "已连接" : "连接中..."}
           </span>
         </div>
         <div className="flex items-center gap-1">
@@ -254,7 +254,7 @@ export function ProfileViewer({ profileId, cdpUrl, clipboardSync: initialClipboa
           <button
             onClick={() => { console.log("[clipboard] toggle:", !clipboardSync); setClipboardSync(!clipboardSync); }}
             className={`p-1 ${clipboardSync ? "text-accent" : "text-gray-500 hover:text-gray-300"}`}
-            title={clipboardSync ? "Disable clipboard sync" : "Enable clipboard sync"}
+            title={clipboardSync ? "关闭剪贴板同步" : "开启剪贴板同步"}
             disabled={!connected}
           >
             <ClipboardCopy className="h-3.5 w-3.5" />
@@ -262,7 +262,7 @@ export function ProfileViewer({ profileId, cdpUrl, clipboardSync: initialClipboa
           <button
             onClick={toggleFullscreen}
             className="text-gray-500 hover:text-gray-300 p-1"
-            title={fullscreen ? "Exit fullscreen" : "Fullscreen"}
+            title={fullscreen ? "退出全屏" : "全屏"}
           >
             {fullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
           </button>

@@ -17,6 +17,9 @@ Free, self-hosted alternative to Multilogin, GoLogin, and AdsPower.
 
 ---
 
+> 中文说明与一键服务器安装见 [README.zh-CN.md](README.zh-CN.md)。
+> This fork adds Chinese UI polish, proxy testing, Apple Silicon profile presets, username/password auth, and a production Docker + Caddy installer.
+
 <p align="center">
 <img src="https://i.imgur.com/twdX81Q.png" width="800" alt="CloakBrowser Manager — Browser View">
 <br>
@@ -40,6 +43,14 @@ The first run creates a local Python environment, installs dependencies, builds 
 
 ```bash
 docker run -p 127.0.0.1:8080:8080 -v cloakprofiles:/data cloakhq/cloakbrowser-manager
+```
+
+Production install with HTTPS reverse proxy:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/NorwayXZ/CloakBrowser-Manager/main/install.sh -o install.sh
+chmod +x install.sh
+sudo ./install.sh --domain cloak.example.com
 ```
 
 Or build from source:
@@ -169,25 +180,32 @@ Then open `http://localhost:8080`.
 
 ## Authentication
 
-By default, there is no authentication (ideal for local use). To protect the web UI and API when hosting on a network, set the `AUTH_TOKEN` environment variable:
+By default, there is no authentication (ideal for local use). For hosted installs, use `ADMIN_USERNAME` and `ADMIN_PASSWORD`:
 
 ```bash
-docker run -p 8080:8080 -v cloakprofiles:/data -e AUTH_TOKEN=your-secret-token cloakhq/cloakbrowser-manager
+docker run \
+  -p 8080:8080 \
+  -v cloakprofiles:/data \
+  -e ADMIN_USERNAME=admin \
+  -e ADMIN_PASSWORD=your-strong-password \
+  cloakhq/cloakbrowser-manager
 ```
 
-Or in `docker-compose.yml`:
+Or in compose:
 
 ```yaml
 environment:
-  - AUTH_TOKEN=your-secret-token
+  - ADMIN_USERNAME=admin
+  - ADMIN_PASSWORD=your-strong-password
 ```
 
-When `AUTH_TOKEN` is set:
+The first startup stores the admin account in SQLite. You can later change the username/password from the web UI.
 
-- The web UI shows a login page. Enter the token to unlock.
+`AUTH_TOKEN` is still supported for API clients:
+
 - API consumers pass the token via `Authorization: Bearer <token>` header.
-- VNC WebSocket connections are authenticated via the login cookie.
-- The `/api/status` endpoint remains unauthenticated (for Docker healthcheck).
+- Legacy token login/cookies continue to work when `AUTH_TOKEN` is set.
+- The `/api/status` endpoint remains unauthenticated for Docker healthcheck.
 
 > **Note**: The auth token is transmitted in cleartext over HTTP. If you expose the Manager to the internet, put it behind a reverse proxy with HTTPS (Caddy, nginx, Traefik).
 

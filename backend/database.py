@@ -37,6 +37,8 @@ def init_db():
             CREATE TABLE IF NOT EXISTS profiles (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
+                browser_engine TEXT DEFAULT 'auto',
+                device_profile TEXT,
                 fingerprint_seed INTEGER NOT NULL,
                 proxy TEXT,
                 timezone TEXT,
@@ -67,6 +69,12 @@ def init_db():
                 color TEXT,
                 PRIMARY KEY (profile_id, tag)
             );
+
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
         """)
         conn.commit()
 
@@ -81,10 +89,44 @@ def init_db():
         if "auto_launch" not in cols:
             conn.execute("ALTER TABLE profiles ADD COLUMN auto_launch BOOLEAN DEFAULT 0")
             conn.commit()
+        if "browser_engine" not in cols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN browser_engine TEXT DEFAULT 'auto'")
+            conn.commit()
+        if "device_profile" not in cols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN device_profile TEXT")
+            conn.commit()
 
 
 def _now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def get_setting(key: str) -> str | None:
+    with get_db() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else None
+
+
+def set_setting(key: str, value: str) -> None:
+    now = _now()
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO settings (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = excluded.updated_at
+            """,
+            (key, value, now),
+        )
+        conn.commit()
+
+
+def delete_setting(key: str) -> None:
+    with get_db() as conn:
+        conn.execute("DELETE FROM settings WHERE key = ?", (key,))
+        conn.commit()
 
 
 def create_profile(
@@ -101,14 +143,17 @@ def create_profile(
     with get_db() as conn:
         conn.execute(
             """INSERT INTO profiles (
-                id, name, fingerprint_seed, proxy, timezone, locale, platform,
+                id, name, browser_engine, device_profile, fingerprint_seed, proxy, timezone, locale, platform,
                 user_agent, screen_width, screen_height, gpu_vendor, gpu_renderer,
                 hardware_concurrency, humanize, human_preset, headless, geoip,
                 clipboard_sync, auto_launch, color_scheme, launch_args, notes,
                 user_data_dir, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                profile_id, name, seed,
+                profile_id, name,
+                fields.get("browser_engine", "auto"),
+                fields.get("device_profile"),
+                seed,
                 fields.get("proxy"),
                 fields.get("timezone"),
                 fields.get("locale"),
@@ -185,9 +230,11 @@ def update_profile(profile_id: str, **fields: Any) -> dict[str, Any] | None:
     # Pre-serialize launch_args to JSON before the generic update loop
     if "launch_args" in fields:
         fields["launch_args"] = json.dumps(fields["launch_args"] or [])
+    if fields.get("fingerprint_seed") is None:
+        fields.pop("fingerprint_seed", None)
 
     for col in (
-        "name", "fingerprint_seed", "proxy", "timezone", "locale", "platform",
+        "name", "browser_engine", "device_profile", "fingerprint_seed", "proxy", "timezone", "locale", "platform",
         "user_agent", "screen_width", "screen_height", "gpu_vendor", "gpu_renderer",
         "hardware_concurrency", "humanize", "human_preset", "headless", "geoip",
         "clipboard_sync", "auto_launch", "color_scheme", "launch_args", "notes",

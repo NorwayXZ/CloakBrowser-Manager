@@ -22,7 +22,7 @@ export function CdpEndpointButton({ cdpUrl }: CdpEndpointButtonProps) {
     <button
       onClick={copyEndpoint}
       className={`p-1 ${copied ? "text-emerald-400" : "text-gray-500 hover:text-gray-300"}`}
-      title={copied ? "Copied!" : "Copy CDP endpoint URL"}
+      title={copied ? "已复制" : "复制 CDP 地址"}
     >
       <Code2 className="h-3.5 w-3.5" />
     </button>

@@ -12,7 +12,7 @@ export function useProfiles() {
       setProfiles(data);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to fetch profiles");
+      setError(err instanceof Error ? err.message : "获取配置失败");
     } finally {
       setLoading(false);
     }
@@ -32,7 +32,7 @@ export function useProfiles() {
         setProfiles((prev) => [profile, ...prev]);
         return profile;
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to create profile");
+        setError(err instanceof Error ? err.message : "创建配置失败");
       }
     },
     [],
@@ -45,7 +45,7 @@ export function useProfiles() {
         setProfiles((prev) => prev.map((p) => (p.id === id ? profile : p)));
         return profile;
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to update profile");
+        setError(err instanceof Error ? err.message : "保存配置失败");
       }
     },
     [],
@@ -57,7 +57,7 @@ export function useProfiles() {
         await api.deleteProfile(id);
         setProfiles((prev) => prev.filter((p) => p.id !== id));
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to delete profile");
+        setError(err instanceof Error ? err.message : "删除配置失败");
       }
     },
     [],
@@ -70,7 +70,7 @@ export function useProfiles() {
         await refresh();
         return result;
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to launch profile");
+        setError(err instanceof Error ? err.message : "启动配置失败");
       }
     },
     [refresh],
@@ -82,7 +82,7 @@ export function useProfiles() {
         await api.stopProfile(id);
         await refresh();
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to stop profile");
+        setError(err instanceof Error ? err.message : "停止配置失败");
       }
     },
     [refresh],

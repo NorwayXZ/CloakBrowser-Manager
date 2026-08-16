@@ -9,8 +9,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from backend.browser_manager import (
+    _accept_language_value,
+    _build_locale_timezone_env,
     _init_profile_defaults,
     _normalize_proxy,
+    _sync_profile_locale,
     _validate_proxy,
     BrowserManager,
     RunningProfile,
@@ -398,6 +401,38 @@ def test_init_creates_preferences(tmp_path: Path):
     assert "DuckDuckGo" in data["default_search_provider_data"]["template_url_data"]["short_name"]
 
 
+def test_accept_language_value_adds_base_language():
+    assert _accept_language_value("en-US") == "en-US,en"
+    assert _accept_language_value("zh-HK") == "zh-HK,zh"
+
+
+def test_sync_profile_locale_updates_chrome_preferences(tmp_path: Path):
+    _init_profile_defaults(tmp_path)
+    _sync_profile_locale(tmp_path, "en-US")
+
+    prefs = json.loads((tmp_path / "Default" / "Preferences").read_text())
+    assert prefs["intl"]["accept_languages"] == "en-US,en"
+    assert prefs["intl"]["selected_languages"] == "en-US,en"
+    assert prefs["translate"]["enabled"] is False
+
+    local_state = json.loads((tmp_path / "Local State").read_text())
+    assert local_state["intl"]["app_locale"] == "en-US"
+
+
+def test_build_locale_timezone_env_sets_process_time_and_language():
+    env = _build_locale_timezone_env(
+        locale="en-US",
+        timezone="America/New_York",
+        display=None,
+    )
+
+    assert env is not None
+    assert env["TZ"] == "America/New_York"
+    assert env["LANG"] == "en_US.UTF-8"
+    assert env["LC_ALL"] == "en_US.UTF-8"
+    assert env["LANGUAGE"] == "en_US:en"
+
+
 def test_init_idempotent(tmp_path: Path):
     _init_profile_defaults(tmp_path)
     bookmarks_path = tmp_path / "Default" / "Bookmarks"
@@ -409,3 +444,37 @@ def test_init_idempotent(tmp_path: Path):
     # Second call should NOT overwrite (file already exists)
     _init_profile_defaults(tmp_path)
     assert bookmarks_path.read_text() == "SENTINEL"
+
+
+@pytest.mark.asyncio
+async def test_launch_applies_locale_timezone_to_process_and_page(
+    monkeypatch,
+    tmp_path: Path,
+):
+    from backend import browser_manager as module
+
+    context = MagicMock()
+    context.pages = []
+    context.add_init_script = AsyncMock()
+    manager = BrowserManager(NATIVE_RUNTIME)
+    manager._wait_for_cdp = AsyncMock()
+    launch = AsyncMock(return_value=context)
+    monkeypatch.setattr(module, "launch_persistent_context_async", launch)
+
+    profile = _launch_profile(tmp_path)
+    profile["locale"] = "en-US"
+    profile["timezone"] = "America/New_York"
+
+    await manager.launch(profile)
+
+    options = launch.await_args.kwargs
+    assert options["locale"] == "en-US"
+    assert options["timezone"] == "America/New_York"
+    assert "--lang=en-US" in options["args"]
+    assert "--accept-lang=en-US,en" in options["args"]
+    assert options["env"]["TZ"] == "America/New_York"
+    assert options["env"]["LANG"] == "en_US.UTF-8"
+
+    init_scripts = [call.args[0] for call in context.add_init_script.await_args_list]
+    assert any("Navigator.prototype" in script for script in init_scripts)
+    assert any("Date.prototype.getTimezoneOffset" in script for script in init_scripts)

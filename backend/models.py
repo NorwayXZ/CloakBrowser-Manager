@@ -8,9 +8,13 @@ from pydantic import BaseModel, Field, field_validator
 
 from .runtime import HostOS, RuntimeMode, ViewerMode
 
+BrowserEngine = Literal["auto", "system_chrome", "cloakbrowser"]
+
 
 class ProfileCreate(BaseModel):
     name: str
+    browser_engine: BrowserEngine = "auto"
+    device_profile: str | None = None
     fingerprint_seed: int | None = None  # random if not set
     proxy: str | None = None  # "http://user:pass@host:port" or null
     timezone: str | None = None  # "America/New_York"
@@ -36,6 +40,8 @@ class ProfileCreate(BaseModel):
 
 class ProfileUpdate(BaseModel):
     name: str | None = None
+    browser_engine: BrowserEngine | None = None
+    device_profile: str | None = Field(default=None)
     fingerprint_seed: int | None = None
     proxy: str | None = Field(default=None)
     timezone: str | None = Field(default=None)
@@ -72,6 +78,8 @@ class TagResponse(BaseModel):
 class ProfileResponse(BaseModel):
     id: str
     name: str
+    browser_engine: str | None = None
+    device_profile: str | None = None
     fingerprint_seed: int
     proxy: str | None = None
     timezone: str | None = None
@@ -117,6 +125,7 @@ class LaunchResponse(BaseModel):
     vnc_ws_port: int | None = None
     display: str | None = None
     cdp_url: str | None = None
+    browser_engine: str | None = None
 
 
 class StatusResponse(BaseModel):
@@ -128,6 +137,24 @@ class StatusResponse(BaseModel):
     viewer_mode: ViewerMode
 
 
+class ProxyTestRequest(BaseModel):
+    proxy: str
+
+
+class ProxyTestResponse(BaseModel):
+    ok: bool = True
+    ip: str | None = None
+    country: str | None = None
+    country_code: str | None = None
+    suggested_locale: str | None = None
+    region: str | None = None
+    city: str | None = None
+    timezone: str | None = None
+    org: str | None = None
+    asn: str | None = None
+    source: str = "ipapi.co"
+
+
 class ProfileStatusResponse(BaseModel):
     status: str  # "running" | "stopped"
     runtime_mode: RuntimeMode
@@ -135,6 +162,7 @@ class ProfileStatusResponse(BaseModel):
     vnc_ws_port: int | None = None
     display: str | None = None
     cdp_url: str | None = None
+    browser_engine: str | None = None
 
 
 class ClipboardRequest(BaseModel):
@@ -142,4 +170,12 @@ class ClipboardRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    token: str
+    username: str | None = None
+    password: str | None = None
+    token: str | None = None
+
+
+class AuthAccountUpdate(BaseModel):
+    current_password: str
+    username: str | None = Field(default=None, min_length=3, max_length=64)
+    new_password: str | None = Field(default=None, min_length=8, max_length=256)

@@ -1,0 +1,37 @@
+services:
+  manager:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - manager_data:/data
+    environment:
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
+      - AUTH_TOKEN=${AUTH_TOKEN:-}
+      - SESSION_SECRET=${SESSION_SECRET:-}
+      - CLOAKBROWSER_MANAGER_ENGINE=${CLOAKBROWSER_MANAGER_ENGINE:-cloakbrowser}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/api/status')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - manager
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - CLOAK_DOMAIN=${CLOAK_DOMAIN:?Set CLOAK_DOMAIN in .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  manager_data:
+  caddy_data:
+  caddy_config:

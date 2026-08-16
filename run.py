@@ -94,6 +94,7 @@ def _ensure_environment() -> Path:
 
 def _ensure_server_port_available() -> None:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
+        server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             server_socket.bind(("127.0.0.1", 8080))
         except OSError as exc:

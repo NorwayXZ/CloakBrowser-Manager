@@ -7,11 +7,16 @@ for browser profile management with live VNC viewing.
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 import hmac
+import json
 import logging
 import os
+import secrets
 import struct
 import shutil
+import time
 from contextlib import asynccontextmanager
 from http.cookies import SimpleCookie
 from pathlib import Path
@@ -25,14 +30,18 @@ import starlette.requests
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from . import database as db
-from .browser_manager import BrowserManager
+from .browser_manager import BrowserManager, _normalize_proxy, _validate_proxy
+from .proxy_geo import fetch_proxy_geo
 from .models import (
+    AuthAccountUpdate,
     ClipboardRequest,
     LaunchResponse,
     LoginRequest,
     ProfileCreate,
     ProfileResponse,
     ProfileStatusResponse,
+    ProxyTestRequest,
+    ProxyTestResponse,
     ProfileUpdate,
     StatusResponse,
     TagResponse,
@@ -45,18 +54,136 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("asyncio").setLevel(logging.WARNING)
 
-# Optional authentication via AUTH_TOKEN env var.
-# If not set, all routes are open (local dev). If set, all /api/* routes
-# (except /api/auth/* and /api/status) require Bearer token or cookie.
+# Optional authentication. Local installs can run without auth. Hosted installs
+# can set ADMIN_USERNAME + ADMIN_PASSWORD for browser login, and/or AUTH_TOKEN
+# for API/Bearer-token compatibility.
 AUTH_TOKEN: str | None = os.environ.get("AUTH_TOKEN") or None
+ADMIN_USERNAME_ENV: str | None = os.environ.get("ADMIN_USERNAME") or None
+ADMIN_PASSWORD_ENV: str | None = os.environ.get("ADMIN_PASSWORD") or None
+
+_AUTH_USERNAME_KEY = "auth.username"
+_AUTH_PASSWORD_KEY = "auth.password_hash"
+_AUTH_COOKIE_NAME = "auth_token"
+_AUTH_SESSION_TTL = 30 * 24 * 60 * 60
+_PBKDF2_ITERATIONS = 260_000
 
 # Paths that bypass authentication even when AUTH_TOKEN is set
 _AUTH_EXEMPT = frozenset({"/api/auth/status", "/api/auth/login", "/api/status"})
 
 
+def _setting(key: str) -> str | None:
+    try:
+        return db.get_setting(key)
+    except Exception as exc:
+        logger.debug("Auth setting read skipped for %s: %s", key, exc)
+        return None
+
+
+def _hash_password(password: str) -> str:
+    salt = secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt.encode("ascii"), _PBKDF2_ITERATIONS
+    ).hex()
+    return f"pbkdf2_sha256${_PBKDF2_ITERATIONS}${salt}${digest}"
+
+
+def _verify_password(password: str, stored: str | None) -> bool:
+    if not password or not stored:
+        return False
+    try:
+        algo, rounds_raw, salt, expected = stored.split("$", 3)
+        if algo != "pbkdf2_sha256":
+            return False
+        rounds = int(rounds_raw)
+        actual = hashlib.pbkdf2_hmac(
+            "sha256", password.encode("utf-8"), salt.encode("ascii"), rounds
+        ).hex()
+    except (TypeError, ValueError):
+        return False
+    return hmac.compare_digest(actual, expected)
+
+
+def _auth_username() -> str:
+    return _setting(_AUTH_USERNAME_KEY) or ADMIN_USERNAME_ENV or "admin"
+
+
+def _auth_required() -> bool:
+    return bool(AUTH_TOKEN or _setting(_AUTH_PASSWORD_KEY))
+
+
+def _ensure_auth_bootstrap() -> None:
+    """Create the first admin account from env vars, without overwriting edits."""
+    if _setting(_AUTH_PASSWORD_KEY):
+        if not _setting(_AUTH_USERNAME_KEY):
+            db.set_setting(_AUTH_USERNAME_KEY, ADMIN_USERNAME_ENV or "admin")
+        return
+
+    password = ADMIN_PASSWORD_ENV or AUTH_TOKEN
+    if not password:
+        return
+
+    db.set_setting(_AUTH_USERNAME_KEY, ADMIN_USERNAME_ENV or "admin")
+    db.set_setting(_AUTH_PASSWORD_KEY, _hash_password(password))
+
+
+def _verify_admin_password(password: str) -> bool:
+    if _verify_password(password, _setting(_AUTH_PASSWORD_KEY)):
+        return True
+    return bool(AUTH_TOKEN and hmac.compare_digest(password or "", AUTH_TOKEN))
+
+
+def _b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+
+def _b64url_decode(value: str) -> bytes:
+    return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+
+
+def _session_secret() -> bytes:
+    seed = "\0".join((
+        os.environ.get("SESSION_SECRET", ""),
+        _setting(_AUTH_PASSWORD_KEY) or "",
+        AUTH_TOKEN or "",
+    ))
+    return hashlib.sha256(seed.encode("utf-8")).digest()
+
+
+def _make_session_cookie(username: str) -> str:
+    payload = _b64url(json.dumps(
+        {"u": username, "iat": int(time.time())},
+        separators=(",", ":"),
+    ).encode("utf-8"))
+    sig = _b64url(hmac.new(_session_secret(), payload.encode("ascii"), hashlib.sha256).digest())
+    return f"v1.{payload}.{sig}"
+
+
+def _verify_session_cookie(value: str) -> bool:
+    if AUTH_TOKEN and hmac.compare_digest(value, AUTH_TOKEN):
+        return True
+    try:
+        version, payload, sig = value.split(".", 2)
+        if version != "v1":
+            return False
+        expected = _b64url(hmac.new(
+            _session_secret(), payload.encode("ascii"), hashlib.sha256
+        ).digest())
+        if not hmac.compare_digest(sig, expected):
+            return False
+        data = json.loads(_b64url_decode(payload))
+        if not isinstance(data, dict):
+            return False
+        issued_at = int(data.get("iat", 0))
+        if issued_at <= 0 or time.time() - issued_at > _AUTH_SESSION_TTL:
+            return False
+        return data.get("u") == _auth_username()
+    except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
+        return False
+
+
 def _check_auth(scope: Scope) -> bool:
     """Check if the request has a valid auth token (header or cookie)."""
-    if AUTH_TOKEN is None:
+    if not _auth_required():
         return True
 
     # Check Authorization: Bearer <token> header
@@ -65,18 +192,18 @@ def _check_auth(scope: Scope) -> bool:
             auth_value = val.decode()
             if auth_value.startswith("Bearer "):
                 token = auth_value[7:]
-                if token and hmac.compare_digest(token, AUTH_TOKEN):
+                if AUTH_TOKEN and token and hmac.compare_digest(token, AUTH_TOKEN):
                     return True
             break
 
-    # Check auth_token cookie
+    # Check signed session cookie, or legacy AUTH_TOKEN cookie
     for key, val in scope.get("headers", []):
         if key == b"cookie":
             cookies = SimpleCookie()
             cookies.load(val.decode())
-            if "auth_token" in cookies:
-                cookie_val = cookies["auth_token"].value
-                if cookie_val and hmac.compare_digest(cookie_val, AUTH_TOKEN):
+            if _AUTH_COOKIE_NAME in cookies:
+                cookie_val = cookies[_AUTH_COOKIE_NAME].value
+                if cookie_val and _verify_session_cookie(cookie_val):
                     return True
             break
 
@@ -150,8 +277,8 @@ class AuthMiddleware:
         self.app = app
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send):
-        # Pass through if auth disabled, or non-HTTP/WS scope (e.g. lifespan)
-        if not AUTH_TOKEN or scope["type"] not in ("http", "websocket"):
+        # Pass through non-HTTP/WS scopes (e.g. lifespan)
+        if scope["type"] not in ("http", "websocket"):
             await self.app(scope, receive, send)
             return
 
@@ -159,6 +286,10 @@ class AuthMiddleware:
 
         # Skip auth for exempt endpoints and non-API paths (static frontend)
         if path in _AUTH_EXEMPT or not path.startswith("/api/"):
+            await self.app(scope, receive, send)
+            return
+
+        if not _auth_required():
             await self.app(scope, receive, send)
             return
 
@@ -379,6 +510,7 @@ def _filter_rfb_client_messages(data: bytes) -> bytes:
 async def lifespan(app: FastAPI):
     browser_mgr.vnc.validate_available()
     db.init_db()
+    _ensure_auth_bootstrap()
     await browser_mgr.cleanup_stale()
     browser_mgr._auto_launch_task = asyncio.create_task(browser_mgr.auto_launch_all())
     logger.info("CloakBrowser Manager started")
@@ -403,35 +535,91 @@ async def auth_status(request: starlette.requests.Request):
 
     Exempt from auth middleware so the frontend can always call it.
     """
-    authenticated = False
-    if AUTH_TOKEN:
-        authenticated = _check_auth(request.scope)
-    return {"auth_required": AUTH_TOKEN is not None, "authenticated": authenticated}
+    required = _auth_required()
+    authenticated = _check_auth(request.scope) if required else False
+    return {
+        "auth_required": required,
+        "authenticated": authenticated,
+        "username": _auth_username() if required else None,
+    }
 
 
 @app.post("/api/auth/login")
 async def auth_login(body: LoginRequest, request: Request, response: Response):
-    if not AUTH_TOKEN:
+    if not _auth_required():
         return {"ok": True}
-    if not body.token or not hmac.compare_digest(body.token, AUTH_TOKEN):
-        raise HTTPException(status_code=401, detail="Invalid token")
+
     is_https = _is_https(request)
+
+    if body.token and AUTH_TOKEN and hmac.compare_digest(body.token, AUTH_TOKEN):
+        response.set_cookie(
+            key=_AUTH_COOKIE_NAME,
+            value=AUTH_TOKEN,
+            httponly=True,
+            samesite="strict",
+            secure=is_https,
+            path="/",
+            max_age=_AUTH_SESSION_TTL,
+        )
+        return {"ok": True, "username": _auth_username()}
+
+    username = (body.username or "").strip()
+    password = body.password or ""
+    if username != _auth_username() or not _verify_admin_password(password):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+
     response.set_cookie(
-        key="auth_token",
-        value=AUTH_TOKEN,
+        key=_AUTH_COOKIE_NAME,
+        value=_make_session_cookie(username),
         httponly=True,
         samesite="strict",
         secure=is_https,
         path="/",
+        max_age=_AUTH_SESSION_TTL,
     )
-    return {"ok": True}
+    return {"ok": True, "username": username}
+
+
+@app.get("/api/auth/account")
+async def auth_account():
+    if not _auth_required():
+        return {"username": None}
+    return {"username": _auth_username()}
+
+
+@app.put("/api/auth/account")
+async def auth_account_update(body: AuthAccountUpdate, request: Request, response: Response):
+    if not _auth_required():
+        raise HTTPException(status_code=400, detail="当前没有开启登录保护")
+    if not _verify_admin_password(body.current_password):
+        raise HTTPException(status_code=401, detail="当前密码错误")
+
+    username = (body.username or _auth_username()).strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="用户名不能为空")
+
+    db.set_setting(_AUTH_USERNAME_KEY, username)
+    if body.new_password:
+        db.set_setting(_AUTH_PASSWORD_KEY, _hash_password(body.new_password))
+
+    is_https = _is_https(request)
+    response.set_cookie(
+        key=_AUTH_COOKIE_NAME,
+        value=_make_session_cookie(username),
+        httponly=True,
+        samesite="strict",
+        secure=is_https,
+        path="/",
+        max_age=_AUTH_SESSION_TTL,
+    )
+    return {"ok": True, "username": username}
 
 
 @app.post("/api/auth/logout")
 async def auth_logout(request: Request, response: Response):
     is_https = _is_https(request)
     response.delete_cookie(
-        key="auth_token", path="/", secure=is_https, samesite="strict",
+        key=_AUTH_COOKIE_NAME, path="/", secure=is_https, samesite="strict",
     )
     return {"ok": True}
 
@@ -440,7 +628,7 @@ async def auth_logout(request: Request, response: Response):
 
 
 def _profile_response(profile: dict) -> ProfileResponse:
-    payload = {**profile, **browser_mgr.get_status(profile["id"])}
+    payload = {**profile, **browser_mgr.get_status(profile["id"], profile)}
     payload["tags"] = [TagResponse(**tag) for tag in profile.get("tags", [])]
     return ProfileResponse(**payload)
 
@@ -531,6 +719,7 @@ async def launch_profile(profile_id: str):
         vnc_ws_port=running.ws_port,
         display=f":{running.display}" if running.display is not None else None,
         cdp_url=f"/api/profiles/{profile_id}/cdp",
+        browser_engine=running.browser_engine,
     )
 
 
@@ -547,8 +736,24 @@ async def get_profile_status(profile_id: str):
     profile = db.get_profile(profile_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
-    status = browser_mgr.get_status(profile_id)
+    status = browser_mgr.get_status(profile_id, profile)
     return ProfileStatusResponse(**status)
+
+
+@app.get("/api/profiles/{profile_id}/fingerprint-report")
+async def get_fingerprint_report(profile_id: str):
+    profile = db.get_profile(profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    if profile_id not in browser_mgr.running:
+        raise HTTPException(status_code=409, detail="请先启动浏览器，再运行指纹自检")
+    try:
+        return await browser_mgr.fingerprint_report(profile)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Fingerprint report failed for %s: %s", profile_id, exc)
+        raise HTTPException(status_code=500, detail="指纹自检失败") from exc
 
 
 # ── System Status ─────────────────────────────────────────────────────────────
@@ -574,6 +779,26 @@ async def get_system_status():
         runtime_mode=browser_mgr.runtime.runtime_mode,
         viewer_mode=browser_mgr.runtime.viewer_mode,
     )
+
+
+@app.post("/api/proxy/test", response_model=ProxyTestResponse)
+async def test_proxy(req: ProxyTestRequest):
+    raw_proxy = req.proxy.strip()
+    if not raw_proxy:
+        raise HTTPException(status_code=400, detail="请先填写代理")
+
+    try:
+        proxy = _normalize_proxy(raw_proxy)
+        _validate_proxy(proxy)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"代理格式无效：{exc}") from exc
+
+    try:
+        data = await fetch_proxy_geo(proxy)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"代理测试失败：{exc}") from exc
+
+    return ProxyTestResponse(**data)
 
 
 # ── Clipboard Relay ──────────────────────────────────────────────────────────

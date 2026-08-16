@@ -1,0 +1,4 @@
+{$CLOAK_DOMAIN} {
+  encode zstd gzip
+  reverse_proxy manager:8080
+}

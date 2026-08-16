@@ -3,11 +3,13 @@ import { Lock } from "lucide-react";
 import { api } from "../lib/api";
 
 interface LoginPageProps {
-  onSuccess: () => void;
+  onSuccess: (username?: string | null) => void;
+  initialUsername?: string | null;
 }
 
-export function LoginPage({ onSuccess }: LoginPageProps) {
-  const [token, setToken] = useState("");
+export function LoginPage({ onSuccess, initialUsername }: LoginPageProps) {
+  const [username, setUsername] = useState(initialUsername || "admin");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -16,10 +18,10 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
     setLoading(true);
     setError(null);
     try {
-      await api.login(token);
-      onSuccess();
+      const result = await api.login(username.trim(), password);
+      onSuccess(result.username);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      setError(err instanceof Error ? err.message : "登录失败");
     } finally {
       setLoading(false);
     }
@@ -35,24 +37,31 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
           <h1 className="text-lg font-semibold text-gray-100">
             CloakBrowser Manager
           </h1>
-          <p className="text-xs text-gray-500 mt-1">Enter your access token</p>
+          <p className="text-xs text-gray-500 mt-1">输入管理员账号和密码</p>
         </div>
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} className="space-y-3">
           <input
-            type="password"
-            className="input mb-3"
-            placeholder="Access token"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
+            type="text"
+            className="input"
+            placeholder="用户名"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
             autoFocus
           />
-          {error && <p className="text-red-400 text-xs mb-3">{error}</p>}
+          <input
+            type="password"
+            className="input"
+            placeholder="密码"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+          {error && <p className="text-red-400 text-xs">{error}</p>}
           <button
             type="submit"
-            disabled={loading || !token}
+            disabled={loading || !username.trim() || !password}
             className="btn-primary w-full disabled:opacity-50"
           >
-            {loading ? "Authenticating..." : "Unlock"}
+            {loading ? "登录中..." : "登录"}
           </button>
         </form>
       </div>
