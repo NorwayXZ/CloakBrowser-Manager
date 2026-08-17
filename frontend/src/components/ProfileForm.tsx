@@ -364,6 +364,7 @@ export function ProfileForm({
         gpu_vendor: profile.gpu_vendor,
         gpu_renderer: profile.gpu_renderer,
         hardware_concurrency: profile.hardware_concurrency,
+        device_memory: profile.device_memory,
         humanize: profile.humanize,
         human_preset: profile.human_preset,
         headless: profile.headless,
@@ -1043,7 +1044,7 @@ export function ProfileForm({
                       ))}
                       <option value="custom">自定义</option>
                     </select>
-                    <div className="mt-1 text-xs text-slate-500">分辨率要和设备画像匹配，例如 Windows 笔记本常见 1920 × 1200，MacBook Pro 14 常见 3024 × 1964。</div>
+                    <div className="mt-1 text-xs text-slate-500">这里填写浏览器看到的逻辑分辨率，不是 Retina 面板物理像素。例如 MacBook Pro 14 默认常见 1512 × 982。</div>
                   </div>
 
                   {currentResolution === "custom" && (
@@ -1079,6 +1080,21 @@ export function ProfileForm({
                       placeholder="按画像或真实设备"
                     />
                     <div className="mt-1 text-xs text-slate-500">留空表示稳定原生使用真实 CPU；伪装画像会按当前系统画像预设推荐线程数。</div>
+                  </div>
+
+                  <label className="pt-2 text-right text-sm font-medium text-slate-600">浏览器内存</label>
+                  <div>
+                    <select
+                      className="input max-w-sm"
+                      value={form.device_memory ?? ""}
+                      onChange={(e) => set("device_memory", e.target.value ? Number(e.target.value) : null)}
+                    >
+                      <option value="">按真实设备</option>
+                      <option value="2">2 GB</option>
+                      <option value="4">4 GB</option>
+                      <option value="8">8 GB</option>
+                    </select>
+                    <div className="mt-1 text-xs text-slate-500">Chrome 的 navigator.deviceMemory 只暴露粗略值并且最高为 8 GB；画像默认使用 8，不虚构 16/32/64 GB。</div>
                   </div>
 
                   <label className="pt-2 text-right text-sm font-medium text-slate-600">GPU 预设</label>

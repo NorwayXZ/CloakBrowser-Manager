@@ -27,6 +27,7 @@ class ProfileCreate(BaseModel):
     gpu_vendor: str | None = None
     gpu_renderer: str | None = None
     hardware_concurrency: int | None = None
+    device_memory: int | None = Field(default=None, ge=1, le=8)
     humanize: bool = True
     human_preset: Literal["default", "careful"] = "default"
     headless: bool = False
@@ -58,6 +59,7 @@ class ProfileUpdate(BaseModel):
     gpu_vendor: str | None = Field(default=None)
     gpu_renderer: str | None = Field(default=None)
     hardware_concurrency: int | None = Field(default=None)
+    device_memory: int | None = Field(default=None, ge=1, le=8)
     humanize: bool | None = None
     human_preset: Literal["default", "careful"] | None = None
     headless: bool | None = None
@@ -100,6 +102,7 @@ class ProfileResponse(BaseModel):
     gpu_vendor: str | None = None
     gpu_renderer: str | None = None
     hardware_concurrency: int | None = None
+    device_memory: int | None = None
     humanize: bool = True
     human_preset: str = "default"
     headless: bool = False
@@ -168,6 +171,32 @@ class ManagerUpdateResponse(BaseModel):
     restart_required: bool = False
     message: str
     log: list[str] = []
+
+
+class BrowserUpdateResponse(BaseModel):
+    ok: bool
+    updated: bool = False
+    wrapper_version: str | None = None
+    current_version: str | None = None
+    available_version: str | None = None
+    platform: str | None = None
+    restart_required: bool = False
+    message: str
+
+
+class PreflightIssue(BaseModel):
+    severity: Literal["error", "warning", "info"]
+    code: str
+    message: str
+
+
+class PreflightResponse(BaseModel):
+    status: Literal["pass", "warning", "fail"]
+    browser_engine: str
+    launch_mode: LaunchMode
+    can_launch: bool
+    issues: list[PreflightIssue] = []
+    capabilities: dict = {}
 
 
 class ProxyTestRequest(BaseModel):

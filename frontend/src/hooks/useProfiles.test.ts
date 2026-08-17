@@ -11,6 +11,7 @@ vi.mock("../lib/api", () => ({
     deleteProfile: vi.fn(),
     launchProfile: vi.fn(),
     stopProfile: vi.fn(),
+    getPreflight: vi.fn(),
   },
 }));
 
@@ -41,6 +42,7 @@ const fakeProfile = {
   gpu_vendor: null,
   gpu_renderer: null,
   hardware_concurrency: null,
+  device_memory: null,
   humanize: false,
   human_preset: "default",
   headless: false,

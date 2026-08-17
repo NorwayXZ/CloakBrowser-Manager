@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any
 
 
@@ -31,10 +32,66 @@ async () => {
         vendor: debug ? gl.getParameter(debug.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR),
         renderer: debug ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
         version: gl.getParameter(gl.VERSION),
+        shadingLanguageVersion: gl.getParameter(gl.SHADING_LANGUAGE_VERSION),
+        maxTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE),
       };
     } catch (err) {
       return { error: String(err) };
     }
+  };
+
+  const readStorage = async () => {
+    const result = {
+      cookieEnabled: navigator.cookieEnabled,
+      localStorage: { available: false, roundTrip: false },
+      sessionStorage: { available: false, roundTrip: false },
+      indexedDB: false,
+      cacheStorage: false,
+      estimate: null,
+    };
+    for (const name of ['localStorage', 'sessionStorage']) {
+      try {
+        const storage = window[name];
+        const key = '__cloak_probe__';
+        storage.setItem(key, 'ok');
+        result[name].available = true;
+        result[name].roundTrip = storage.getItem(key) === 'ok';
+        storage.removeItem(key);
+      } catch (_) { /* opaque pages can intentionally deny storage */ }
+    }
+    try { result.indexedDB = Boolean(window.indexedDB); } catch (_) {}
+    try { result.cacheStorage = Boolean(window.caches); } catch (_) {}
+    try { result.estimate = await navigator.storage?.estimate?.(); } catch (_) {}
+    return result;
+  };
+
+  const readFonts = () => {
+    const candidates = ['Arial', 'Helvetica Neue', 'Times New Roman', 'Courier New', 'Menlo', 'SF Pro Text', 'Segoe UI', 'Roboto'];
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return { available: [], measurable: false };
+    const baseline = '72px monospace';
+    ctx.font = baseline;
+    const baselineWidth = ctx.measureText('mmmmmmmmmmlli').width;
+    const available = candidates.filter((font) => {
+      ctx.font = `72px "${font}", monospace`;
+      return ctx.measureText('mmmmmmmmmmlli').width !== baselineWidth;
+    });
+    return { available, measurable: true };
+  };
+
+  const readWebRtcCandidates = async () => {
+    try {
+      if (!window.RTCPeerConnection) return [];
+      const pc = new RTCPeerConnection({ iceServers: [] });
+      const candidates = [];
+      pc.createDataChannel('probe');
+      pc.onicecandidate = (event) => { if (event.candidate?.candidate) candidates.push(event.candidate.candidate); };
+      await pc.setLocalDescription(await pc.createOffer());
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      pc.close();
+      return candidates;
+    } catch (_) { return []; }
   };
 
   const readCanvasHash = () => {
@@ -158,6 +215,16 @@ async () => {
         audioHashA: await readAudioHash(),
         audioHashB: await readAudioHash(),
       },
+      storage: await readStorage(),
+      fonts: readFonts(),
+      network: {
+        webrtcCandidates: await readWebRtcCandidates(),
+        connection: navigator.connection ? {
+          effectiveType: navigator.connection.effectiveType ?? null,
+          rtt: navigator.connection.rtt ?? null,
+          downlink: navigator.connection.downlink ?? null,
+        } : null,
+      },
       nativeStrings: {
         functionToString: Function.prototype.toString.toString(),
         dateToString: Date.prototype.toString.toString(),
@@ -200,6 +267,7 @@ async () => {
           platform: w.navigator.platform,
           webdriver: w.navigator.webdriver,
           hardwareConcurrency: w.navigator.hardwareConcurrency,
+          deviceMemory: w.navigator.deviceMemory ?? null,
           userAgentData: uaData ? {
             brands: uaData.brands,
             mobile: uaData.mobile,
@@ -336,6 +404,11 @@ def analyze_fingerprint(
     expected_screen_width: int | None,
     expected_screen_height: int | None,
     expected_hardware_concurrency: int | None,
+    expected_device_memory: int | None = None,
+    expected_gpu_vendor: str | None = None,
+    expected_gpu_renderer: str | None = None,
+    expected_user_agent: str | None = None,
+    proxy_configured: bool = False,
 ) -> dict[str, Any]:
     issues: list[dict[str, Any]] = []
 
@@ -464,6 +537,34 @@ def analyze_fingerprint(
                     actual=scope_first_language,
                     message="Main page, iframe and Worker navigator.languages values differ",
                 )
+            for signal, main_actual, scope_actual in (
+                ("userAgent", main_nav.get("userAgent"), nav.get("userAgent")),
+                ("platform", main_nav.get("platform"), nav.get("platform")),
+                ("hardwareConcurrency", main_nav.get("hardwareConcurrency"), nav.get("hardwareConcurrency")),
+                ("deviceMemory", main_nav.get("deviceMemory"), nav.get("deviceMemory")),
+            ):
+                if main_actual is not None and scope_actual is not None and main_actual != scope_actual:
+                    _add_issue(
+                        issues,
+                        severity="error",
+                        signal=f"scope_consistency.navigator.{signal}",
+                        scope=scope,
+                        expected=main_actual,
+                        actual=scope_actual,
+                        message=f"Main page and {scope} navigator.{signal} values differ",
+                    )
+            main_ua_data = main_nav.get("userAgentData") if isinstance(main_nav.get("userAgentData"), dict) else None
+            scope_ua_data = nav.get("userAgentData") if isinstance(nav.get("userAgentData"), dict) else None
+            if main_ua_data and scope_ua_data and main_ua_data.get("platform") != scope_ua_data.get("platform"):
+                _add_issue(
+                    issues,
+                    severity="error",
+                    signal="scope_consistency.userAgentData.platform",
+                    scope=scope,
+                    expected=main_ua_data.get("platform"),
+                    actual=scope_ua_data.get("platform"),
+                    message=f"Main page and {scope} UA-CH platform values differ",
+                )
             scope_intl_values = {
                 "Intl.DateTimeFormat": intl.get("dateTime", {}).get("locale"),
                 "Intl.NumberFormat": intl.get("number", {}).get("locale"),
@@ -542,6 +643,36 @@ def analyze_fingerprint(
 
     user_agent = str(nav.get("userAgent") or "")
     platform = str(nav.get("platform") or "")
+    if expected_user_agent and user_agent != expected_user_agent:
+        _add_issue(
+            issues,
+            severity="warning",
+            signal="userAgent",
+            scope="main",
+            expected=expected_user_agent,
+            actual=user_agent,
+            message="实际 User-Agent 与配置值不同；请避免手动填写与内核版本不一致的 UA。",
+        )
+
+    chrome_major_match = re.search(r"(?:Chrome|Chromium)/(\d+)", user_agent)
+    if chrome_major_match and ua_data:
+        brands = ua_data.get("highEntropy", {}).get("fullVersionList") if isinstance(ua_data.get("highEntropy"), dict) else ua_data.get("brands")
+        chrome_brand_version = None
+        if isinstance(brands, list):
+            for brand in brands:
+                if isinstance(brand, dict) and brand.get("brand") in {"Google Chrome", "Chromium"}:
+                    chrome_brand_version = str(brand.get("version") or "")
+                    break
+        if chrome_brand_version and chrome_brand_version.split(".", 1)[0] != chrome_major_match.group(1):
+            _add_issue(
+                issues,
+                severity="error",
+                signal="ua_ua_ch_version",
+                scope="main",
+                expected=chrome_major_match.group(1),
+                actual=chrome_brand_version,
+                message="User-Agent 的 Chrome 主版本与 UA-CH 不一致。",
+            )
     if expected_platform == "macos":
         if "Macintosh" not in user_agent or platform != "MacIntel":
             _add_issue(
@@ -576,6 +707,17 @@ def analyze_fingerprint(
             message="Hardware concurrency differs from the configured profile value",
         )
 
+    if expected_device_memory and nav.get("deviceMemory") not in (None, expected_device_memory):
+        _add_issue(
+            issues,
+            severity="warning",
+            signal="deviceMemory",
+            scope="main",
+            expected=expected_device_memory,
+            actual=nav.get("deviceMemory"),
+            message="浏览器内存暴露值与画像不同；Chrome 会对该值做粗粒度限制。",
+        )
+
     if expected_screen_width and screen.get("availWidth") not in (None, expected_screen_width):
         _add_issue(
             issues,
@@ -595,6 +737,92 @@ def analyze_fingerprint(
             expected=expected_screen_height,
             actual=screen.get("height"),
             message="Screen height differs from the configured profile height",
+        )
+
+    webgl = graphics.get("webgl") if isinstance(graphics.get("webgl"), dict) else {}
+    if expected_gpu_vendor and webgl.get("vendor") and str(expected_gpu_vendor).lower() not in str(webgl.get("vendor")).lower():
+        _add_issue(
+            issues,
+            severity="warning",
+            signal="webgl.vendor",
+            scope="main",
+            expected=expected_gpu_vendor,
+            actual=webgl.get("vendor"),
+            message="WebGL 厂商与画像预期不同；请检查运行环境是否强制了软件渲染。",
+        )
+    if expected_gpu_renderer and webgl.get("renderer") and str(expected_gpu_renderer).lower() not in str(webgl.get("renderer")).lower():
+        _add_issue(
+            issues,
+            severity="warning",
+            signal="webgl.renderer",
+            scope="main",
+            expected=expected_gpu_renderer,
+            actual=webgl.get("renderer"),
+            message="WebGL 渲染器与画像预期不同；VNC/软件渲染环境可能覆盖了 GPU。",
+        )
+
+    storage = main.get("storage") if isinstance(main.get("storage"), dict) else {}
+    for storage_name in ("localStorage", "sessionStorage"):
+        value = storage.get(storage_name)
+        if isinstance(value, dict) and value.get("available") is False:
+            _add_issue(
+                issues,
+                severity="warning",
+                signal=f"storage.{storage_name}",
+                scope="main",
+                expected="available",
+                actual=value,
+                message=f"{storage_name} 不可用；这会影响部分网站的登录状态和本地设置。",
+            )
+    if storage.get("cookieEnabled") is False:
+        _add_issue(
+            issues,
+            severity="error",
+            signal="cookies",
+            scope="main",
+            expected=True,
+            actual=False,
+            message="浏览器 Cookie 被禁用，网站无法保存登录状态。",
+        )
+
+    fonts = main.get("fonts") if isinstance(main.get("fonts"), dict) else {}
+    available_fonts = fonts.get("available") if isinstance(fonts.get("available"), list) else []
+    if fonts.get("measurable") and expected_platform == "macos" and not any(
+        font in available_fonts for font in ("Arial", "Helvetica Neue", "Menlo")
+    ):
+        _add_issue(
+            issues,
+            severity="warning",
+            signal="fonts.macos_baseline",
+            scope="main",
+            expected="Arial or Helvetica Neue or Menlo",
+            actual=available_fonts,
+            message="没有检测到常见 macOS 字体基线；字体目录或运行容器可能与 macOS 画像不匹配。",
+        )
+    if fonts.get("measurable") and expected_platform == "windows" and not any(
+        font in available_fonts for font in ("Arial", "Segoe UI", "Courier New")
+    ):
+        _add_issue(
+            issues,
+            severity="warning",
+            signal="fonts.windows_baseline",
+            scope="main",
+            expected="Arial or Segoe UI or Courier New",
+            actual=available_fonts,
+            message="没有检测到常见 Windows 字体基线；字体目录或运行容器可能与 Windows 画像不匹配。",
+        )
+
+    network = main.get("network") if isinstance(main.get("network"), dict) else {}
+    candidates = network.get("webrtcCandidates")
+    if proxy_configured and isinstance(candidates, list) and any("typ host" in str(candidate).lower() for candidate in candidates):
+        _add_issue(
+            issues,
+            severity="warning",
+            signal="webrtc.host_candidates",
+            scope="main",
+            expected="no non-proxied host candidates",
+            actual=candidates,
+            message="WebRTC 仍产生本地候选地址；已配置代理时请结合浏览器设置和外部页面继续确认是否有公网泄漏。",
         )
 
     if graphics.get("canvasHashA") != graphics.get("canvasHashB"):

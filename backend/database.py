@@ -50,6 +50,7 @@ def init_db():
                 gpu_vendor TEXT,
                 gpu_renderer TEXT,
                 hardware_concurrency INTEGER,
+                device_memory INTEGER,
                 humanize BOOLEAN DEFAULT 1,
                 human_preset TEXT DEFAULT 'default',
                 headless BOOLEAN DEFAULT 0,
@@ -141,6 +142,38 @@ def init_db():
         if "deleted_at" not in cols:
             conn.execute("ALTER TABLE profiles ADD COLUMN deleted_at TEXT")
             conn.commit()
+        if "device_memory" not in cols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN device_memory INTEGER")
+            conn.commit()
+
+        # Older releases stored Retina panel pixels instead of the logical CSS
+        # screen dimensions exposed by Chromium. Upgrade only known legacy
+        # values so existing profiles keep their identity and user data.
+        legacy_screen_migrations = (
+            ("mbp_14_%", 3024, 1964, 1512, 982),
+            ("mbp_16_%", 3456, 2234, 1728, 1117),
+            ("mba_13_m1_%", 2560, 1600, 1440, 900),
+            ("mba_13_%", 2560, 1664, 1470, 956),
+            ("mba_15_%", 2880, 1864, 1710, 1107),
+            ("imac_24_%", 4480, 2520, 2240, 1260),
+        )
+        for pattern, old_width, old_height, new_width, new_height in legacy_screen_migrations:
+            conn.execute(
+                """UPDATE profiles
+                   SET screen_width = ?, screen_height = ?
+                   WHERE device_profile LIKE ? AND screen_width = ? AND screen_height = ?""",
+                (new_width, new_height, pattern, old_width, old_height),
+            )
+        conn.execute(
+            """UPDATE profiles
+               SET device_memory = 8
+               WHERE device_memory IS NULL
+                 AND browser_engine = 'cloakbrowser'
+                 AND device_profile IS NOT NULL
+                 AND device_profile != 'native_macos'
+                 AND device_profile != 'native_windows'"""
+        )
+        conn.commit()
         cutoff = (
             datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)
         ).isoformat()
@@ -219,11 +252,11 @@ def create_profile(
             """INSERT INTO profiles (
                 id, name, browser_engine, device_profile, fingerprint_seed, proxy, timezone, locale, platform,
                 user_agent, screen_width, screen_height, gpu_vendor, gpu_renderer,
-                hardware_concurrency, humanize, human_preset, headless, geoip,
+                hardware_concurrency, device_memory, humanize, human_preset, headless, geoip,
                 clipboard_sync, auto_launch, color_scheme, group_name, account_platform,
                 cookies_json, startup_urls, launch_args, notes,
                 user_data_dir, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 profile_id, name,
                 fields.get("browser_engine", "auto"),
@@ -239,6 +272,7 @@ def create_profile(
                 fields.get("gpu_vendor"),
                 fields.get("gpu_renderer"),
                 fields.get("hardware_concurrency"),
+                fields.get("device_memory"),
                 fields.get("humanize", True),
                 fields.get("human_preset", "default"),
                 fields.get("headless", False),
@@ -333,7 +367,7 @@ def update_profile(profile_id: str, **fields: Any) -> dict[str, Any] | None:
     for col in (
         "name", "browser_engine", "device_profile", "fingerprint_seed", "proxy", "timezone", "locale", "platform",
         "user_agent", "screen_width", "screen_height", "gpu_vendor", "gpu_renderer",
-        "hardware_concurrency", "humanize", "human_preset", "headless", "geoip",
+        "hardware_concurrency", "device_memory", "humanize", "human_preset", "headless", "geoip",
         "clipboard_sync", "auto_launch", "color_scheme", "group_name", "account_platform", "cookies_json",
         "startup_urls", "launch_args", "notes",
     ):

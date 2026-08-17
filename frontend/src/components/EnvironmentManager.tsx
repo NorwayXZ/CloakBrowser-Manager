@@ -25,7 +25,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { api, type LaunchMode, type ManagerUpdateResult, type Profile, type ProfileGroup, type ProxyPreset } from "../lib/api";
+import { api, type BrowserUpdateResult, type LaunchMode, type ManagerUpdateResult, type Profile, type ProfileGroup, type ProxyPreset } from "../lib/api";
 import { StatusIndicator } from "./StatusIndicator";
 
 interface EnvironmentManagerProps {
@@ -64,6 +64,7 @@ type UpdateNotice = {
   tone: "success" | "info" | "error";
   text: string;
   result?: ManagerUpdateResult;
+  browser?: BrowserUpdateResult;
 };
 
 const navItems: { id: ManagerSection; label: string; icon: typeof LayoutGrid }[] = [
@@ -538,10 +539,12 @@ export function EnvironmentManager({
     setUpdateNotice(null);
     try {
       const result = await api.updateManager();
+      const browser = await api.updateBrowser();
       setUpdateNotice({
-        tone: result.updated ? "success" : "info",
-        text: result.message,
+        tone: result.updated || browser.updated ? "success" : "info",
+        text: `${result.message}\n${browser.message}`,
         result,
+        browser,
       });
       await onRefresh();
     } catch (err) {

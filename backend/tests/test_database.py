@@ -75,6 +75,7 @@ def test_create_profile_all_fields(tmp_db: Path):
         gpu_vendor="NVIDIA",
         gpu_renderer="RTX 3070",
         hardware_concurrency=16,
+        device_memory=8,
         humanize=True,
         human_preset="careful",
         headless=True,
@@ -87,6 +88,7 @@ def test_create_profile_all_fields(tmp_db: Path):
     assert p["platform"] == "macos"
     assert p["gpu_vendor"] == "NVIDIA"
     assert p["hardware_concurrency"] == 16
+    assert p["device_memory"] == 8
     assert p["humanize"] == 1  # SQLite stores bool as int
     assert p["human_preset"] == "careful"
     assert p["color_scheme"] == "dark"

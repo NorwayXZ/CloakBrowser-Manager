@@ -253,6 +253,7 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
     gpu_vendor: profile.gpu_vendor,
     gpu_renderer: profile.gpu_renderer,
     hardware_concurrency: profile.hardware_concurrency,
+    device_memory: profile.device_memory,
     humanize: profile.humanize,
     human_preset: profile.human_preset,
     headless: profile.headless,
@@ -275,6 +276,15 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
   }, [create, profileToCreateData, refreshAll]);
 
   const handleLaunchProfile = useCallback(async (id: string, launchMode: LaunchMode) => {
+    const preflight = await api.getPreflight(id, launchMode);
+    if (!preflight.can_launch) {
+      window.alert(`启动前检查未通过：\n${preflight.issues.filter((issue) => issue.severity === "error").map((issue) => issue.message).join("\n")}`);
+      return;
+    }
+    const warnings = preflight.issues.filter((issue) => issue.severity === "warning");
+    if (warnings.length > 0 && !window.confirm(`启动前检查发现提示：\n${warnings.map((issue) => issue.message).join("\n")}\n\n仍然启动吗？`)) {
+      return;
+    }
     const result = await launch(id, launchMode);
     if (result?.viewer_mode === "vnc" || result?.viewer_mode === "native-window") {
       setSelectedId(id);
@@ -286,10 +296,15 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
 
   const handleBatchLaunchProfiles = useCallback(async (ids: string[], launchMode: LaunchMode) => {
     for (const id of ids) {
+      const preflight = await api.getPreflight(id, launchMode);
+      if (!preflight.can_launch) {
+        window.alert(`${profiles.find((profile) => profile.id === id)?.name ?? id} 启动前检查未通过：\n${preflight.issues.filter((issue) => issue.severity === "error").map((issue) => issue.message).join("\n")}`);
+        continue;
+      }
       await launch(id, launchMode);
     }
     setView("list");
-  }, [launch]);
+  }, [launch, profiles]);
 
   const handleStopProfile = useCallback(async (id: string) => {
     await stop(id);

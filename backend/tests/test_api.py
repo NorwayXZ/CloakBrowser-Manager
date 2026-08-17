@@ -293,6 +293,16 @@ def test_system_status(app_client: TestClient):
     assert data["profiles_total"] >= 1
 
 
+def test_profile_preflight_reports_capabilities(app_client: TestClient):
+    created = app_client.post("/api/profiles", json={"name": "Preflight"}).json()
+    response = app_client.get(f"/api/profiles/{created['id']}/preflight")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["can_launch"] is True
+    assert data["capabilities"]["tls_externally_verified"] is False
+
+
 @dataclass
 class FakeUpdateResult:
     ok: bool = True
@@ -331,6 +341,24 @@ def test_update_manager_conflict(app_client: TestClient, monkeypatch: pytest.Mon
 
     assert resp.status_code == 409
     assert "未提交改动" in resp.json()["detail"]
+
+
+def test_browser_update_reports_current_platform_version(
+    app_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    import cloakbrowser
+    import cloakbrowser.config as cloak_config
+
+    monkeypatch.setattr(cloakbrowser, "check_for_update", lambda: None, raising=False)
+    monkeypatch.setattr(cloakbrowser, "__version__", "0.5.7", raising=False)
+    monkeypatch.setattr(cloak_config, "get_chromium_version", lambda: "145.0.0.0", raising=False)
+
+    resp = app_client.post("/api/browser/update")
+
+    assert resp.status_code == 200
+    assert resp.json()["updated"] is False
+    assert resp.json()["current_version"] == "145.0.0.0"
 
 
 # ── Launch Args ─────────────────────────────────────────────────────────────

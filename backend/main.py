@@ -39,6 +39,7 @@ from .updater import UpdateError, update_from_git
 from .xray_runtime import is_xray_link, start_xray_proxy
 from .models import (
     AuthAccountUpdate,
+    BrowserUpdateResponse,
     ClipboardRequest,
     GroupCreate,
     GroupResponse,
@@ -49,6 +50,7 @@ from .models import (
     ProfileCreate,
     ProfileResponse,
     ProfileStatusResponse,
+    PreflightResponse,
     ProxyPresetBulkCreate,
     ProxyPresetCreate,
     ProxyPresetResponse,
@@ -807,6 +809,15 @@ async def delete_proxy_preset(preset_id: str):
 # ── Launch / Stop ─────────────────────────────────────────────────────────────
 
 
+@app.get("/api/profiles/{profile_id}/preflight", response_model=PreflightResponse)
+async def profile_preflight(profile_id: str, launch_mode: str = "manual"):
+    profile = db.get_profile(profile_id)
+    if not profile or profile.get("deleted_at"):
+        raise HTTPException(status_code=404, detail="Profile not found")
+    mode = "debug" if launch_mode == "debug" else "manual"
+    return PreflightResponse(**browser_mgr.preflight(profile, mode))
+
+
 @app.post("/api/profiles/{profile_id}/launch", response_model=LaunchResponse)
 async def launch_profile(
     profile_id: str,
@@ -819,6 +830,10 @@ async def launch_profile(
         raise HTTPException(status_code=409, detail="Profile is already running")
 
     try:
+        preflight = browser_mgr.preflight(profile, req.launch_mode if req else "manual")
+        if not preflight["can_launch"]:
+            messages = "\n".join(issue["message"] for issue in preflight["issues"] if issue["severity"] == "error")
+            raise HTTPException(status_code=409, detail=f"启动前检查未通过：{messages}")
         running = await browser_mgr.launch(
             profile,
             launch_mode=(req.launch_mode if req else "manual"),
@@ -827,6 +842,8 @@ async def launch_profile(
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         logger.error("Failed to launch profile %s: %s", profile_id, exc)
+        if isinstance(exc, HTTPException):
+            raise exc
         raise HTTPException(status_code=500, detail="Failed to launch browser")
 
     db.mark_profile_opened(profile_id, running.proxy_geo)
@@ -1116,6 +1133,42 @@ async def update_manager():
     except Exception as exc:
         logger.exception("Manager update failed")
         raise HTTPException(status_code=500, detail=f"升级失败：{exc}") from exc
+
+
+@app.post("/api/browser/update", response_model=BrowserUpdateResponse)
+async def update_browser_binary():
+    """Check/download the official CloakBrowser binary for this platform."""
+    try:
+        import cloakbrowser
+        from cloakbrowser.config import get_chromium_version
+
+        before = get_chromium_version()
+        latest = await asyncio.to_thread(cloakbrowser.check_for_update)
+        after = get_chromium_version()
+        platform = None
+        try:
+            from cloakbrowser.config import get_platform_tag
+            platform = get_platform_tag()
+        except (ImportError, AttributeError):
+            pass
+        wrapper = getattr(cloakbrowser, "__version__", None)
+        if latest or after != before:
+            message = f"CloakBrowser 内核已更新到 {after}，关闭运行中的浏览器后重新启动画像。"
+        else:
+            message = f"当前平台已经是可用的最新内核 {after}；免费渠道没有发现更高版本。"
+        return BrowserUpdateResponse(
+            ok=True,
+            updated=bool(latest or after != before),
+            wrapper_version=str(wrapper) if wrapper else None,
+            current_version=before,
+            available_version=after,
+            platform=platform,
+            restart_required=bool(latest or after != before),
+            message=message,
+        )
+    except Exception as exc:
+        logger.exception("CloakBrowser binary update failed")
+        raise HTTPException(status_code=502, detail=f"浏览器内核检查失败：{exc}") from exc
 
 
 @app.post("/api/proxy/test", response_model=ProxyTestResponse)

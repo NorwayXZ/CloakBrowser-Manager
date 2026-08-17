@@ -24,6 +24,7 @@ export interface Profile {
   gpu_vendor: string | null;
   gpu_renderer: string | null;
   hardware_concurrency: number | null;
+  device_memory: number | null;
   humanize: boolean;
   human_preset: string;
   headless: boolean;
@@ -67,6 +68,7 @@ export interface ProfileCreateData {
   gpu_vendor?: string | null;
   gpu_renderer?: string | null;
   hardware_concurrency?: number | null;
+  device_memory?: number | null;
   humanize?: boolean;
   human_preset?: string;
   headless?: boolean;
@@ -113,6 +115,32 @@ export interface ManagerUpdateResult {
   restart_required: boolean;
   message: string;
   log: string[];
+}
+
+export interface BrowserUpdateResult {
+  ok: boolean;
+  updated: boolean;
+  wrapper_version: string | null;
+  current_version: string | null;
+  available_version: string | null;
+  platform: string | null;
+  restart_required: boolean;
+  message: string;
+}
+
+export interface PreflightIssue {
+  severity: "error" | "warning" | "info";
+  code: string;
+  message: string;
+}
+
+export interface PreflightResult {
+  status: "pass" | "warning" | "fail";
+  browser_engine: string;
+  launch_mode: LaunchMode;
+  can_launch: boolean;
+  issues: PreflightIssue[];
+  capabilities: Record<string, unknown>;
 }
 
 export interface ProxyTestResult {
@@ -173,9 +201,19 @@ export interface FingerprintReport {
     screen_width: number | null;
     screen_height: number | null;
     hardware_concurrency: number | null;
+    device_memory: number | null;
+    gpu_vendor: string | null;
+    gpu_renderer: string | null;
   };
   collection: "active" | "passive";
   proxy_geo: ProxyTestResult | null;
+  network: {
+    proxy_configured: boolean;
+    dns_policy: string;
+    webrtc_policy: string;
+    tls_transport: string;
+    tls_externally_verified: boolean;
+  };
   analysis: {
     status: "pass" | "warning" | "fail";
     score: number;
@@ -314,6 +352,12 @@ export const api = {
 
   updateManager: () =>
     request<ManagerUpdateResult>("/api/update", { method: "POST" }),
+
+  updateBrowser: () =>
+    request<BrowserUpdateResult>("/api/browser/update", { method: "POST" }),
+
+  getPreflight: (id: string, launchMode: LaunchMode = "manual") =>
+    request<PreflightResult>(`/api/profiles/${id}/preflight?launch_mode=${launchMode}`),
 
   getFingerprintReport: (id: string) =>
     request<FingerprintReport>(`/api/profiles/${id}/fingerprint-report`),

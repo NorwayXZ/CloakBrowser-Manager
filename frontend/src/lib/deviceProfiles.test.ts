@@ -21,6 +21,22 @@ describe("deviceProfiles", () => {
 
     expect(next.platform).toBe("windows");
     expect(next.device_profile).toBe("native_windows");
+    expect(next.device_memory).toBeNull();
+  });
+
+  it("uses logical CSS screen sizes for Retina Mac profiles", () => {
+    const macbook = getDeviceProfile("mbp_14_m4_2024");
+    const imac = getDeviceProfile("imac_24_m4_2024");
+
+    expect([macbook.screen_width, macbook.screen_height]).toEqual([1512, 982]);
+    expect([imac.screen_width, imac.screen_height]).toEqual([2240, 1260]);
+  });
+
+  it("applies the browser-visible memory cap to CloakBrowser presets", () => {
+    const preset = getDeviceProfile("mbp_14_m4_2024");
+    const next = applyDeviceProfile({ name: "test", browser_engine: "cloakbrowser" }, preset);
+
+    expect(next.device_memory).toBe(8);
   });
 
   it("filters profile lists by platform", () => {

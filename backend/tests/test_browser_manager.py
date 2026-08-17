@@ -192,6 +192,11 @@ def test_build_args_hardware_concurrency():
     assert "--fingerprint-hardware-concurrency=8" in args
 
 
+def test_build_args_device_memory():
+    args = _mgr._build_fingerprint_args({"device_memory": 8})
+    assert "--fingerprint-device-memory=8" in args
+
+
 def test_build_args_screen():
     args = _mgr._build_fingerprint_args({"screen_width": 2560, "screen_height": 1440})
     assert "--fingerprint-screen-width=2560" in args
@@ -207,6 +212,34 @@ def test_build_args_empty_profile():
 def test_native_build_args_do_not_force_software_gl():
     args = BrowserManager(NATIVE_RUNTIME)._build_fingerprint_args({})
     assert "--use-angle=swiftshader" not in args
+
+
+def test_preflight_blocks_cross_platform_profile(tmp_path: Path):
+    manager = BrowserManager(RuntimeConfig("macos", "native", "native-window", tmp_path))
+    result = manager.preflight({
+        "platform": "windows",
+        "browser_engine": "cloakbrowser",
+        "screen_width": 1920,
+        "screen_height": 1080,
+    })
+
+    assert result["can_launch"] is False
+    assert any(issue["code"] == "host_platform_mismatch" for issue in result["issues"])
+
+
+def test_preflight_describes_system_chrome_limits(tmp_path: Path):
+    manager = BrowserManager(RuntimeConfig("macos", "native", "native-window", tmp_path))
+    result = manager.preflight({
+        "platform": "macos",
+        "browser_engine": "system_chrome",
+        "device_profile": "mbp_14_m4_2024",
+        "screen_width": 1512,
+        "screen_height": 982,
+        "gpu_vendor": "Google Inc. (Apple)",
+    })
+
+    assert result["can_launch"] is True
+    assert any(issue["code"] == "system_chrome_native_only" for issue in result["issues"])
 
 
 def test_docker_system_chrome_profile_uses_cloakbrowser_runtime():

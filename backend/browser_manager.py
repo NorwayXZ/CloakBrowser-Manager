@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -1636,6 +1637,123 @@ class BrowserManager:
             return "system_chrome"
         return "cloakbrowser"
 
+    def preflight(self, profile: dict[str, Any], launch_mode: str = "manual") -> dict[str, Any]:
+        """Check compatibility before a process is started.
+
+        This is deliberately a compatibility report, not an anti-bot score. It
+        prevents profiles from silently mixing host OS and device families and
+        calls out features that only exist in the managed debug context.
+        """
+        engine = self._browser_engine(profile)
+        mode = "debug" if launch_mode == "debug" else "manual"
+        issues: list[dict[str, str]] = []
+        host = self.runtime.host_os
+        platform = str(profile.get("platform") or "").lower()
+
+        if host in {"macos", "windows"} and platform and platform != host:
+            issues.append({
+                "severity": "error",
+                "code": "host_platform_mismatch",
+                "message": f"当前电脑是 {host}，不能启动 {platform or '未设置'} 设备画像。请在编辑页选择本机平台画像。",
+            })
+
+        if engine == "system_chrome":
+            spoofed = any(profile.get(key) for key in (
+                "gpu_vendor", "gpu_renderer", "hardware_concurrency", "device_memory",
+            ))
+            device_profile = str(profile.get("device_profile") or "")
+            if spoofed or device_profile.startswith(("mba_", "mbp_", "imac_", "mac_", "win_")):
+                issues.append({
+                    "severity": "warning",
+                    "code": "system_chrome_native_only",
+                    "message": "稳定原生模式使用本机 Chrome 和真实硬件；GPU、CPU、内存、屏幕和 Canvas 画像参数不会写入系统 Chrome。",
+                })
+        ua = str(profile.get("user_agent") or "")
+        if ua:
+            if platform == "macos" and ("Macintosh" not in ua or "Mac OS X" not in ua):
+                issues.append({
+                    "severity": "error", "code": "ua_platform_mismatch",
+                    "message": "自定义 User-Agent 没有 macOS 标识，和当前 macOS 画像不一致。",
+                })
+            if platform == "windows" and "Windows NT" not in ua:
+                issues.append({
+                    "severity": "error", "code": "ua_platform_mismatch",
+                    "message": "自定义 User-Agent 没有 Windows 标识，和当前 Windows 画像不一致。",
+                })
+            if engine == "cloakbrowser":
+                ua_major = re.search(r"(?:Chrome|Chromium)/(\d+)", ua)
+                try:
+                    from cloakbrowser.config import get_chromium_version
+
+                    binary_major = str(get_chromium_version()).split(".", 1)[0]
+                except (ImportError, AttributeError):
+                    binary_major = ""
+                if ua_major and binary_major and ua_major.group(1) != binary_major:
+                    issues.append({
+                        "severity": "error", "code": "ua_binary_version_mismatch",
+                        "message": f"自定义 UA 是 Chrome {ua_major.group(1)}，当前 CloakBrowser 内核是 {binary_major}；请清空 UA 跟随内核。",
+                    })
+
+        vendor = str(profile.get("gpu_vendor") or "")
+        renderer = str(profile.get("gpu_renderer") or "")
+        if platform == "macos" and (
+            (vendor and "apple" not in vendor.lower())
+            or (renderer and "apple" not in renderer.lower())
+        ):
+            issues.append({
+                "severity": "error", "code": "gpu_platform_mismatch",
+                "message": "macOS 画像的 GPU 厂商/渲染器不是 Apple，和平台不一致。",
+            })
+        if platform == "windows" and ("apple" in vendor.lower() or "apple" in renderer.lower()):
+            issues.append({
+                "severity": "error", "code": "gpu_platform_mismatch",
+                "message": "Windows 画像不能使用 Apple GPU 渲染器。",
+            })
+
+        width = profile.get("screen_width")
+        height = profile.get("screen_height")
+        if not isinstance(width, int) or not isinstance(height, int) or width < 320 or height < 240:
+            issues.append({
+                "severity": "error", "code": "invalid_screen",
+                "message": "屏幕尺寸必须是至少 320×240 的有效逻辑分辨率。",
+            })
+
+        if profile.get("proxy") and profile.get("geoip") and not profile.get("proxy_geo"):
+            issues.append({
+                "severity": "warning", "code": "proxy_geo_pending",
+                "message": "已开启按代理匹配语言/时区，但当前还没有保存的代理 GeoIP 结果；启动时会重新测试代理。",
+            })
+        if profile.get("cookies_json") and mode == "manual":
+            issues.append({
+                "severity": "info", "code": "manual_cookie_import",
+                "message": "日常无 CDP 手动启动会保留已有 Cookie，但不会自动注入粘贴的 Cookie JSON；调试启动才会尝试导入。",
+            })
+        if profile.get("humanize") and mode == "manual":
+            issues.append({
+                "severity": "info", "code": "manual_humanize_limit",
+                "message": "无 CDP 手动启动不会由 Manager 自动操控鼠标键盘；你亲自使用浏览器时该选项不改变真实输入。",
+            })
+
+        error_count = sum(1 for issue in issues if issue["severity"] == "error")
+        warning_count = sum(1 for issue in issues if issue["severity"] == "warning")
+        return {
+            "status": "fail" if error_count else "warning" if warning_count else "pass",
+            "browser_engine": engine,
+            "launch_mode": mode,
+            "can_launch": error_count == 0,
+            "issues": issues,
+            "capabilities": {
+                "external_cdp": mode == "debug",
+                "fingerprint_args": engine == "cloakbrowser",
+                "native_system_chrome": engine == "system_chrome",
+                "proxy_dns_policy": "proxy_host_resolver" if profile.get("proxy") else "direct",
+                "webrtc_policy": "disable_non_proxied_udp",
+                "tls_transport": "browser_native",
+                "tls_externally_verified": False,
+                "storage_persistence": True,
+            },
+        }
+
     async def launch(self, profile: dict[str, Any], launch_mode: str = "manual") -> RunningProfile:
         """Launch a browser instance using the configured host runtime."""
         profile_id = profile["id"]
@@ -1654,6 +1772,10 @@ class BrowserManager:
         proxy_bridge: HttpProxyBridge | None = None
         xray_process: XrayProcess | None = None
         try:
+            preflight = self.preflight(profile, requested_launch_mode)
+            if not preflight["can_launch"]:
+                messages = "；".join(issue["message"] for issue in preflight["issues"] if issue["severity"] == "error")
+                raise RuntimeError(f"启动前检查未通过：{messages}")
             if self.runtime.viewer_mode == "vnc":
                 display, ws_port = await self.vnc.allocate()
 
@@ -2140,6 +2262,9 @@ class BrowserManager:
         expected_hardware_concurrency = (
             None if running.browser_engine == "system_chrome" else profile.get("hardware_concurrency")
         )
+        expected_device_memory = (
+            None if running.browser_engine == "system_chrome" else profile.get("device_memory")
+        )
         analysis = analyze_fingerprint(
             raw,
             expected_locale=expected_locale,
@@ -2148,6 +2273,11 @@ class BrowserManager:
             expected_screen_width=expected_screen_width,
             expected_screen_height=expected_screen_height,
             expected_hardware_concurrency=expected_hardware_concurrency,
+            expected_device_memory=expected_device_memory,
+            expected_gpu_vendor=None if running.browser_engine == "system_chrome" else profile.get("gpu_vendor"),
+            expected_gpu_renderer=None if running.browser_engine == "system_chrome" else profile.get("gpu_renderer"),
+            expected_user_agent=profile.get("user_agent"),
+            proxy_configured=bool(profile.get("proxy")),
         )
         report = {
             "profile_id": profile_id,
@@ -2161,8 +2291,18 @@ class BrowserManager:
                 "screen_width": expected_screen_width,
                 "screen_height": expected_screen_height,
                 "hardware_concurrency": expected_hardware_concurrency,
+                "device_memory": expected_device_memory,
+                "gpu_vendor": None if running.browser_engine == "system_chrome" else profile.get("gpu_vendor"),
+                "gpu_renderer": None if running.browser_engine == "system_chrome" else profile.get("gpu_renderer"),
             },
             "proxy_geo": running.proxy_geo,
+            "network": {
+                "proxy_configured": bool(profile.get("proxy")),
+                "dns_policy": "proxy_host_resolver" if profile.get("proxy") else "direct",
+                "webrtc_policy": "disable_non_proxied_udp",
+                "tls_transport": "browser_native",
+                "tls_externally_verified": False,
+            },
             "collection": collection,
             "analysis": analysis,
             "raw": raw,
@@ -2287,6 +2427,10 @@ class BrowserManager:
         hw = profile.get("hardware_concurrency")
         if hw is not None:
             args.append(f"--fingerprint-hardware-concurrency={hw}")
+
+        memory = profile.get("device_memory")
+        if memory is not None:
+            args.append(f"--fingerprint-device-memory={memory}")
 
         sw = profile.get("screen_width")
         sh = profile.get("screen_height")

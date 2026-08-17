@@ -255,6 +255,22 @@ Ctrl + C
 8. 点击保存
 9. 回到首页，点击 `打开`
 
+点击 `打开` 前，Manager 会先做启动前检查：
+
+- macOS 只允许启动 macOS 画像，Windows 只允许启动 Windows 画像。
+- 检查自定义 UA、平台、GPU、逻辑分辨率是否明显冲突。
+- 提醒系统 Chrome 不会应用 CloakBrowser 的 GPU、CPU、内存、Canvas 等底层画像参数。
+- 提醒无 CDP 日常模式会保留现有 Cookie，但不会自动导入粘贴的 Cookie JSON。
+
+启动后的本地信息页会检查主页面、iframe 和 Worker 的语言、时区、UA、平台、CPU 和内存，还会检查 WebGL、Canvas/Audio 稳定性、字体基线、Cookie 和常见网页存储。报告只显示有证据的通过、警告或失败，不承诺任何网站都无法识别自动化。
+
+网络报告中的含义：
+
+- `proxy_host_resolver`：浏览器已启用通过代理解析域名的启动策略。
+- `disable_non_proxied_udp`：浏览器已禁止非代理 UDP 的 WebRTC 路径。
+- `browser_native`：TLS 由实际浏览器内核发起，不是 Python 请求代测。
+- `tls_externally_verified: false`：没有受控外部探针时，不会假装 TLS 已验证通过。
+
 ## 浏览器数据保存在哪里
 
 项目代码放在哪里都可以，但浏览器数据不会保存在项目文件夹里。
@@ -299,7 +315,7 @@ Windows：
 
 ## 升级教程
 
-Git 安装版可以先在面板右上角点击 `升级`。如果提示升级完成，关闭当前运行 Manager 的终端窗口，再重新启动 Manager。
+Git 安装版可以先在面板右上角点击 `升级`。按钮会依次检查 Manager 的 Git 代码和当前平台官方可用的 CloakBrowser 内核。不同系统、免费/付费渠道可用版本可能不同；页面只显示官方检查实际返回的版本，不会硬写一个并不存在的版本号。如果提示升级完成，关闭当前运行 Manager 的终端窗口，再重新启动 Manager。
 
 如果你是 Git 下载的：
 

@@ -117,6 +117,14 @@ describe("api.updateManager", () => {
   });
 });
 
+describe("api.getPreflight", () => {
+  it("requests the selected launch mode", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ status: "pass", can_launch: true, issues: [] }));
+    await api.getPreflight("profile-1", "manual");
+    expect(mockFetch.mock.calls[0][0]).toBe("/api/profiles/profile-1/preflight?launch_mode=manual");
+  });
+});
+
 // ── setClipboard ────────────────────────────────────────────────────────────
 
 describe("api.setClipboard", () => {
