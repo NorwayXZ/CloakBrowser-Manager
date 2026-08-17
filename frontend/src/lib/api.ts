@@ -165,6 +165,8 @@ export interface FingerprintReport {
   profile_id: string;
   expected: {
     browser_engine: string | null;
+    launch_mode: LaunchMode | null;
+    external_cdp: boolean;
     locale: string | null;
     timezone: string | null;
     platform: string | null;
@@ -172,6 +174,7 @@ export interface FingerprintReport {
     screen_height: number | null;
     hardware_concurrency: number | null;
   };
+  collection: "active" | "passive";
   proxy_geo: ProxyTestResult | null;
   analysis: {
     status: "pass" | "warning" | "fail";

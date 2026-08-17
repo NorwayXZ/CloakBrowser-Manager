@@ -454,6 +454,59 @@ def _launch_system_chrome_manual_process(
     )
 
 
+def _launch_cloakbrowser_manual_process(
+    *,
+    user_data_dir: str | os.PathLike[str],
+    headless: bool = False,
+    proxy: str | None = None,
+    args: list[str] | None = None,
+    user_agent: str | None = None,
+    viewport: Any = None,
+    locale: str | None = None,
+    timezone: str | None = None,
+    env: dict[str, str] | None = None,
+    start_urls: list[str] | None = None,
+    **_: Any,
+) -> subprocess.Popen[Any]:
+    """Launch the patched CloakBrowser binary without Playwright or CDP."""
+    if headless:
+        raise ValueError("Manual CloakBrowser launch does not support headless mode")
+
+    from cloakbrowser import build_args
+    from cloakbrowser.download import ensure_binary
+
+    browser_path = Path(ensure_binary())
+    if not browser_path.exists():
+        raise RuntimeError(f"CloakBrowser binary was not found: {browser_path}")
+
+    extra_args = list(args or [])
+    if proxy and not _has_chrome_arg(extra_args, "--proxy-server"):
+        extra_args.extend(_chrome_proxy_args(proxy))
+    if user_agent:
+        _append_chrome_arg_once(extra_args, "--user-agent", user_agent)
+    _append_chrome_arg_once(extra_args, "--user-data-dir", os.fspath(user_data_dir))
+    _append_chrome_arg_once(extra_args, "--no-first-run")
+    _append_chrome_arg_once(extra_args, "--no-default-browser-check")
+    if viewport and isinstance(viewport, dict):
+        width = viewport.get("width")
+        height = viewport.get("height")
+        if width and height:
+            _append_chrome_arg_once(extra_args, "--window-size", f"{width},{height}")
+
+    chrome_args = build_args(
+        True,
+        extra_args,
+        timezone=timezone,
+        locale=locale,
+        headless=False,
+    )
+    chrome_args.extend(start_urls or [])
+    return subprocess.Popen(
+        [os.fspath(browser_path), *chrome_args],
+        **_chrome_popen_kwargs(env),
+    )
+
+
 async def _terminate_process_async(process: subprocess.Popen[Any] | None) -> None:
     if process is None:
         return
@@ -1537,6 +1590,7 @@ class RunningProfile:
     proxy_bridge: HttpProxyBridge | None = None
     xray_process: XrayProcess | None = None
     monitor_task: asyncio.Task | None = None
+    fingerprint_report: dict[str, Any] | None = None
 
 
 class BrowserManager:
@@ -1715,6 +1769,10 @@ class BrowserManager:
                 extra_args = self._build_fingerprint_args(profile)
                 if resolved_locale and not any(arg.startswith("--lang") for arg in user_launch_args):
                     extra_args.append(f"--lang={resolved_locale}")
+                if resolved_locale and not any(arg.startswith("--fingerprint-locale") for arg in user_launch_args):
+                    extra_args.append(f"--fingerprint-locale={resolved_locale}")
+                if resolved_timezone and not any(arg.startswith("--fingerprint-timezone") for arg in user_launch_args):
+                    extra_args.append(f"--fingerprint-timezone={resolved_timezone}")
                 if resolved_locale and not any(arg.startswith("--accept-lang") for arg in user_launch_args):
                     extra_args.append(f"--accept-lang={_accept_language_value(resolved_locale)}")
                 if SESSION_RESTORE_ARG not in extra_args:
@@ -1748,34 +1806,43 @@ class BrowserManager:
                     "height": profile.get("screen_height", 1080) - 133,
                 }
 
-            needs_browser_level_spoofing = bool(resolved_timezone or resolved_locale)
             use_manual_system_chrome = (
                 requested_launch_mode == "manual"
                 and self.runtime.runtime_mode == "native"
                 and browser_engine == "system_chrome"
                 and display is None
                 and not bool(profile.get("headless", False))
-                and not needs_browser_level_spoofing
             )
-            if (
+            use_manual_cloakbrowser = (
                 requested_launch_mode == "manual"
-                and browser_engine == "system_chrome"
-                and needs_browser_level_spoofing
-            ):
-                logger.info(
-                    "Profile %s needs browser-level locale/timezone spoofing; "
-                    "using debug launch instead of manual system Chrome",
-                    profile_id,
-                )
+                and self.runtime.runtime_mode == "native"
+                and browser_engine == "cloakbrowser"
+                and display is None
+                and not bool(profile.get("headless", False))
+            )
 
-            effective_launch_mode = "manual" if use_manual_system_chrome else "debug"
+            effective_launch_mode = (
+                "manual"
+                if use_manual_system_chrome or use_manual_cloakbrowser
+                else "debug"
+            )
             startup_urls = _startup_urls_for_profile(profile, profile_id)
 
-            if use_manual_system_chrome:
-                manual_start_urls: list[str] = []
-                if not _has_restorable_chrome_session(user_data_dir):
+            if use_manual_system_chrome or use_manual_cloakbrowser:
+                if _has_restorable_chrome_session(user_data_dir):
+                    # Keep restored tabs and add one local report tab so manual,
+                    # no-CDP launches are still checked on every startup.
+                    manual_start_urls = [
+                        NATIVE_START_PAGE_TEMPLATE.format(profile_id=profile_id)
+                    ]
+                else:
                     manual_start_urls = startup_urls
-                browser_process = _launch_system_chrome_manual_process(
+                manual_launcher = (
+                    _launch_system_chrome_manual_process
+                    if use_manual_system_chrome
+                    else _launch_cloakbrowser_manual_process
+                )
+                browser_process = manual_launcher(
                     **launch_options,
                     start_urls=manual_start_urls,
                 )
@@ -1841,17 +1908,20 @@ class BrowserManager:
                     });
                 """
                 init_scripts = [clipboard_init_js]
-                fingerprint_init_js = _build_fingerprint_init_script(
-                    locale=resolved_locale,
-                    timezone=resolved_timezone,
-                    platform=profile.get("platform"),
-                )
-                await _apply_cdp_locale_timezone_overrides(
-                    context,
-                    profile_id=profile_id,
-                    locale=resolved_locale,
-                    timezone=resolved_timezone,
-                )
+                fingerprint_init_js = ""
+                if browser_engine == "system_chrome":
+                    fingerprint_init_js = _build_fingerprint_init_script(
+                        locale=resolved_locale,
+                        timezone=resolved_timezone,
+                        platform=profile.get("platform"),
+                    )
+                if browser_engine == "system_chrome":
+                    await _apply_cdp_locale_timezone_overrides(
+                        context,
+                        profile_id=profile_id,
+                        locale=resolved_locale,
+                        timezone=resolved_timezone,
+                    )
                 if fingerprint_init_js:
                     init_scripts.append(fingerprint_init_js)
                 for script in init_scripts:
@@ -2042,8 +2112,26 @@ class BrowserManager:
         running = self.running.get(profile_id)
         if not running:
             raise RuntimeError(f"Profile {profile_id} is not running")
-        if running.context is None or running.cdp_port is None:
-            raise RuntimeError("日常启动未开启调试连接；请停止后使用“调试启动”再运行指纹自检")
+        if running.context is None:
+            if running.fingerprint_report is not None:
+                return running.fingerprint_report
+            raise RuntimeError("起始页尚未完成自动自检，请先打开该浏览器的起始页后重试")
+
+        raw = await run_fingerprint_probe(running.context)
+        return self.record_fingerprint_report(profile, raw, collection="active")
+
+    def record_fingerprint_report(
+        self,
+        profile: dict[str, Any],
+        raw: dict[str, Any],
+        *,
+        collection: str = "passive",
+    ) -> dict[str, Any]:
+        """Analyze and cache a report collected by the profile itself or Manager."""
+        profile_id = profile["id"]
+        running = self.running.get(profile_id)
+        if not running:
+            raise RuntimeError(f"Profile {profile_id} is not running")
 
         expected_locale = running.effective_locale or profile.get("locale")
         expected_timezone = running.effective_timezone or profile.get("timezone")
@@ -2052,7 +2140,6 @@ class BrowserManager:
         expected_hardware_concurrency = (
             None if running.browser_engine == "system_chrome" else profile.get("hardware_concurrency")
         )
-        raw = await run_fingerprint_probe(running.context)
         analysis = analyze_fingerprint(
             raw,
             expected_locale=expected_locale,
@@ -2062,10 +2149,12 @@ class BrowserManager:
             expected_screen_height=expected_screen_height,
             expected_hardware_concurrency=expected_hardware_concurrency,
         )
-        return {
+        report = {
             "profile_id": profile_id,
             "expected": {
                 "browser_engine": running.browser_engine,
+                "launch_mode": running.launch_mode,
+                "external_cdp": running.cdp_port is not None,
                 "locale": expected_locale,
                 "timezone": expected_timezone,
                 "platform": profile.get("platform"),
@@ -2074,9 +2163,12 @@ class BrowserManager:
                 "hardware_concurrency": expected_hardware_concurrency,
             },
             "proxy_geo": running.proxy_geo,
+            "collection": collection,
             "analysis": analysis,
             "raw": raw,
         }
+        running.fingerprint_report = report
+        return report
 
     async def cleanup_all(self):
         """Stop all running profiles. Called on shutdown."""

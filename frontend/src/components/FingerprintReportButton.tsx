@@ -108,6 +108,12 @@ export function FingerprintReportButton({
                   </div>
 
                   <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600">
+                    启动方式：{report.expected.launch_mode === "manual" ? "日常无外部 CDP" : "调试模式"}
+                    {" · "}采集方式：{report.collection === "passive" ? "浏览器起始页自动采集" : "Manager 主动检查"}
+                    {" · "}外部 CDP：{report.expected.external_cdp ? "已开启" : "未开启"}
+                  </div>
+
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600">
                     这里的“预期语言 / 时区”是浏览器层值，System 时区仍然是本机系统时区，不会被 Manager 修改。
                   </div>
 

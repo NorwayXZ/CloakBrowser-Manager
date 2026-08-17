@@ -73,3 +73,37 @@ def test_windows_platform_mismatch_is_reported():
     signals = {issue["signal"] for issue in result["issues"]}
     assert "platform" in signals
     assert "navigator.userAgentData.platform" in signals
+
+
+def test_scope_locale_and_timezone_mismatch_is_reported_without_expected_values():
+    main = {
+        "navigator": {"language": "en-US", "languages": ["en-US"]},
+        "intl": {
+            "dateTime": {"locale": "en-US"},
+            "number": {"locale": "en-US"},
+            "collator": {"locale": "en-US"},
+        },
+        "date": {"timezone": "America/New_York"},
+    }
+    iframe = {
+        "navigator": {"language": "fr-FR", "languages": ["fr-FR"]},
+        "intl": {
+            "dateTime": {"locale": "fr-FR"},
+            "number": {"locale": "fr-FR"},
+            "collator": {"locale": "fr-FR"},
+        },
+        "date": {"timezone": "Europe/Paris"},
+    }
+    result = analyze_fingerprint(
+        {"main": main, "iframe": iframe, "worker": iframe},
+        expected_locale=None,
+        expected_timezone=None,
+        expected_platform=None,
+        expected_screen_width=None,
+        expected_screen_height=None,
+        expected_hardware_concurrency=None,
+    )
+
+    signals = {issue["signal"] for issue in result["issues"]}
+    assert "scope_consistency.navigator.language" in signals
+    assert "scope_consistency.timezone" in signals

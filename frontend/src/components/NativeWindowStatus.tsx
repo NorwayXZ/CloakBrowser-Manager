@@ -29,9 +29,14 @@ export function NativeWindowStatus({
           {profileName} 正在这台电脑上运行。请在弹出的 {isSystemChrome ? "Google Chrome 原生" : "CloakBrowser/Chromium"} 窗口里浏览。
         </p>
         {isManual ? (
-          <div className="mt-5 flex items-center justify-center gap-2 text-xs text-emerald-300">
+          <div className="mt-5 flex flex-wrap items-center justify-center gap-2 text-xs text-emerald-700">
             <ExternalLink className="h-3.5 w-3.5" />
-            <span>日常模式：未开启调试连接</span>
+            <span>日常模式：未开启外部 CDP</span>
+            <FingerprintReportButton
+              profileId={profileId}
+              disabled={false}
+              disabledReason="起始页尚未完成自动自检"
+            />
           </div>
         ) : (
           <div className="mt-5 flex items-center justify-center gap-2 text-xs text-gray-500">

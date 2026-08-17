@@ -532,6 +532,81 @@ def _mock_running_profile(pid: str) -> MagicMock:
     return mock
 
 
+def _passive_report_payload() -> dict:
+    values = {
+        "navigator": {
+            "webdriver": False,
+            "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_0) Chrome/145.0.0.0 Safari/537.36",
+            "platform": "MacIntel",
+            "language": "en-US",
+            "languages": ["en-US", "en"],
+            "userAgentData": {"platform": "macOS"},
+        },
+        "intl": {
+            "dateTime": {"locale": "en-US"},
+            "number": {"locale": "en-US"},
+            "collator": {"locale": "en-US"},
+        },
+        "date": {"timezone": "America/New_York"},
+        "page": {"secureContext": True},
+        "screen": {},
+        "graphics": {"canvasHashA": "a", "canvasHashB": "a", "audioHashA": "b", "audioHashB": "b"},
+        "nativeStrings": {},
+    }
+    return {
+        "main": values,
+        "iframe": values,
+        "worker": values,
+    }
+
+
+def test_manual_profile_accepts_and_returns_passive_fingerprint_report(app_client: TestClient):
+    create = app_client.post("/api/profiles", json={
+        "name": "Passive report",
+        "platform": "macos",
+        "browser_engine": "cloakbrowser",
+        "locale": "en-US",
+        "timezone": "America/New_York",
+    })
+    pid = create.json()["id"]
+    main.browser_mgr.running[pid] = RunningProfile(
+        profile_id=pid,
+        context=None,
+        cdp_port=None,
+        browser_engine="cloakbrowser",
+        launch_mode="manual",
+        effective_locale="en-US",
+        effective_timezone="America/New_York",
+    )
+
+    submitted = app_client.post(
+        f"/profile/{pid}/fingerprint-report",
+        json=_passive_report_payload(),
+    )
+    assert submitted.status_code == 200
+    report = submitted.json()
+    assert report["collection"] == "passive"
+    assert report["expected"]["external_cdp"] is False
+    assert report["analysis"]["status"] == "pass"
+
+    fetched = app_client.get(f"/api/profiles/{pid}/fingerprint-report")
+    assert fetched.status_code == 200
+    assert fetched.json()["analysis"]["status"] == "pass"
+    main.browser_mgr.running.pop(pid, None)
+
+
+def test_profile_start_page_embeds_automatic_passive_check(app_client: TestClient):
+    create = app_client.post("/api/profiles", json={"name": "Start report"})
+    pid = create.json()["id"]
+
+    response = app_client.get(f"/profile/{pid}/start")
+
+    assert response.status_code == 200
+    assert "启动自检" in response.text
+    assert f"/profile/{pid}/fingerprint-report" in response.text
+    assert "const collectFingerprint = async () =>" in response.text
+
+
 def test_cdp_json_version_rewrites_ws_url(app_client: TestClient):
     """GET /cdp/json/version rewrites webSocketDebuggerUrl through our proxy."""
     create = app_client.post("/api/profiles", json={"name": "CdpVer"})

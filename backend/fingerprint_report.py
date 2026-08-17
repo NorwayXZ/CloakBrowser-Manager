@@ -419,6 +419,80 @@ def analyze_fingerprint(
                 message="Timezone does not match the profile/proxy timezone",
             )
 
+    # A profile can have no explicit locale/timezone (for example when GeoIP is
+    # unavailable). The browser surfaces must still agree with each other.
+    # Compare against main rather than inventing a value from one child scope.
+    main_values = raw.get("main") if isinstance(raw.get("main"), dict) else None
+    if main_values:
+        main_nav = main_values.get("navigator", {})
+        main_intl = main_values.get("intl", {})
+        main_date = main_values.get("date", {})
+        main_language = main_nav.get("language")
+        main_first_language = _first_language(main_values)
+        main_timezone = main_date.get("timezone")
+        main_intl_values = {
+            "Intl.DateTimeFormat": main_intl.get("dateTime", {}).get("locale"),
+            "Intl.NumberFormat": main_intl.get("number", {}).get("locale"),
+            "Intl.Collator": main_intl.get("collator", {}).get("locale"),
+        }
+        for scope in ("iframe", "worker"):
+            values = raw.get(scope)
+            if not isinstance(values, dict) or values.get("error"):
+                continue
+            nav = values.get("navigator", {})
+            intl = values.get("intl", {})
+            date = values.get("date", {})
+            scope_language = nav.get("language")
+            if main_language and scope_language and not _locale_matches(str(scope_language), str(main_language)):
+                _add_issue(
+                    issues,
+                    severity="error",
+                    signal="scope_consistency.navigator.language",
+                    scope=scope,
+                    expected=main_language,
+                    actual=scope_language,
+                    message="Main page, iframe and Worker navigator.language values differ",
+                )
+            scope_first_language = _first_language(values)
+            if main_first_language and scope_first_language and not _locale_matches(str(scope_first_language), str(main_first_language)):
+                _add_issue(
+                    issues,
+                    severity="error",
+                    signal="scope_consistency.navigator.languages",
+                    scope=scope,
+                    expected=main_first_language,
+                    actual=scope_first_language,
+                    message="Main page, iframe and Worker navigator.languages values differ",
+                )
+            scope_intl_values = {
+                "Intl.DateTimeFormat": intl.get("dateTime", {}).get("locale"),
+                "Intl.NumberFormat": intl.get("number", {}).get("locale"),
+                "Intl.Collator": intl.get("collator", {}).get("locale"),
+            }
+            for signal, actual in scope_intl_values.items():
+                expected = main_intl_values[signal]
+                if expected and actual and not _locale_matches(str(actual), str(expected)):
+                    _add_issue(
+                        issues,
+                        severity="error",
+                        signal=f"scope_consistency.{signal}",
+                        scope=scope,
+                        expected=expected,
+                        actual=actual,
+                        message=f"Main page, iframe and Worker {signal} locales differ",
+                    )
+            scope_timezone = date.get("timezone")
+            if main_timezone and scope_timezone and scope_timezone != main_timezone:
+                _add_issue(
+                    issues,
+                    severity="error",
+                    signal="scope_consistency.timezone",
+                    scope=scope,
+                    expected=main_timezone,
+                    actual=scope_timezone,
+                    message="Main page, iframe and Worker timezones differ",
+                )
+
     main = raw.get("main", {}) if isinstance(raw.get("main"), dict) else {}
     nav = main.get("navigator", {}) if isinstance(main.get("navigator"), dict) else {}
     page = main.get("page", {}) if isinstance(main.get("page"), dict) else {}

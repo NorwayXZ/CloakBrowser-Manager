@@ -209,6 +209,7 @@ function platformLabel(platform: DevicePlatform): string {
 function createDefaultForm(hostOS?: HostOS | null): ProfileCreateData {
   return applyDeviceProfile({
     name: "",
+    browser_engine: "cloakbrowser",
     humanize: true,
     human_preset: "default",
     headless: false,
@@ -707,8 +708,8 @@ export function ProfileForm({
                       </select>
                       <div className="mt-1 text-xs text-accent">
                         {currentEngine === "system_chrome"
-                          ? "日常启动默认不打开 CDP，只是原生真 Chrome；一旦这个配置需要跟随代理的时区/语言，Manager 会自动切到调试启动。"
-                          : "启用画像参数，适合继续调试指纹一致性。"}
+                          ? "日常启动始终不打开外部 CDP。系统 Chrome 会使用语言参数和进程时区，但能否完整生效由本机 Chrome 决定，启动自检会如实报告。"
+                          : "日常启动直接运行 CloakBrowser 二进制，不打开外部 CDP；语言和时区由底层参数统一应用到主页面、iframe 与 Worker。"}
                       </div>
                     </div>
 

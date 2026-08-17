@@ -280,28 +280,27 @@ def _launch_profile(tmp_path: Path) -> dict:
 async def test_native_launch_skips_vnc_and_display(monkeypatch, tmp_path: Path):
     from backend import browser_manager as module
 
-    context = MagicMock()
-    context.pages = []
-    context.add_init_script = AsyncMock()
     manager = BrowserManager(NATIVE_RUNTIME)
     manager.vnc.allocate = AsyncMock()
     manager.vnc.start_vnc = AsyncMock()
-    manager._wait_for_cdp = AsyncMock()
-    launch = AsyncMock(return_value=context)
-    monkeypatch.setattr(module, "launch_persistent_context_async", launch)
-
+    manual_launch = MagicMock(return_value=MagicMock())
+    monkeypatch.setattr(module, "_launch_cloakbrowser_manual_process", manual_launch)
+    monkeypatch.setattr(manager, "_watch_process", AsyncMock())
     running = await manager.launch(_launch_profile(tmp_path))
 
     assert running.display is None
     assert running.ws_port is None
+    assert running.context is None
+    assert running.cdp_port is None
+    assert running.launch_mode == "manual"
     manager.vnc.allocate.assert_not_awaited()
     manager.vnc.start_vnc.assert_not_awaited()
-    options = launch.await_args.kwargs
+    options = manual_launch.call_args.kwargs
     assert "env" not in options
     assert "viewport" not in options
     assert "--use-angle=swiftshader" not in options["args"]
     assert "--restore-last-session" in options["args"]
-    assert "--remote-debugging-address=127.0.0.1" in options["args"]
+    assert not any(arg.startswith("--remote-debugging") for arg in options["args"])
 
 
 @pytest.mark.asyncio
@@ -449,6 +448,30 @@ async def test_system_chrome_manual_launch_does_not_reserve_cdp(monkeypatch, tmp
 
 
 @pytest.mark.asyncio
+async def test_manual_launch_adds_self_check_tab_when_restoring_session(monkeypatch, tmp_path: Path):
+    from backend import browser_manager as module
+
+    user_data_dir = tmp_path / "profile-1"
+    sessions_dir = user_data_dir / "Default" / "Sessions"
+    sessions_dir.mkdir(parents=True)
+    (sessions_dir / "Session_1").write_bytes(b"restorable")
+    manager = BrowserManager(RuntimeConfig("macos", "native", "native-window", tmp_path))
+    manual_launch = MagicMock(return_value=MagicMock())
+    monkeypatch.setattr(module, "_launch_cloakbrowser_manual_process", manual_launch)
+    monkeypatch.setattr(manager, "_watch_process", AsyncMock())
+
+    await manager.launch({
+        **_launch_profile(tmp_path),
+        "user_data_dir": str(user_data_dir),
+        "startup_urls": ["https://example.com/should-not-duplicate"],
+    })
+
+    assert manual_launch.call_args.kwargs["start_urls"] == [
+        "http://127.0.0.1:8080/profile/profile-1/start"
+    ]
+
+
+@pytest.mark.asyncio
 async def test_native_system_chrome_keeps_restored_tabs(monkeypatch, tmp_path: Path):
     from backend import browser_manager as module
 
@@ -512,7 +535,7 @@ async def test_native_close_event_releases_session(monkeypatch, tmp_path: Path):
         "launch_persistent_context_async",
         AsyncMock(return_value=context),
     )
-    running = await manager.launch(_launch_profile(tmp_path))
+    running = await manager.launch(_launch_profile(tmp_path), launch_mode="debug")
     close_callback = context.on.call_args.args[1]
 
     await close_callback(context)
@@ -548,7 +571,7 @@ async def test_docker_launch_keeps_vnc_display(monkeypatch, tmp_path: Path):
     launch = AsyncMock(return_value=context)
     monkeypatch.setattr(module, "launch_persistent_context_async", launch)
 
-    running = await manager.launch(_launch_profile(tmp_path))
+    running = await manager.launch(_launch_profile(tmp_path), launch_mode="debug")
 
     assert running.display == 100
     assert running.ws_port == 6100
@@ -576,7 +599,7 @@ async def test_launch_retries_failed_cdp_and_closes_first_context(
     launch = AsyncMock(side_effect=[first_context, second_context])
     monkeypatch.setattr(module, "launch_persistent_context_async", launch)
 
-    running = await manager.launch(_launch_profile(tmp_path))
+    running = await manager.launch(_launch_profile(tmp_path), launch_mode="debug")
 
     assert launch.await_count == 2
     first_context.close.assert_awaited_once()
@@ -805,7 +828,7 @@ async def test_launch_applies_locale_timezone_to_process_and_page(
     profile["locale"] = "en-US"
     profile["timezone"] = "America/New_York"
 
-    await manager.launch(profile)
+    await manager.launch(profile, launch_mode="debug")
 
     options = launch.await_args.kwargs
     assert options["locale"] == "en-US"
@@ -814,35 +837,29 @@ async def test_launch_applies_locale_timezone_to_process_and_page(
     assert "--accept-lang=en-US,en" in options["args"]
     assert options["env"]["TZ"] == "America/New_York"
     assert options["env"]["LANG"] == "en_US.UTF-8"
-    assert context.new_cdp_session.await_count == 1
+    assert "--fingerprint-locale=en-US" in options["args"]
+    assert "--fingerprint-timezone=America/New_York" in options["args"]
+    assert context.new_cdp_session.await_count == 0
     assert context.on.called
-    assert session.send.await_args_list == [
-        call("Emulation.setTimezoneOverride", {"timezoneId": "America/New_York"}),
-        call("Emulation.setLocaleOverride", {"locale": "en_US"}),
-    ]
+    assert session.send.await_args_list == []
 
     init_scripts = [item.args[0] for item in context.add_init_script.await_args_list]
-    assert any("Navigator.prototype" in script for script in init_scripts)
-    assert any("Date.prototype.getTimezoneOffset" in script for script in init_scripts)
+    assert not any("Navigator.prototype" in script for script in init_scripts)
+    assert not any("Date.prototype.getTimezoneOffset" in script for script in init_scripts)
 
 
 @pytest.mark.asyncio
-async def test_system_chrome_manual_launch_falls_back_to_debug_when_spoofing_is_needed(
+async def test_system_chrome_manual_launch_stays_native_without_debug_when_spoofing_is_requested(
     monkeypatch,
     tmp_path: Path,
 ):
     from backend import browser_manager as module
 
-    context = MagicMock()
-    context.pages = []
-    context.add_init_script = AsyncMock()
-    context.on = MagicMock()
     manager = BrowserManager(NATIVE_RUNTIME)
-    manager._wait_for_cdp = AsyncMock()
-    launch = AsyncMock(return_value=context)
-    manual_launch = MagicMock(side_effect=AssertionError("manual path should not be used"))
-    monkeypatch.setattr(module, "_launch_system_chrome_persistent_context_async", launch)
+    fake_process = MagicMock()
+    manual_launch = MagicMock(return_value=fake_process)
     monkeypatch.setattr(module, "_launch_system_chrome_manual_process", manual_launch)
+    monkeypatch.setattr(manager, "_watch_process", AsyncMock())
 
     profile = _launch_profile(tmp_path)
     profile["browser_engine"] = "system_chrome"
@@ -850,10 +867,9 @@ async def test_system_chrome_manual_launch_falls_back_to_debug_when_spoofing_is_
 
     running = await manager.launch(profile, launch_mode="manual")
 
-    assert running.launch_mode == "debug"
-    assert launch.await_count == 1
-    manual_launch.assert_not_called()
-    assert context.on.called
+    assert running.launch_mode == "manual"
+    manual_launch.assert_called_once()
+    assert running.context is None
 
 
 @pytest.mark.asyncio
@@ -884,7 +900,7 @@ async def test_launch_uses_proxy_geo_when_geoip_off(
     profile["proxy"] = "http://proxy.example:8080"
     profile["geoip"] = False
 
-    running = await manager.launch(profile)
+    running = await manager.launch(profile, launch_mode="debug")
 
     assert running.proxy_geo == geo
     options = launch.await_args.kwargs

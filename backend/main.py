@@ -32,6 +32,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from . import database as db
 from .browser_manager import BrowserManager, _normalize_proxy, _validate_proxy
+from .fingerprint_report import DIAGNOSTIC_SCRIPT
 from .proxy_bridge import HttpProxyBridge
 from .proxy_geo import fetch_proxy_geo
 from .updater import UpdateError, update_from_git
@@ -880,6 +881,23 @@ async def get_fingerprint_report(profile_id: str):
         raise HTTPException(status_code=500, detail="指纹自检失败") from exc
 
 
+@app.post("/profile/{profile_id}/fingerprint-report", include_in_schema=False)
+async def receive_passive_fingerprint_report(
+    profile_id: str,
+    raw: dict = Body(...),
+):
+    """Receive a same-origin report from a browser launched without CDP."""
+    profile = db.get_profile(profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    if profile_id not in browser_mgr.running:
+        raise HTTPException(status_code=409, detail="Profile is not running")
+    try:
+        return browser_mgr.record_fingerprint_report(profile, raw, collection="passive")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @app.get("/profile/{profile_id}/start", response_class=HTMLResponse, include_in_schema=False)
 async def profile_start_page(profile_id: str):
     """Show proxy and browser time details when a native profile opens."""
@@ -915,6 +933,8 @@ async def profile_start_page(profile_id: str):
     proxy_state = "已配置" if profile.get("proxy") else "未配置"
     status = "运行中" if running else "未启动"
     source = html.escape(str(geo.get("source") or "Manager"))
+    diagnostic_script = DIAGNOSTIC_SCRIPT.strip()
+    report_url = json.dumps(f"/profile/{profile_id}/fingerprint-report")
 
     return HTMLResponse(
         f"""<!doctype html>
@@ -1002,6 +1022,7 @@ async def profile_start_page(profile_id: str):
           <dt>屏幕尺寸</dt><dd id="screen-size">读取中...</dd>
           <dt>页面视口</dt><dd id="viewport-size">读取中...</dd>
           <dt>设备像素比</dt><dd id="device-scale">读取中...</dd>
+          <dt>启动自检</dt><dd id="fingerprint-check">采集中...</dd>
         </dl>
       </section>
     </div>
@@ -1030,6 +1051,30 @@ async def profile_start_page(profile_id: str):
     }};
     updateBrowserValues();
     window.setInterval(updateBrowserValues, 1000);
+
+    const collectFingerprint = {diagnostic_script};
+    const submitFingerprintReport = async () => {{
+      const statusNode = document.querySelector("#fingerprint-check");
+      try {{
+        const raw = await collectFingerprint();
+        const response = await fetch({report_url}, {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify(raw),
+        }});
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || "自检提交失败");
+        const analysis = result.analysis;
+        statusNode.textContent = analysis.status === "pass"
+          ? `通过 · ${{analysis.score}} 分`
+          : `${{analysis.status === "fail" ? "未通过" : "有警告"}} · ${{analysis.score}} 分`;
+        statusNode.style.color = analysis.status === "pass" ? "#76e4a3" : "#f6c177";
+      }} catch (error) {{
+        statusNode.textContent = `采集失败：${{String(error)}}`;
+        statusNode.style.color = "#ff8a8a";
+      }}
+    }};
+    void submitFingerprintReport();
   </script>
 </body>
 </html>"""
