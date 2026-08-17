@@ -34,6 +34,7 @@ from . import database as db
 from .browser_manager import BrowserManager, _normalize_proxy, _validate_proxy
 from .proxy_bridge import HttpProxyBridge
 from .proxy_geo import fetch_proxy_geo
+from .updater import UpdateError, update_from_git
 from .xray_runtime import is_xray_link, start_xray_proxy
 from .models import (
     AuthAccountUpdate,
@@ -43,6 +44,7 @@ from .models import (
     LaunchRequest,
     LaunchResponse,
     LoginRequest,
+    ManagerUpdateResponse,
     ProfileCreate,
     ProfileResponse,
     ProfileStatusResponse,
@@ -321,6 +323,7 @@ browser_mgr = BrowserManager()
 
 # Frontend build directory (React production build)
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend" / "dist"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 # ---------------------------------------------------------------------------
@@ -1056,6 +1059,18 @@ async def get_system_status():
         runtime_mode=browser_mgr.runtime.runtime_mode,
         viewer_mode=browser_mgr.runtime.viewer_mode,
     )
+
+
+@app.post("/api/update", response_model=ManagerUpdateResponse)
+async def update_manager():
+    try:
+        result = await asyncio.to_thread(update_from_git, PROJECT_ROOT)
+        return ManagerUpdateResponse(**result.__dict__)
+    except UpdateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Manager update failed")
+        raise HTTPException(status_code=500, detail=f"升级失败：{exc}") from exc
 
 
 @app.post("/api/proxy/test", response_model=ProxyTestResponse)

@@ -104,6 +104,17 @@ export interface SystemStatus {
   viewer_mode: ViewerMode;
 }
 
+export interface ManagerUpdateResult {
+  ok: boolean;
+  updated: boolean;
+  before: string | null;
+  after: string | null;
+  branch: string | null;
+  restart_required: boolean;
+  message: string;
+  log: string[];
+}
+
 export interface ProxyTestResult {
   ok: boolean;
   ip: string | null;
@@ -297,6 +308,9 @@ export const api = {
     request<{ ok: boolean }>(`/api/profiles/${id}/stop`, { method: "POST" }),
 
   getStatus: () => request<SystemStatus>("/api/status"),
+
+  updateManager: () =>
+    request<ManagerUpdateResult>("/api/update", { method: "POST" }),
 
   getFingerprintReport: (id: string) =>
     request<FingerprintReport>(`/api/profiles/${id}/fingerprint-report`),

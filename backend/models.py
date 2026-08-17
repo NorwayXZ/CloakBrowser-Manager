@@ -159,6 +159,17 @@ class StatusResponse(BaseModel):
     viewer_mode: ViewerMode
 
 
+class ManagerUpdateResponse(BaseModel):
+    ok: bool
+    updated: bool
+    before: str | None = None
+    after: str | None = None
+    branch: str | None = None
+    restart_required: bool = False
+    message: str
+    log: list[str] = []
+
+
 class ProxyTestRequest(BaseModel):
     proxy: str
 

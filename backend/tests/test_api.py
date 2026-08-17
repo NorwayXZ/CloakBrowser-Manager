@@ -293,6 +293,46 @@ def test_system_status(app_client: TestClient):
     assert data["profiles_total"] >= 1
 
 
+@dataclass
+class FakeUpdateResult:
+    ok: bool = True
+    updated: bool = True
+    before: str | None = "old123"
+    after: str | None = "new456"
+    branch: str | None = "main"
+    restart_required: bool = True
+    message: str = "已升级"
+    log: list[str] | None = None
+
+    def __post_init__(self):
+        if self.log is None:
+            self.log = ["$ git pull --ff-only"]
+
+
+def test_update_manager(app_client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(main, "update_from_git", lambda _root: FakeUpdateResult())
+
+    resp = app_client.post("/api/update")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["updated"] is True
+    assert data["restart_required"] is True
+    assert data["after"] == "new456"
+
+
+def test_update_manager_conflict(app_client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    def fail(_root):
+        raise main.UpdateError("本地代码有未提交改动")
+
+    monkeypatch.setattr(main, "update_from_git", fail)
+
+    resp = app_client.post("/api/update")
+
+    assert resp.status_code == 409
+    assert "未提交改动" in resp.json()["detail"]
+
+
 # ── Launch Args ─────────────────────────────────────────────────────────────
 
 

@@ -103,6 +103,20 @@ describe("api.stopProfile", () => {
   });
 });
 
+// ── updateManager ───────────────────────────────────────────────────────────
+
+describe("api.updateManager", () => {
+  it("sends POST to update endpoint", async () => {
+    const result = { ok: true, updated: false, restart_required: false, message: "已经是最新版本", log: [] };
+    mockFetch.mockResolvedValueOnce(jsonResponse(result));
+    const data = await api.updateManager();
+    expect(data.updated).toBe(false);
+    const [url, options] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/update");
+    expect(options.method).toBe("POST");
+  });
+});
+
 // ── setClipboard ────────────────────────────────────────────────────────────
 
 describe("api.setClipboard", () => {

@@ -25,7 +25,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import type { LaunchMode, Profile, ProfileGroup, ProxyPreset } from "../lib/api";
+import { api, type LaunchMode, type ManagerUpdateResult, type Profile, type ProfileGroup, type ProxyPreset } from "../lib/api";
 import { StatusIndicator } from "./StatusIndicator";
 
 interface EnvironmentManagerProps {
@@ -60,6 +60,11 @@ interface EnvironmentManagerProps {
 type ManagerSection = "profiles" | "groups" | "proxies" | "trash";
 type ProxyInputMode = "single" | "batch";
 type ProxyMode = "http" | "https" | "socks5" | "vless" | "vmess" | "trojan" | "ss";
+type UpdateNotice = {
+  tone: "success" | "info" | "error";
+  text: string;
+  result?: ManagerUpdateResult;
+};
 
 const navItems: { id: ManagerSection; label: string; icon: typeof LayoutGrid }[] = [
   { id: "profiles", label: "环境管理", icon: LayoutGrid },
@@ -257,6 +262,8 @@ export function EnvironmentManager({
   const [proxyBatchText, setProxyBatchText] = useState("");
   const [proxyError, setProxyError] = useState<string | null>(null);
   const [proxySaving, setProxySaving] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const [updateNotice, setUpdateNotice] = useState<UpdateNotice | null>(null);
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
@@ -522,6 +529,31 @@ export function EnvironmentManager({
     }
   };
 
+  const handleUpdateManager = async () => {
+    if (updating) return;
+    if (runningCount > 0 && !confirm("当前还有浏览器正在运行。升级会拉取新代码并重建面板，建议先关闭浏览器。确定继续升级吗？")) {
+      return;
+    }
+    setUpdating(true);
+    setUpdateNotice(null);
+    try {
+      const result = await api.updateManager();
+      setUpdateNotice({
+        tone: result.updated ? "success" : "info",
+        text: result.message,
+        result,
+      });
+      await onRefresh();
+    } catch (err) {
+      setUpdateNotice({
+        tone: "error",
+        text: err instanceof Error ? err.message : "升级失败",
+      });
+    } finally {
+      setUpdating(false);
+    }
+  };
+
   return (
     <div className="flex h-screen bg-surface-0 text-slate-900">
       <aside className="flex w-[248px] shrink-0 flex-col border-r border-border bg-white">
@@ -590,6 +622,15 @@ export function EnvironmentManager({
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              className="btn-secondary flex items-center gap-1.5 px-3 disabled:opacity-60"
+              title="从 GitHub 拉取最新代码并重建本地面板"
+              disabled={updating}
+              onClick={() => void handleUpdateManager()}
+            >
+              <RefreshCw className={`h-4 w-4 ${updating ? "animate-spin" : ""}`} />
+              <span>{updating ? "升级中" : "升级"}</span>
+            </button>
             <button className="btn-secondary px-2.5" title="刷新" onClick={() => void onRefresh()}>
               <RefreshCw className="h-4 w-4" />
             </button>
@@ -605,6 +646,50 @@ export function EnvironmentManager({
             )}
           </div>
         </header>
+
+        {updateNotice && (
+          <div className={`border-b px-5 py-3 ${
+            updateNotice.tone === "error"
+              ? "border-red-200 bg-red-50"
+              : updateNotice.tone === "success"
+              ? "border-emerald-200 bg-emerald-50"
+              : "border-blue-200 bg-blue-50"
+          }`}>
+            <div className={`flex items-start gap-3 rounded-md border bg-white/70 px-3 py-2 text-sm ${
+              updateNotice.tone === "error"
+                ? "border-red-200 text-red-900"
+                : updateNotice.tone === "success"
+                ? "border-emerald-200 text-emerald-900"
+                : "border-blue-200 text-blue-900"
+            }`}>
+              <div className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
+                updateNotice.tone === "error"
+                  ? "bg-red-100 text-red-700"
+                  : updateNotice.tone === "success"
+                  ? "bg-emerald-100 text-emerald-700"
+                  : "bg-blue-100 text-blue-700"
+              }`}>
+                {updateNotice.tone === "error" ? <AlertTriangle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold">
+                  {updateNotice.tone === "error" ? "升级失败" : updateNotice.result?.restart_required ? "升级完成，需要重启" : "升级检查完成"}
+                </div>
+                <div className="mt-0.5 whitespace-pre-wrap break-words text-xs leading-5">{updateNotice.text}</div>
+                {updateNotice.result?.restart_required && (
+                  <div className="mt-1 text-xs font-medium">请关闭当前终端里的 Manager，然后重新运行启动命令。</div>
+                )}
+              </div>
+              <button
+                className="shrink-0 rounded p-1 text-current opacity-60 hover:bg-white hover:opacity-100"
+                title="关闭提示"
+                onClick={() => setUpdateNotice(null)}
+              >
+                <XCircle className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
 
         {error && (
           <div className="border-b border-amber-200 bg-amber-50 px-5 py-3">
