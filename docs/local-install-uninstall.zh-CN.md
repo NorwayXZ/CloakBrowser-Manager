@@ -8,12 +8,73 @@
 - 浏览器画像数据不保存在项目文件夹里，而是保存在系统用户目录。
 - 默认卸载只删除运行环境，不删除画像、Cookie 和登录状态。
 - 彻底删除数据前，请先备份整个 `CloakBrowser Manager` 文件夹。
+- 这是本地 Windows / macOS 使用教程，不是服务器部署教程。
+
+## 安装前必须准备什么
+
+请先安装这些依赖，顺序不要乱：
+
+1. **Google Chrome**
+   - 下载地址：`https://www.google.com/chrome/`
+   - macOS 的稳定原生模式会调用本机 Chrome。
+
+2. **Python 3.10 或更高版本**
+   - 下载地址：`https://www.python.org/downloads/`
+   - Windows 安装时必须勾选 `Add Python to PATH`。
+
+3. **Node.js 18 或更高版本**
+   - 下载地址：`https://nodejs.org/`
+   - 安装 LTS 版本即可。
+
+4. **Git，可选**
+   - 下载地址：`https://git-scm.com/downloads`
+   - 不会 Git 的用户可以直接在 GitHub 点击 `Code` → `Download ZIP`。
+
+检查依赖是否安装成功：
+
+macOS：
+
+```bash
+python3 --version
+node --version
+npm --version
+git --version
+```
+
+Windows：
+
+```text
+py -3 --version
+node --version
+npm --version
+git --version
+```
+
+如果某个命令提示找不到，就先把对应软件装好，再继续下一步。
+
+## 下载项目
+
+会用 Git 的用户：
+
+```bash
+git clone https://github.com/NorwayXZ/CloakBrowser-Manager.git
+cd CloakBrowser-Manager
+```
+
+不会 Git 的用户：
+
+1. 打开 GitHub 项目页面。
+2. 点击绿色 `Code`。
+3. 点击 `Download ZIP`。
+4. 解压 ZIP。
+5. 进入解压后的项目文件夹。
 
 ## 一键安装
 
 macOS：
 
 ```bash
+chmod +x install-macos.sh run-macos.sh uninstall-macos.sh bin/cloak
 ./install-macos.sh
 ```
 
@@ -26,7 +87,7 @@ Windows：
 如果 macOS 提示“没有权限运行”，在项目文件夹打开终端执行：
 
 ```bash
-chmod +x install-macos.sh uninstall-macos.sh
+chmod +x install-macos.sh run-macos.sh uninstall-macos.sh bin/cloak
 ./install-macos.sh
 ```
 
@@ -39,14 +100,34 @@ chmod +x install-macos.sh uninstall-macos.sh
 5. 启动 Manager
 6. 打开 `http://127.0.0.1:8080`
 
-前置条件：
-
-- macOS 或 Windows
-- Python 3.10 或更高版本
-- Node.js 18 或更高版本
-- macOS 的“稳定原生”模式需要已安装 Google Chrome
-
 首次安装需要下载依赖，时间和网络速度有关。以后再次双击 `run-macos.sh`、`run-windows.bat` 即可启动，不会重复安装未变化的依赖。
+
+## 日常启动和关闭
+
+macOS 启动：
+
+```bash
+./run-macos.sh
+```
+
+Windows 启动：
+
+```text
+双击 run-windows.bat
+```
+
+打开地址：
+
+```text
+http://127.0.0.1:8080
+```
+
+关闭方式：
+
+- macOS：在运行 Manager 的终端按 `Control + C`
+- Windows：在运行 Manager 的窗口按 `Ctrl + C`，或关闭命令窗口
+
+如果提示 8080 被占用，先打开 `http://127.0.0.1:8080` 看看是不是已经在运行。
 
 ## 一键卸载
 

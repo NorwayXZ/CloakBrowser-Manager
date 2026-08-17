@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-ROOT="/Users/norwayx/Documents/New project/CloakBrowser-Manager"
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 URL="http://127.0.0.1:8080"
 STATUS_URL="$URL/api/status"
 LOG_DIR="$HOME/Library/Logs/CloakBrowser Manager"

@@ -1,78 +1,47 @@
 # CloakBrowser Manager 本地版
 
-这是基于 CloakBrowser-Manager 的本地桌面版配置管理器，重点面向 Windows 和 macOS。
+这是给普通用户看的中文安装说明。项目只面向本地 Windows / macOS 使用，不需要服务器。
 
-## 现在保留什么
+完整教程已经放在 GitHub 首页：[README.md](README.md)
 
-- 中文界面
-- 代理增强：HTTP / HTTPS / SOCKS5，分开填写主机、端口、账号、密码
-- 代理测试：可查看出口 IP、国家、时区、语言建议
-- Apple Silicon 画像：内置多组 M1 / M2 / M3 / M4 / M5 系列 macOS 设备画像
-- 稳定原生模式：macOS 本机可用系统 Google Chrome
-- 伪装画像模式：可继续调 GPU、CPU、UA、分辨率等参数
-- 指纹自检：启动后生成本地报告，提示明显不一致的地方
-- 双启动模式：日常启动不打开 CDP；调试启动才打开 CDP 供排查使用
-- 账号密码登录：可选，本地也能启用
+如果你是第一次安装，按这个顺序来：
 
-## 本地使用
+1. 安装 Google Chrome
+2. 安装 Python 3.10+
+3. 安装 Node.js 18+
+4. 下载本项目
+5. 运行安装脚本
+6. 打开 `http://127.0.0.1:8080`
 
-```bash
-Windows: install-windows.bat / run-windows.bat
-macOS:   ./install-macos.sh / ./run-macos.sh
-卸载:     uninstall-windows.bat / ./uninstall-macos.sh
-```
-
-首次启动会创建本地 Python 环境，安装依赖，构建前端，然后打开：
-
-```text
-http://127.0.0.1:8080
-```
-
-详细安装、卸载、备份和迁移说明见 [本地安装文档](docs/local-install-uninstall.zh-CN.md)。
-
-Windows 配置会保存在：
-
-```text
-%LOCALAPPDATA%\CloakBrowser Manager
-```
-
-macOS 配置会保存在：
-
-```text
-~/Library/Application Support/CloakBrowser Manager
-```
-
-每个画像的浏览器用户数据在上述目录的 `profiles/<profile-id>/` 中；CloakBrowser 二进制缓存默认在 macOS 的 `~/.cloakbrowser`、Windows 的 `%USERPROFILE%\.cloakbrowser`。不要把这两个位置混淆。
-
-## 使用建议
-
-macOS 本机的“稳定原生”模式适合直接用真实 Chrome。默认“启动”是日常模式：Manager 只负责打开 Chrome、使用独立资料夹和代理配置，不再连接 CDP。需要看 console、cookie 或运行指纹自检时，先停止浏览器，再点“调试启动”。
-
-伪装画像模式更适合继续调试指纹一致性、代理和语言时区。
-
-不要把“随机改参数”当成好画像。更稳的做法是选一套互相匹配的设备画像，再让语言、时区、代理 IP 尽量一致。
-
-## 开发
+macOS：
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r backend/requirements.txt
-uvicorn backend.main:app --reload --host 127.0.0.1 --port 8080
+cd CloakBrowser-Manager
+chmod +x install-macos.sh run-macos.sh uninstall-macos.sh bin/cloak
+./install-macos.sh
 ```
 
-前端：
+Windows：
 
-```bash
-cd frontend
-npm install
-npm run dev
+```text
+双击 install-windows.bat
 ```
 
-## API
+以后启动：
 
-只有“调试启动”的运行配置会提供 CDP 接口，可以给 Playwright / Puppeteer 连接。默认“启动”不会提供 CDP。
+```text
+macOS:   ./run-macos.sh
+Windows: 双击 run-windows.bat
+```
 
-## 许可证
+数据目录：
 
-- 本应用 GUI 源码：MIT，见 [LICENSE](LICENSE)
-- CloakBrowser 二进制：免费使用，不能重新分发，见 [BINARY-LICENSE.md](BINARY-LICENSE.md)
+```text
+macOS:   ~/Library/Application Support/CloakBrowser Manager
+Windows: %LOCALAPPDATA%\CloakBrowser Manager
+```
+
+更详细的安装、卸载、备份、迁移说明见：
+
+- [README.md](README.md)
+- [docs/local-install-uninstall.zh-CN.md](docs/local-install-uninstall.zh-CN.md)
