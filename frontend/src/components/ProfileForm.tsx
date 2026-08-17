@@ -385,6 +385,19 @@ export function ProfileForm({
     set("fingerprint_seed", randomFingerprintSeed());
   };
 
+  const randomizeDeviceProfile = () => {
+    const profilePool = DEVICE_PROFILES.filter((preset) => (
+      preset.id !== DEFAULT_DEVICE_PROFILE_ID && preset.id !== form.device_profile
+    ));
+    const fallbackPool = DEVICE_PROFILES.filter((preset) => preset.id !== DEFAULT_DEVICE_PROFILE_ID);
+    const pool = profilePool.length > 0 ? profilePool : fallbackPool;
+    const nextProfile = pool[Math.floor(Math.random() * pool.length)] ?? getDeviceProfile(DEFAULT_DEVICE_PROFILE_ID);
+    setForm((prev) => applyDeviceProfile(
+      { ...prev, fingerprint_seed: randomFingerprintSeed() },
+      nextProfile,
+    ));
+  };
+
   const updateProxyPart = <K extends keyof ProxyParts>(key: K, value: ProxyParts[K]) => {
     const next = { ...proxyParts, [key]: value };
     setProxyParts(next);
@@ -911,7 +924,7 @@ export function ProfileForm({
               <section className="rounded-md border border-border bg-white p-5">
                 <div className="mb-2 text-sm font-semibold text-slate-900">指纹配置</div>
                 <div className="mb-5 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-800">
-                  稳定原生模式会优先使用真实 Chrome、真实 Canvas/GPU/CPU。伪装画像模式才会使用下面的设备画像参数。这里不是越随机越好，重点是让屏幕、CPU、GPU、UA、语言和代理地区彼此合理。
+                  设备画像决定 Mac 型号、屏幕、CPU、GPU 这些看得见的参数；稳定种子只决定同一画像里的 Canvas / Audio 等稳定细节。改完需要保存并重新启动浏览器才会影响实际打开的浏览器。
                 </div>
                 <div className="mb-5 grid max-w-3xl grid-cols-2 gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs">
                   {fingerprintPreviewRows.map(([label, value]) => (
@@ -922,7 +935,7 @@ export function ProfileForm({
                   ))}
                 </div>
                 <div className="grid max-w-3xl grid-cols-[120px_minmax(0,1fr)] items-start gap-x-5 gap-y-4">
-                  <label className="pt-2 text-right text-sm font-medium text-slate-600">画像生成码</label>
+                  <label className="pt-2 text-right text-sm font-medium text-slate-600">稳定种子</label>
                   <div>
                     <div className="flex max-w-sm gap-2">
                       <input
@@ -932,11 +945,15 @@ export function ProfileForm({
                         onChange={(e) => set("fingerprint_seed", e.target.value ? Number(e.target.value) : null)}
                         placeholder="自动随机"
                       />
-                      <button type="button" onClick={randomizeSeed} className="btn-secondary px-2.5" title="重新生成画像码">
+                      <button type="button" onClick={randomizeSeed} className="btn-secondary px-2.5" title="重新生成稳定种子">
                         <RefreshCw className="h-4 w-4" />
                       </button>
                     </div>
-                    <div className="mt-1 text-xs text-slate-500">同一个生成码会让同一套画像保持稳定；点击刷新会换一套画像。日常原生模式下它主要用于记录，不会强行改真实硬件。</div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      {currentEngine === "cloakbrowser"
+                        ? "它不会改变上面的设备画像、CPU、GPU 或分辨率；只让同一套画像的细节输出保持稳定。想换整套 Mac 画像，用右侧概要里的“随机设备画像”。"
+                        : "原生模式使用真实 Chrome 和真实硬件输出，这个值主要用于记录，不会强行改变你的真实 CPU、GPU 或 Canvas。"}
+                    </div>
                   </div>
 
                   <label className="pt-2 text-right text-sm font-medium text-slate-600">分辨率</label>
@@ -1189,9 +1206,13 @@ export function ProfileForm({
           <aside className="sticky top-6 h-[calc(100vh-140px)] overflow-y-auto rounded-md border border-border bg-white p-5">
             <div className="mb-4 flex items-center justify-between border-b border-border pb-3">
               <div className="text-base font-semibold text-slate-900">概要</div>
-              <button type="button" onClick={randomizeSeed} className="text-sm font-medium text-accent">
-                生成新指纹
-              </button>
+              {currentEngine === "cloakbrowser" ? (
+                <button type="button" onClick={randomizeDeviceProfile} className="text-sm font-medium text-accent">
+                  随机设备画像
+                </button>
+              ) : (
+                <span className="text-xs text-slate-400">原生模式使用真实设备</span>
+              )}
             </div>
             <div className="space-y-3 text-sm">
               {summaryRows.map(([label, value]) => (
