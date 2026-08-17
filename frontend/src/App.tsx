@@ -74,9 +74,9 @@ export default function App() {
         <div className="text-center">
           <p className="text-red-400 text-sm mb-2">无法连接到服务</p>
           <button
-          onClick={() => {
-            setAuthState("checking");
-            api.authStatus()
+            onClick={() => {
+              setAuthState("checking");
+              api.authStatus()
                 .then(({ auth_required, authenticated, username }) => {
                   setAuthRequired(auth_required);
                   setAuthUsername(username);
@@ -262,7 +262,7 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
 
   const handleLaunchProfile = useCallback(async (id: string, launchMode: LaunchMode) => {
     const result = await launch(id, launchMode);
-    if (result?.viewer_mode === "vnc") {
+    if (result?.viewer_mode === "vnc" || result?.viewer_mode === "native-window") {
       setSelectedId(id);
       setView("view");
     } else {
@@ -411,6 +411,7 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
         ) : (
           <NativeWindowStatus
             key={selected.id}
+            profileId={selected.id}
             profileName={selected.name}
             cdpUrl={selected.cdp_url}
             browserEngine={selected.browser_engine}

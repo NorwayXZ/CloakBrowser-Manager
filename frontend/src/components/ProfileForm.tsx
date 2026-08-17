@@ -251,9 +251,19 @@ function parseProxy(raw?: string | null): ProxyParts {
 }
 
 function buildProxy(parts: ProxyParts): string | null {
-  const host = parts.host.trim();
+  let host = parts.host.trim();
   const port = parts.port.trim();
   if (!host || !port) return null;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(host)) {
+    try {
+      host = new URL(host).hostname;
+    } catch {
+      // Keep the original value and let backend validation report the error.
+    }
+  }
+  if (host.includes(":") && !host.startsWith("[") && !host.endsWith("]")) {
+    host = `[${host}]`;
+  }
 
   const username = parts.username.trim();
   const password = parts.password.trim();
@@ -364,7 +374,7 @@ export function ProfileForm({
 
   const handleDelete = async () => {
     if (!onDelete) return;
-    if (!confirm("确定删除这个配置吗？浏览器数据会被永久移除。")) return;
+    if (!confirm("确定删除这个浏览器吗？删除后会进入回收站，7 天内可以恢复。")) return;
     setDeleting(true);
     try {
       await onDelete();

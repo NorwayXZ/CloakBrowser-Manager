@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ClipboardCopy, Maximize2, Minimize2 } from "lucide-react";
 import { api } from "../lib/api";
 import { CdpEndpointButton } from "./CdpEndpointButton";
+import { FingerprintReportButton } from "./FingerprintReportButton";
 
 interface ProfileViewerProps {
   profileId: string;
@@ -235,6 +236,11 @@ export function ProfileViewer({ profileId, cdpUrl, clipboardSync: initialClipboa
         </div>
         <div className="flex items-center gap-1">
           <CdpEndpointButton cdpUrl={cdpUrl} />
+          <FingerprintReportButton
+            profileId={profileId}
+            disabled={!cdpUrl}
+            disabledReason="先启动调试连接，再运行指纹自检"
+          />
           <button
             onClick={() => setClipboardSync(!clipboardSync)}
             className={`p-1 ${clipboardSync ? "text-accent" : "text-gray-500 hover:text-gray-300"}`}

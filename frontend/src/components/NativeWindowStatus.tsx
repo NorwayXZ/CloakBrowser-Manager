@@ -1,7 +1,9 @@
 import { ExternalLink, Monitor } from "lucide-react";
 import { CdpEndpointButton } from "./CdpEndpointButton";
+import { FingerprintReportButton } from "./FingerprintReportButton";
 
 interface NativeWindowStatusProps {
+  profileId: string;
   profileName: string;
   cdpUrl: string | null;
   browserEngine?: string | null;
@@ -9,6 +11,7 @@ interface NativeWindowStatusProps {
 }
 
 export function NativeWindowStatus({
+  profileId,
   profileName,
   cdpUrl,
   browserEngine,
@@ -35,6 +38,11 @@ export function NativeWindowStatus({
             <ExternalLink className="h-3.5 w-3.5" />
             <span>调试模式：可通过 Manager CDP 使用</span>
             <CdpEndpointButton cdpUrl={cdpUrl} />
+            <FingerprintReportButton
+              profileId={profileId}
+              disabled={!cdpUrl}
+              disabledReason="先启动调试连接，再运行指纹自检"
+            />
           </div>
         )}
       </div>

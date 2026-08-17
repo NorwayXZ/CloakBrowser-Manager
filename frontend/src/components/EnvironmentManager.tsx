@@ -11,7 +11,6 @@ import {
   KeyRound,
   Laptop,
   LayoutGrid,
-  ListChecks,
   LogOut,
   MapPin,
   MoreVertical,
@@ -77,7 +76,14 @@ function isDirectProxyMode(mode: string): mode is ProxyMode {
 }
 
 function normalizeProxyHost(host: string) {
-  const value = host.trim();
+  let value = host.trim();
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
+    try {
+      value = new URL(value).hostname;
+    } catch {
+      // Keep the original value and let backend validation report the error.
+    }
+  }
   if (value.includes(":") && !value.startsWith("[") && !value.endsWith("]")) {
     return `[${value}]`;
   }
@@ -432,8 +438,25 @@ export function EnvironmentManager({
   };
 
   const handleDelete = async (profile: Profile) => {
-    if (!confirm(`确定删除「${profile.name}」吗？浏览器数据会被永久移除。`)) return;
+    if (!confirm(`确定删除「${profile.name}」吗？删除后会进入回收站，7 天内可以恢复。`)) return;
     await runRowAction(profile.id, () => onDelete(profile.id));
+  };
+
+  const handleDeleteGroup = async (group: ProfileGroup) => {
+    const count = profiles.filter((profile) => profile.group_name === group.name).length;
+    const detail = count > 0 ? `其中 ${count} 个浏览器会回到“未分组”。` : "";
+    if (!confirm(`确定删除分组「${group.name}」吗？${detail}`)) return;
+    await onDeleteGroup(group.id);
+  };
+
+  const handleDeleteProxyPreset = async (preset: ProxyPreset) => {
+    if (!confirm(`确定删除保存代理「${preset.name}」吗？不会影响已经使用这个代理的浏览器。`)) return;
+    await onDeleteProxyPreset(preset.id);
+  };
+
+  const handlePurgeProfile = async (profile: Profile) => {
+    if (!confirm(`确定彻底删除「${profile.name}」吗？此操作不可恢复。`)) return;
+    await onPurgeProfile(profile.id);
   };
 
   const handleCreateGroup = async () => {
@@ -913,26 +936,6 @@ export function EnvironmentManager({
                               <span>删除</span>
                             </button>
                             <div className="my-1 border-t border-border" />
-                            <button
-                              className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-                              onClick={() => {
-                                setMenuOpenId(null);
-                                onEdit(profile.id);
-                              }}
-                            >
-                              <Globe2 className="h-4 w-4" />
-                              <span>修改代理</span>
-                            </button>
-                            <button
-                              className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-                              onClick={() => {
-                                setMenuOpenId(null);
-                                onEdit(profile.id);
-                              }}
-                            >
-                              <ListChecks className="h-4 w-4" />
-                              <span>修改指纹</span>
-                            </button>
                           </div>
                         )}
                       </td>
@@ -999,7 +1002,7 @@ export function EnvironmentManager({
                       <td className="border-t border-border px-4 py-3">
                         <button
                           className="btn-secondary px-2.5 text-red-600"
-                          onClick={() => void onDeleteGroup(group.id)}
+                          onClick={() => void handleDeleteGroup(group)}
                         >
                           删除
                         </button>
@@ -1240,7 +1243,7 @@ export function EnvironmentManager({
                       <td className="border-t border-border px-4 py-3">
                         <button
                           className="btn-secondary px-2.5 text-red-600"
-                          onClick={() => void onDeleteProxyPreset(preset.id)}
+                          onClick={() => void handleDeleteProxyPreset(preset)}
                         >
                           删除
                         </button>
@@ -1284,7 +1287,7 @@ export function EnvironmentManager({
                           <button className="btn-secondary px-2.5" onClick={() => void onRestoreProfile(profile.id)}>
                             恢复
                           </button>
-                          <button className="btn-danger px-2.5" onClick={() => void onPurgeProfile(profile.id)}>
+                          <button className="btn-danger px-2.5" onClick={() => void handlePurgeProfile(profile)}>
                             彻底删除
                           </button>
                         </div>
