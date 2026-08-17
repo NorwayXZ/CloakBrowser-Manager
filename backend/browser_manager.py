@@ -1864,6 +1864,8 @@ class BrowserManager:
             if running_launch_mode in {"manual", "debug"}
             else ("debug" if running else None)
         )
+        running_proxy_geo = getattr(running, "proxy_geo", None) if running else None
+        proxy_geo = running_proxy_geo if isinstance(running_proxy_geo, dict) else None
         status = {
             "status": "running" if running else "stopped",
             "runtime_mode": self.runtime.runtime_mode,
@@ -1881,6 +1883,7 @@ class BrowserManager:
                 else None
             ),
             "launch_mode": launch_mode,
+            "proxy_geo": proxy_geo,
         }
         return status
 

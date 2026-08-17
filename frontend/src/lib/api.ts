@@ -43,6 +43,7 @@ export interface Profile {
   vnc_ws_port: number | null;
   cdp_url: string | null;
   launch_mode: LaunchMode | null;
+  proxy_geo: ProxyTestResult | null;
 }
 
 export interface ProfileCreateData {

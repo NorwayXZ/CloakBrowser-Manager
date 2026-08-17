@@ -56,12 +56,12 @@ export function AccountSettings({ username, onClose, onUpdated }: AccountSetting
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <div className="flex items-center gap-2">
             <KeyRound className="h-4 w-4 text-accent" />
-            <h2 className="text-sm font-semibold text-gray-100">账号设置</h2>
+            <h2 className="text-sm font-semibold text-slate-900">账号设置</h2>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-1 text-gray-500 hover:text-gray-300"
+            className="p-1 text-slate-500 hover:text-slate-900"
             title="关闭"
           >
             <X className="h-4 w-4" />

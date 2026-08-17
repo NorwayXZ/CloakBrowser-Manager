@@ -81,7 +81,7 @@ export function FingerprintReportButton({
                   setReport(null);
                   setError(null);
                 }}
-                className="text-gray-500 hover:text-gray-300"
+                className="text-slate-500 hover:text-slate-900"
               >
                 关闭
               </button>
@@ -94,26 +94,26 @@ export function FingerprintReportButton({
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-3">
                     <div className="rounded-md bg-surface-2 p-3">
-                      <div className="text-gray-500 mb-1">当前引擎</div>
-                      <div className="text-gray-200">{report.expected.browser_engine ?? "未知"}</div>
+                      <div className="text-slate-500 mb-1">当前引擎</div>
+                      <div className="text-slate-800">{report.expected.browser_engine ?? "未知"}</div>
                     </div>
                     <div className="rounded-md bg-surface-2 p-3">
-                      <div className="text-gray-500 mb-1">预期语言</div>
-                      <div className="text-gray-200">{report.expected.locale ?? "未设置"}</div>
+                      <div className="text-slate-500 mb-1">预期语言</div>
+                      <div className="text-slate-800">{report.expected.locale ?? "未设置"}</div>
                     </div>
                     <div className="rounded-md bg-surface-2 p-3">
-                      <div className="text-gray-500 mb-1">预期时区</div>
-                      <div className="text-gray-200">{report.expected.timezone ?? "未设置"}</div>
+                      <div className="text-slate-500 mb-1">预期时区</div>
+                      <div className="text-slate-800">{report.expected.timezone ?? "未设置"}</div>
                     </div>
                   </div>
 
                   {report.proxy_geo && (
                     <div className="rounded-md bg-surface-2 p-3 text-xs">
-                      <div className="text-gray-500 mb-1">代理地区</div>
-                      <div className="text-gray-200">
+                      <div className="text-slate-500 mb-1">代理地区</div>
+                      <div className="text-slate-800">
                         {report.proxy_geo.ip} · {report.proxy_geo.country} / {report.proxy_geo.region} / {report.proxy_geo.city}
                       </div>
-                      <div className="text-gray-500 mt-1">{report.proxy_geo.source}</div>
+                      <div className="text-slate-500 mt-1">{report.proxy_geo.source}</div>
                     </div>
                   )}
 
@@ -132,16 +132,16 @@ export function FingerprintReportButton({
                               : "border-yellow-500/30 bg-yellow-500/10"
                           }`}
                         >
-                          <div className="font-medium text-gray-200">{issueLabel(issue)}</div>
-                          <div className="mt-1 text-gray-400">{issue.message}</div>
+                          <div className="font-medium text-slate-800">{issueLabel(issue)}</div>
+                          <div className="mt-1 text-slate-600">{issue.message}</div>
                           <div className="mt-2 grid grid-cols-2 gap-2">
                             <div>
-                              <div className="text-gray-500">期望</div>
-                              <div className="break-all text-gray-300">{valueText(issue.expected)}</div>
+                              <div className="text-slate-500">期望</div>
+                              <div className="break-all text-slate-700">{valueText(issue.expected)}</div>
                             </div>
                             <div>
-                              <div className="text-gray-500">实际</div>
-                              <div className="break-all text-gray-300">{valueText(issue.actual)}</div>
+                              <div className="text-slate-500">实际</div>
+                              <div className="break-all text-slate-700">{valueText(issue.actual)}</div>
                             </div>
                           </div>
                         </div>

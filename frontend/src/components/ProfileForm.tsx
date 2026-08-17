@@ -1,4 +1,4 @@
-import { ChevronDown, Globe, Loader2, RefreshCw, Save, SlidersHorizontal, Trash2, Wifi, X } from "lucide-react";
+import { ArrowLeft, Globe, Loader2, RefreshCw, Save, Trash2, Wifi, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, type Profile, type ProfileCreateData, type ProxyTestResult } from "../lib/api";
 import {
@@ -120,6 +120,7 @@ const GPU_PRESETS: Record<string, { vendor: string; renderer: string }> = {
 type ProxyKind = "direct" | "xray";
 type ProxyScheme = "http" | "https" | "socks5";
 type EditableBrowserEngine = "system_chrome" | "cloakbrowser";
+type ProfileFormTab = "basic" | "proxy" | "fingerprint" | "advanced";
 
 interface ProxyParts {
   kind: ProxyKind;
@@ -255,7 +256,7 @@ export function ProfileForm({ profile, onSave, onDelete, onCancel, onDraftChange
   const [tagInput, setTagInput] = useState("");
   const [tagColor, setTagColor] = useState<string | null>("#6366f1");
   const [launchArgInput, setLaunchArgInput] = useState("");
-  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<ProfileFormTab>("basic");
   const [draftProfileId, setDraftProfileId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -297,7 +298,7 @@ export function ProfileForm({ profile, onSave, onDelete, onCancel, onDraftChange
     }
     setProxyTest(null);
     setProxyTestError(null);
-    setAdvancedOpen(false);
+    setActiveTab("basic");
   }, [profile?.id]);
 
   useEffect(() => {
@@ -443,13 +444,44 @@ export function ProfileForm({ profile, onSave, onDelete, onCancel, onDraftChange
     set("launch_args", (form.launch_args ?? []).filter((_, i) => i !== idx));
   };
 
+  const tabs: { id: ProfileFormTab; label: string }[] = [
+    { id: "basic", label: "基础设置" },
+    { id: "proxy", label: "代理信息" },
+    { id: "fingerprint", label: "指纹配置" },
+    { id: "advanced", label: "高级设置" },
+  ];
+
+  const proxyLabel = proxyParts.kind === "xray"
+    ? (proxyParts.raw ? proxyParts.raw.split("://", 1)[0]?.toUpperCase() ?? "Xray" : "Xray 链接")
+    : proxyParts.scheme.toUpperCase();
+
+  const summaryRows = [
+    ["浏览器", currentEngine === "system_chrome" ? "Google Chrome 原生" : "CloakBrowser / Chromium"],
+    ["User-Agent", form.user_agent || "跟随真实浏览器"],
+    ["代理", form.proxy ? `${proxyLabel} · 已配置` : "未配置"],
+    ["时区", form.geoip ? "基于 IP" : form.timezone || "未设置"],
+    ["语言", form.geoip ? "基于 IP" : form.locale || "未设置"],
+    ["分辨率", `${form.screen_width ?? 1920} × ${form.screen_height ?? 1080}`],
+    ["Canvas", currentEngine === "system_chrome" ? "真实" : "按画像"],
+    ["WebGL 图像", currentEngine === "system_chrome" ? "真实" : "按画像"],
+    ["WebGL 元数据", summaryGpu],
+    ["CPU", summaryCpu],
+    ["资料夹", isEdit ? "独立保存" : "创建后生成"],
+  ];
+
   return (
-    <form onSubmit={handleSubmit} className="p-6 max-w-2xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+    <form onSubmit={handleSubmit} className="flex h-screen flex-col bg-surface-0 text-slate-900">
+      <div className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-white px-5">
+        <div className="flex items-center gap-3">
+          <button type="button" onClick={onCancel} className="btn-secondary px-2.5" title="返回环境管理">
+            <ArrowLeft className="h-4 w-4" />
+          </button>
+          <div>
+            <h2 className="text-lg font-semibold tracking-tight">{isEdit ? "编辑浏览器" : "新建浏览器"}</h2>
+            <div className="text-xs text-slate-500">{form.name || "未命名"} · {currentEngine === "system_chrome" ? "稳定原生" : "伪装画像"}</div>
+          </div>
+        </div>
         <div className="flex items-center gap-2">
-          <h2 className="text-lg font-semibold">
-            {isEdit ? "编辑配置" : "新建配置"}
-          </h2>
           {isEdit && onDelete && (
             <button
               type="button"
@@ -461,11 +493,7 @@ export function ProfileForm({ profile, onSave, onDelete, onCancel, onDraftChange
               <span>{deleting ? "删除中..." : "删除"}</span>
             </button>
           )}
-        </div>
-        <div className="flex items-center gap-2">
-          <button type="button" onClick={onCancel} className="btn-secondary">
-            取消
-          </button>
+          <button type="button" onClick={onCancel} className="btn-secondary">取消</button>
           <button type="submit" disabled={saving} className="btn-primary flex items-center gap-1.5">
             <Save className="h-3.5 w-3.5" />
             <span>{saving ? "保存中..." : isEdit ? "保存" : "创建"}</span>
@@ -473,111 +501,283 @@ export function ProfileForm({ profile, onSave, onDelete, onCancel, onDraftChange
         </div>
       </div>
 
-      <div className="space-y-5">
-        <section>
-          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">基础信息</h3>
-          <div className="space-y-3">
-            <div>
-              <label className="label">配置名称</label>
-              <input
-                className="input"
-                value={form.name}
-                onChange={(e) => set("name", e.target.value)}
-                placeholder="例如 Amazon Seller #1"
-                required
-              />
-            </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div>
-                <label className="label">浏览器模式</label>
-                <select
-                  className="input"
-                  value={currentEngine}
-                  onChange={(e) => handleEngineChange(e.target.value as "system_chrome" | "cloakbrowser")}
-                >
-                  <option value="system_chrome">稳定原生</option>
-                  <option value="cloakbrowser">伪装画像</option>
-                </select>
-              </div>
-              <div>
-                <label className="label">Apple Silicon 画像</label>
-                <select
-                  className="input"
-                  value={selectedDeviceProfile.id}
-                  onChange={(e) => handleDeviceProfileChange(e.target.value)}
-                >
-                  {DEVICE_PROFILE_FAMILIES.map((family) => (
-                    <optgroup key={family} label={family}>
-                      {DEVICE_PROFILES.filter((preset) => preset.family === family).map((preset) => (
-                        <option key={preset.id} value={preset.id}>{preset.name}</option>
+      <div className="shrink-0 border-b border-border bg-white px-5">
+        <div className="flex gap-8">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              className={`relative h-12 text-sm font-semibold ${
+                activeTab === tab.id ? "text-accent" : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              {tab.label}
+              {activeTab === tab.id && (
+                <span className="absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-accent" />
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="grid min-h-full grid-cols-[minmax(0,1fr)_360px] gap-6 px-6 py-6">
+          <div className="space-y-6">
+            {activeTab === "basic" && (
+              <>
+                <section className="rounded-md border border-border bg-white p-5">
+                  <div className="mb-5 text-sm font-semibold text-slate-900">基础设置</div>
+                  <div className="grid max-w-3xl grid-cols-[120px_minmax(0,1fr)] items-start gap-x-5 gap-y-4">
+                    <label className="pt-2 text-right text-sm font-medium text-slate-600">名称</label>
+                    <input
+                      className="input"
+                      value={form.name}
+                      onChange={(e) => set("name", e.target.value)}
+                      placeholder="例如 Amazon Seller #1"
+                      required
+                    />
+
+                    <label className="pt-2 text-right text-sm font-medium text-slate-600">浏览器</label>
+                    <div>
+                      <select
+                        className="input max-w-xs"
+                        value={currentEngine}
+                        onChange={(e) => handleEngineChange(e.target.value as "system_chrome" | "cloakbrowser")}
+                      >
+                        <option value="system_chrome">稳定原生（系统 Chrome）</option>
+                        <option value="cloakbrowser">伪装画像（CloakBrowser）</option>
+                      </select>
+                      <div className="mt-1 text-xs text-accent">
+                        {currentEngine === "system_chrome"
+                          ? "日常启动不打开 CDP，更接近手动打开真实 Chrome。"
+                          : "启用画像参数，适合继续调试指纹一致性。"}
+                      </div>
+                    </div>
+
+                    <label className="pt-2 text-right text-sm font-medium text-slate-600">操作系统</label>
+                    <div className="flex flex-wrap gap-2">
+                      {["windows", "macos", "linux"].map((platform) => (
+                        <button
+                          key={platform}
+                          type="button"
+                          onClick={() => platform === "macos" && set("platform", "macos")}
+                          disabled={platform !== "macos"}
+                          className={`rounded-md border px-4 py-2 text-sm font-medium ${
+                            form.platform === platform
+                              ? "border-accent bg-accent/10 text-accent"
+                              : "border-slate-300 bg-white text-slate-400"
+                          } disabled:opacity-50`}
+                        >
+                          {platform === "macos" ? "macOS" : platform === "windows" ? "Windows" : "Linux"}
+                        </button>
                       ))}
-                    </optgroup>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
-              <div className="rounded-md bg-surface-2 px-3 py-2">
-                <div className="text-gray-500">芯片</div>
-                <div className="text-gray-200">{selectedDeviceProfile.chip === "Native" ? "真实设备" : selectedDeviceProfile.chip}</div>
-              </div>
-              <div className="rounded-md bg-surface-2 px-3 py-2">
-                <div className="text-gray-500">屏幕</div>
-                <div className="text-gray-200">{form.screen_width} × {form.screen_height}</div>
-              </div>
-              <div className="rounded-md bg-surface-2 px-3 py-2">
-                <div className="text-gray-500">CPU</div>
-                <div className="text-gray-200">{summaryCpu}</div>
-              </div>
-              <div className="rounded-md bg-surface-2 px-3 py-2">
-                <div className="text-gray-500">GPU</div>
-                <div className="truncate text-gray-200" title={form.gpu_renderer ?? "真实设备"}>
-                  {summaryGpu}
-                </div>
-              </div>
-            </div>
-            {currentEngine === "system_chrome" && (
-              <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
-                稳定原生会使用真实 Chrome、真实 Canvas/GPU/CPU/UA；Apple Silicon 画像主要用于档案标记和窗口尺寸预设。
-              </div>
-            )}
-            {currentEngine === "cloakbrowser" && (
-              <div className="rounded-md border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-xs text-yellow-200">
-                伪装画像会启用 Apple Silicon 指纹参数；当前更适合继续调试画像一致性。
-              </div>
-            )}
-          </div>
-        </section>
+                    </div>
 
-        <section>
-          <button
-            type="button"
-            onClick={() => setAdvancedOpen((open) => !open)}
-            className="flex w-full items-center justify-between rounded-md border border-border bg-surface-1 px-3 py-2 text-left text-sm text-gray-200 hover:bg-surface-2"
-          >
-            <span className="inline-flex items-center gap-2">
-              <SlidersHorizontal className="h-4 w-4 text-gray-400" />
-              高级画像参数
-            </span>
-            <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${advancedOpen ? "rotate-180" : ""}`} />
-          </button>
+                    <label className="pt-2 text-right text-sm font-medium text-slate-600">Apple 画像</label>
+                    <select
+                      className="input max-w-xl"
+                      value={selectedDeviceProfile.id}
+                      onChange={(e) => handleDeviceProfileChange(e.target.value)}
+                    >
+                      {DEVICE_PROFILE_FAMILIES.map((family) => (
+                        <optgroup key={family} label={family}>
+                          {DEVICE_PROFILES.filter((preset) => preset.family === family).map((preset) => (
+                            <option key={preset.id} value={preset.id}>{preset.name}</option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </select>
 
-          {advancedOpen && (
-            <div className="mt-3 space-y-3">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <label className="label">平台</label>
-                  <select
-                    className="input"
-                    value={form.platform}
-                    onChange={(e) => set("platform", e.target.value)}
-                  >
-                    <option value="macos">macOS</option>
-                  </select>
+                    <label className="pt-2 text-right text-sm font-medium text-slate-600">User-Agent</label>
+                    <input
+                      className="input max-w-3xl font-mono text-xs"
+                      value={form.user_agent ?? ""}
+                      onChange={(e) => set("user_agent", e.target.value || null)}
+                      placeholder="留空则跟随真实浏览器"
+                    />
+
+                    <label className="pt-2 text-right text-sm font-medium text-slate-600">Cookie</label>
+                    <div>
+                      <textarea
+                        className="input min-h-28 max-w-3xl resize-y text-xs"
+                        value="Cookie 随每个浏览器资料夹自动保存；网站登录后，下次打开同一浏览器会继续使用原资料夹。"
+                        readOnly
+                      />
+                      <div className="mt-1 text-xs text-slate-500">当前版本不做跨浏览器 Cookie 导入，避免把登录状态和画像混用。</div>
+                    </div>
+
+                    <label className="pt-2 text-right text-sm font-medium text-slate-600">备注</label>
+                    <textarea
+                      className="input min-h-20 max-w-3xl resize-y"
+                      value={form.notes ?? ""}
+                      onChange={(e) => set("notes", e.target.value || null)}
+                      placeholder="可选，写一些这个浏览器的用途..."
+                    />
+                  </div>
+                </section>
+              </>
+            )}
+
+            {activeTab === "proxy" && (
+              <section className="rounded-md border border-border bg-white p-5">
+                <div className="mb-5 text-sm font-semibold text-slate-900">代理信息</div>
+                <div className="grid max-w-3xl grid-cols-[120px_minmax(0,1fr)] items-start gap-x-5 gap-y-4">
+                  <label className="pt-2 text-right text-sm font-medium text-slate-600">代理方式</label>
+                  <div className="flex max-w-xl rounded-md bg-slate-100 p-1">
+                    {[
+                      ["direct", "自定义"],
+                      ["xray", "Xray 链接"],
+                    ].map(([kind, label]) => (
+                      <button
+                        key={kind}
+                        type="button"
+                        onClick={() => updateProxyKind(kind as ProxyKind)}
+                        className={`h-9 flex-1 rounded text-sm font-medium ${
+                          proxyParts.kind === kind ? "bg-white text-accent shadow-sm" : "text-slate-600"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {proxyParts.kind === "xray" ? (
+                    <>
+                      <label className="pt-2 text-right text-sm font-medium text-slate-600">代理链接</label>
+                      <div>
+                        <textarea
+                          className="input min-h-28 max-w-3xl resize-y font-mono text-xs"
+                          value={proxyParts.raw}
+                          onChange={(e) => updateProxyPart("raw", e.target.value)}
+                          placeholder="粘贴 ss://、vmess://、vless:// 或 trojan:// 链接"
+                          spellCheck={false}
+                        />
+                        <div className="mt-1 text-xs text-slate-500">启动时会为这个浏览器创建独立的本机 SOCKS5 通道。</div>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <label className="pt-2 text-right text-sm font-medium text-slate-600">代理类型</label>
+                      <select
+                        className="input max-w-sm"
+                        value={proxyParts.scheme}
+                        onChange={(e) => updateProxyPart("scheme", e.target.value as ProxyScheme)}
+                      >
+                        <option value="http">HTTP</option>
+                        <option value="https">HTTPS</option>
+                        <option value="socks5">SOCKS5</option>
+                      </select>
+
+                      <label className="pt-2 text-right text-sm font-medium text-slate-600">主机:端口</label>
+                      <div className="grid max-w-xl grid-cols-[1fr_120px] gap-3">
+                        <input
+                          className="input"
+                          value={proxyParts.host}
+                          onChange={(e) => updateProxyPart("host", e.target.value)}
+                          placeholder="192.168.100.1"
+                        />
+                        <input
+                          className="input no-spin"
+                          value={proxyParts.port}
+                          onChange={(e) => updateProxyPart("port", e.target.value)}
+                          placeholder="1090"
+                        />
+                      </div>
+
+                      <label className="pt-2 text-right text-sm font-medium text-slate-600">代理账号</label>
+                      <input
+                        className="input max-w-xl"
+                        value={proxyParts.username}
+                        onChange={(e) => updateProxyPart("username", e.target.value)}
+                        placeholder="可选"
+                      />
+
+                      <label className="pt-2 text-right text-sm font-medium text-slate-600">代理密码</label>
+                      <input
+                        className="input max-w-xl"
+                        type="password"
+                        value={proxyParts.password}
+                        onChange={(e) => updateProxyPart("password", e.target.value)}
+                        placeholder="可选"
+                      />
+                    </>
+                  )}
+
+                  <label className="pt-2 text-right text-sm font-medium text-slate-600">代理检测</label>
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleProxyTest}
+                        disabled={testingProxy || !form.proxy}
+                        className="btn-secondary flex items-center gap-1.5 disabled:opacity-60"
+                      >
+                        {testingProxy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wifi className="h-3.5 w-3.5" />}
+                        <span>{testingProxy ? "检查中..." : "检查代理"}</span>
+                      </button>
+                      <span className="break-all text-xs text-slate-500">
+                        {form.proxy ? form.proxy : "填写代理后可检查出口 IP、国家、时区和语言"}
+                      </span>
+                    </div>
+                    {proxyTestError && <div className="text-xs text-red-600">{proxyTestError}</div>}
+                    {proxyTest && (
+                      <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
+                        <div className="flex flex-wrap gap-x-4 gap-y-1">
+                          <span>出口 IP：{proxyTest.ip ?? "未知"}</span>
+                          <span>国家：{proxyTest.country ?? "未知"}</span>
+                          <span>时区：{proxyTest.timezone ?? "未知"}</span>
+                          <span>建议语言：{proxyTest.suggested_locale ?? "未知"}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => applyProxyGeo()}
+                          disabled={!proxyTest.timezone && !proxyTest.suggested_locale}
+                          className="mt-2 inline-flex items-center gap-1.5 text-accent disabled:opacity-60"
+                        >
+                          <Globe className="h-3.5 w-3.5" />
+                          <span>应用到时区和语言</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <label className="pt-2 text-right text-sm font-medium text-slate-600">时区语言</label>
+                  <div className="grid max-w-xl grid-cols-2 gap-3">
+                    <input
+                      className="input"
+                      value={form.timezone ?? ""}
+                      onChange={(e) => set("timezone", e.target.value || null)}
+                      placeholder="Asia/Shanghai"
+                    />
+                    <input
+                      className="input"
+                      value={form.locale ?? ""}
+                      onChange={(e) => set("locale", e.target.value || null)}
+                      placeholder="zh-CN"
+                    />
+                  </div>
+
+                  <label className="pt-2 text-right text-sm font-medium text-slate-600">跟随 IP</label>
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={form.geoip ?? false}
+                      onChange={(e) => set("geoip", e.target.checked)}
+                      className="rounded border-slate-300"
+                    />
+                    根据代理 IP 自动匹配时区和语言区域
+                  </label>
                 </div>
-                <div>
-                  <label className="label">指纹种子</label>
-                  <div className="flex gap-2">
+              </section>
+            )}
+
+            {activeTab === "fingerprint" && (
+              <section className="rounded-md border border-border bg-white p-5">
+                <div className="mb-5 text-sm font-semibold text-slate-900">指纹配置</div>
+                <div className="grid max-w-3xl grid-cols-[120px_minmax(0,1fr)] items-start gap-x-5 gap-y-4">
+                  <label className="pt-2 text-right text-sm font-medium text-slate-600">指纹种子</label>
+                  <div className="flex max-w-sm gap-2">
                     <input
                       className="input flex-1 no-spin"
                       type="number"
@@ -585,76 +785,61 @@ export function ProfileForm({ profile, onSave, onDelete, onCancel, onDraftChange
                       onChange={(e) => set("fingerprint_seed", e.target.value ? Number(e.target.value) : null)}
                       placeholder="自动随机"
                     />
-                    <button
-                      type="button"
-                      onClick={randomizeSeed}
-                      className="btn-secondary px-2.5"
-                      title="随机生成种子"
-                    >
+                    <button type="button" onClick={randomizeSeed} className="btn-secondary px-2.5" title="随机生成种子">
                       <RefreshCw className="h-4 w-4" />
                     </button>
                   </div>
-                </div>
-              </div>
 
-              <div>
-                <label className="label">屏幕分辨率</label>
-                <select
-                  className="input"
-                  value={currentResolution}
-                  onChange={(e) => {
-                    const preset = RESOLUTION_PRESETS[e.target.value];
-                    if (preset) {
-                      set("screen_width", preset.width);
-                      set("screen_height", preset.height);
-                    }
-                  }}
-                >
-                  {Object.keys(RESOLUTION_PRESETS).map((name) => (
-                    <option key={name} value={name}>{name}</option>
-                  ))}
-                  <option value="custom">自定义</option>
-                </select>
-              </div>
+                  <label className="pt-2 text-right text-sm font-medium text-slate-600">分辨率</label>
+                  <select
+                    className="input max-w-xl"
+                    value={currentResolution}
+                    onChange={(e) => {
+                      const preset = RESOLUTION_PRESETS[e.target.value];
+                      if (preset) {
+                        set("screen_width", preset.width);
+                        set("screen_height", preset.height);
+                      }
+                    }}
+                  >
+                    {Object.keys(RESOLUTION_PRESETS).map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                    <option value="custom">自定义</option>
+                  </select>
 
-              {currentResolution === "custom" && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="label">宽度</label>
-                    <input
-                      className="input no-spin"
-                      type="number"
-                      value={form.screen_width ?? 1920}
-                      onChange={(e) => set("screen_width", Number(e.target.value))}
-                    />
-                  </div>
-                  <div>
-                    <label className="label">高度</label>
-                    <input
-                      className="input no-spin"
-                      type="number"
-                      value={form.screen_height ?? 1080}
-                      onChange={(e) => set("screen_height", Number(e.target.value))}
-                    />
-                  </div>
-                </div>
-              )}
+                  {currentResolution === "custom" && (
+                    <>
+                      <label className="pt-2 text-right text-sm font-medium text-slate-600">宽高</label>
+                      <div className="grid max-w-sm grid-cols-2 gap-3">
+                        <input
+                          className="input no-spin"
+                          type="number"
+                          value={form.screen_width ?? 1920}
+                          onChange={(e) => set("screen_width", Number(e.target.value))}
+                        />
+                        <input
+                          className="input no-spin"
+                          type="number"
+                          value={form.screen_height ?? 1080}
+                          onChange={(e) => set("screen_height", Number(e.target.value))}
+                        />
+                      </div>
+                    </>
+                  )}
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <label className="label">CPU 线程数</label>
+                  <label className="pt-2 text-right text-sm font-medium text-slate-600">CPU</label>
                   <input
-                    className="input no-spin"
+                    className="input max-w-sm no-spin"
                     type="number"
                     value={form.hardware_concurrency ?? ""}
                     onChange={(e) => set("hardware_concurrency", e.target.value ? Number(e.target.value) : null)}
                     placeholder="按画像或真实设备"
                   />
-                </div>
-                <div>
-                  <label className="label">GPU 预设</label>
+
+                  <label className="pt-2 text-right text-sm font-medium text-slate-600">GPU 预设</label>
                   <select
-                    className="input"
+                    className="input max-w-xl"
                     value=""
                     onChange={(e) => {
                       if (e.target.value) applyGpuPreset(e.target.value);
@@ -665,354 +850,180 @@ export function ProfileForm({ profile, onSave, onDelete, onCancel, onDraftChange
                       <option key={name} value={name}>{name}</option>
                     ))}
                   </select>
-                </div>
-              </div>
 
-              <div>
-                <label className="label">GPU 厂商</label>
-                <input
-                  className="input"
-                  value={form.gpu_vendor ?? ""}
-                  onChange={(e) => set("gpu_vendor", e.target.value || null)}
-                  placeholder="按画像或真实设备"
-                />
-              </div>
-
-              <div>
-                <label className="label">GPU 渲染器</label>
-                <input
-                  className="input"
-                  value={form.gpu_renderer ?? ""}
-                  onChange={(e) => set("gpu_renderer", e.target.value || null)}
-                  placeholder="按画像或真实设备"
-                />
-              </div>
-
-              <div>
-                <label className="label">用户代理（User Agent）</label>
-                <input
-                  className="input"
-                  value={form.user_agent ?? ""}
-                  onChange={(e) => set("user_agent", e.target.value || null)}
-                  placeholder="按浏览器二进制自动生成"
-                />
-              </div>
-            </div>
-          )}
-        </section>
-
-        <section>
-          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">网络与地区</h3>
-          <div className="space-y-3">
-            <div>
-              <label className="label">代理类型</label>
-              <select
-                className="input"
-                value={proxyParts.kind}
-                onChange={(e) => updateProxyKind(e.target.value as ProxyKind)}
-              >
-                <option value="direct">HTTP / HTTPS / SOCKS5</option>
-                <option value="xray">Xray 代理链接</option>
-              </select>
-            </div>
-            {proxyParts.kind === "xray" ? (
-              <div className="space-y-2">
-                <label className="label">代理链接</label>
-                <textarea
-                  className="input min-h-24 resize-y font-mono text-xs"
-                  value={proxyParts.raw}
-                  onChange={(e) => updateProxyPart("raw", e.target.value)}
-                  placeholder="粘贴 ss://、vmess://、vless:// 或 trojan:// 链接"
-                  spellCheck={false}
-                />
-                <p className="text-xs text-gray-500">
-                  启动时会自动下载官方 Xray 核心，并为这个配置创建独立的本机 SOCKS5 通道。
-                </p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="label">代理协议</label>
-                  <select
-                    className="input"
-                    value={proxyParts.scheme}
-                    onChange={(e) => updateProxyPart("scheme", e.target.value as ProxyScheme)}
-                  >
-                    <option value="http">HTTP</option>
-                    <option value="https">HTTPS</option>
-                    <option value="socks5">SOCKS5</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="label">主机</label>
+                  <label className="pt-2 text-right text-sm font-medium text-slate-600">GPU 厂商</label>
                   <input
-                    className="input"
-                    value={proxyParts.host}
-                    onChange={(e) => updateProxyPart("host", e.target.value)}
-                    placeholder="proxy.example.com"
+                    className="input max-w-3xl"
+                    value={form.gpu_vendor ?? ""}
+                    onChange={(e) => set("gpu_vendor", e.target.value || null)}
+                    placeholder="按画像或真实设备"
+                  />
+
+                  <label className="pt-2 text-right text-sm font-medium text-slate-600">GPU 渲染器</label>
+                  <input
+                    className="input max-w-3xl"
+                    value={form.gpu_renderer ?? ""}
+                    onChange={(e) => set("gpu_renderer", e.target.value || null)}
+                    placeholder="按画像或真实设备"
                   />
                 </div>
-                <div>
-                  <label className="label">端口</label>
-                  <input
-                    className="input no-spin"
-                    value={proxyParts.port}
-                    onChange={(e) => updateProxyPart("port", e.target.value)}
-                    placeholder="1080"
-                  />
-                </div>
-                <div>
-                  <label className="label">账号</label>
-                  <input
-                    className="input"
-                    value={proxyParts.username}
-                    onChange={(e) => updateProxyPart("username", e.target.value)}
-                    placeholder="可选"
-                  />
-                </div>
-                <div>
-                  <label className="label">密码</label>
-                  <input
-                    className="input"
-                    type="password"
-                    value={proxyParts.password}
-                    onChange={(e) => updateProxyPart("password", e.target.value)}
-                    placeholder="可选"
-                  />
-                </div>
-              </div>
+              </section>
             )}
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={handleProxyTest}
-                disabled={testingProxy || !form.proxy}
-                className="btn-secondary flex items-center gap-1.5 disabled:opacity-60"
-              >
-                {testingProxy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wifi className="h-3.5 w-3.5" />}
-                <span>{testingProxy ? "测试中..." : "测试代理"}</span>
+
+            {activeTab === "advanced" && (
+              <section className="rounded-md border border-border bg-white p-5">
+                <div className="mb-5 text-sm font-semibold text-slate-900">高级设置</div>
+                <div className="space-y-6">
+                  <div className="grid max-w-3xl grid-cols-[120px_minmax(0,1fr)] items-start gap-x-5 gap-y-4">
+                    <label className="pt-2 text-right text-sm font-medium text-slate-600">行为</label>
+                    <div className="space-y-3">
+                      <label className="flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={form.humanize ?? false}
+                          onChange={(e) => set("humanize", e.target.checked)}
+                          className="rounded border-slate-300"
+                        />
+                        模拟真人鼠标、键盘和滚动行为
+                      </label>
+                      {form.humanize && (
+                        <select
+                          className="input max-w-sm"
+                          value={form.human_preset}
+                          onChange={(e) => set("human_preset", e.target.value)}
+                        >
+                          <option value="default">默认（正常速度）</option>
+                          <option value="careful">谨慎（更慢、更稳）</option>
+                        </select>
+                      )}
+                      <label className="flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={form.clipboard_sync ?? true}
+                          onChange={(e) => set("clipboard_sync", e.target.checked)}
+                          className="rounded border-slate-300"
+                        />
+                        默认启用 VNC 剪贴板同步
+                      </label>
+                      <label className="flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={form.auto_launch ?? false}
+                          onChange={(e) => set("auto_launch", e.target.checked)}
+                          className="rounded border-slate-300"
+                        />
+                        Manager 启动后自动打开
+                      </label>
+                    </div>
+
+                    <label className="pt-2 text-right text-sm font-medium text-slate-600">颜色偏好</label>
+                    <select
+                      className="input max-w-sm"
+                      value={form.color_scheme ?? ""}
+                      onChange={(e) => set("color_scheme", e.target.value || null)}
+                    >
+                      <option value="">跟随系统</option>
+                      <option value="light">浅色</option>
+                      <option value="dark">深色</option>
+                      <option value="no-preference">无偏好</option>
+                    </select>
+
+                    <label className="pt-2 text-right text-sm font-medium text-slate-600">标签</label>
+                    <div>
+                      {(form.tags ?? []).length > 0 && (
+                        <div className="mb-3 flex flex-wrap gap-1.5">
+                          {(form.tags ?? []).map((t) => (
+                            <span
+                              key={t.tag}
+                              className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs"
+                              style={t.color ? { backgroundColor: `${t.color}20`, color: t.color } : undefined}
+                            >
+                              {t.tag}
+                              <button type="button" onClick={() => removeTag(t.tag)} className="hover:opacity-70">
+                                <X className="h-3 w-3" />
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      <div className="flex max-w-2xl items-center gap-2">
+                        <div className="flex gap-1">
+                          {TAG_COLORS.map((c) => (
+                            <button
+                              key={c}
+                              type="button"
+                              onClick={() => setTagColor(c)}
+                              className="h-4 w-4 rounded-full border-2 transition-transform"
+                              style={{
+                                backgroundColor: c,
+                                borderColor: tagColor === c ? "#0f172a" : "transparent",
+                                transform: tagColor === c ? "scale(1.15)" : undefined,
+                              }}
+                            />
+                          ))}
+                        </div>
+                        <input
+                          className="input flex-1"
+                          value={tagInput}
+                          onChange={(e) => setTagInput(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTag(); } }}
+                          placeholder="添加标签..."
+                        />
+                        <button type="button" onClick={addTag} className="btn-secondary text-xs">添加</button>
+                      </div>
+                    </div>
+
+                    <label className="pt-2 text-right text-sm font-medium text-slate-600">启动参数</label>
+                    <div>
+                      {(form.launch_args ?? []).length > 0 && (
+                        <div className="mb-3 flex flex-wrap gap-1.5">
+                          {(form.launch_args ?? []).map((arg, idx) => (
+                            <span
+                              key={idx}
+                              className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-1 font-mono text-xs text-slate-700"
+                            >
+                              {arg}
+                              <button type="button" onClick={() => removeLaunchArg(idx)} className="hover:opacity-70">
+                                <X className="h-3 w-3" />
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      <div className="flex max-w-2xl gap-2">
+                        <input
+                          className="input flex-1 font-mono"
+                          value={launchArgInput}
+                          onChange={(e) => setLaunchArgInput(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addLaunchArg(); } }}
+                          placeholder="--load-extension=/data/extensions/ublock"
+                        />
+                        <button type="button" onClick={addLaunchArg} className="btn-secondary text-xs">添加</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            )}
+          </div>
+
+          <aside className="sticky top-6 h-[calc(100vh-140px)] overflow-y-auto rounded-md border border-border bg-white p-5">
+            <div className="mb-4 flex items-center justify-between border-b border-border pb-3">
+              <div className="text-base font-semibold text-slate-900">概要</div>
+              <button type="button" onClick={randomizeSeed} className="text-sm font-medium text-accent">
+                生成新指纹
               </button>
-              <div className="text-xs text-gray-500 break-all">
-                {form.proxy ? `自动生成：${form.proxy}` : "填写主机和端口后会自动生成代理地址"}
-              </div>
             </div>
-            {proxyTestError && (
-              <div className="text-xs text-red-400">{proxyTestError}</div>
-            )}
-            {proxyTest && (
-              <div className="space-y-2">
-                <div className="text-xs text-emerald-400 space-y-1">
-                  <div className="flex flex-wrap gap-x-4 gap-y-1">
-                    <span>出口 IP：{proxyTest.ip ?? "未知"}</span>
-                    <span>国家：{proxyTest.country ? `${proxyTest.country}${proxyTest.country_code ? ` (${proxyTest.country_code})` : ""}` : "未知"}</span>
-                    <span>时区：{proxyTest.timezone ?? "未知"}</span>
-                    <span>建议语言：{proxyTest.suggested_locale ?? "未知"}</span>
-                  </div>
-                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-gray-400">
-                    <span>地区：{proxyTest.region ?? "未知"}</span>
-                    <span>城市：{proxyTest.city ?? "未知"}</span>
-                    <span>运营商：{proxyTest.org ?? "未知"}</span>
-                    <span>ASN：{proxyTest.asn ?? "未知"}</span>
-                  </div>
+            <div className="space-y-3 text-sm">
+              {summaryRows.map(([label, value]) => (
+                <div key={label} className="grid grid-cols-[92px_minmax(0,1fr)] gap-3">
+                  <div className="text-slate-400">{label}</div>
+                  <div className="break-words text-right font-medium text-slate-700">{value}</div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => applyProxyGeo()}
-                  disabled={!proxyTest.timezone && !proxyTest.suggested_locale}
-                  className="btn-secondary text-xs inline-flex items-center gap-1.5 disabled:opacity-60"
-                >
-                  <Globe className="h-3.5 w-3.5" />
-                  <span>应用到时区和语言</span>
-                </button>
-              </div>
-            )}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="label">时区</label>
-                <input
-                  className="input"
-                  value={form.timezone ?? ""}
-                  onChange={(e) => set("timezone", e.target.value || null)}
-                  placeholder="Asia/Shanghai"
-                />
-              </div>
-              <div>
-                <label className="label">语言区域</label>
-                <input
-                  className="input"
-                  value={form.locale ?? ""}
-                  onChange={(e) => set("locale", e.target.value || null)}
-                  placeholder="zh-CN"
-                />
-              </div>
-            </div>
-            <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={form.geoip ?? false}
-                onChange={(e) => set("geoip", e.target.checked)}
-                className="rounded border-border bg-surface-2"
-              />
-              根据代理 IP 自动匹配时区和语言区域（测试成功后自动回填）
-            </label>
-          </div>
-        </section>
-
-        <section>
-          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">行为设置</h3>
-          <div className="space-y-3">
-            <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={form.humanize ?? false}
-                onChange={(e) => set("humanize", e.target.checked)}
-                className="rounded border-border bg-surface-2"
-              />
-              模拟真人鼠标、键盘和滚动行为
-            </label>
-            {form.humanize && (
-              <div>
-                <label className="label">真人节奏</label>
-                <select
-                  className="input"
-                  value={form.human_preset}
-                  onChange={(e) => set("human_preset", e.target.value)}
-                >
-                  <option value="default">默认（正常速度）</option>
-                  <option value="careful">谨慎（更慢、更稳）</option>
-                </select>
-              </div>
-            )}
-            <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={form.clipboard_sync ?? true}
-                onChange={(e) => set("clipboard_sync", e.target.checked)}
-                className="rounded border-border bg-surface-2"
-              />
-              默认启用 VNC 剪贴板同步
-            </label>
-            <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={form.auto_launch ?? false}
-                onChange={(e) => set("auto_launch", e.target.checked)}
-                className="rounded border-border bg-surface-2"
-              />
-              容器启动时自动启动
-            </label>
-            <div>
-              <label className="label">颜色偏好</label>
-              <select
-                className="input"
-                value={form.color_scheme ?? ""}
-                onChange={(e) => set("color_scheme", e.target.value || null)}
-              >
-                <option value="">跟随系统</option>
-                <option value="light">浅色</option>
-                <option value="dark">深色</option>
-                <option value="no-preference">无偏好</option>
-              </select>
-            </div>
-          </div>
-        </section>
-
-        <section>
-          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">标签</h3>
-          {(form.tags ?? []).length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mb-3">
-              {(form.tags ?? []).map((t) => (
-                <span
-                  key={t.tag}
-                  className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-surface-3 text-gray-300"
-                  style={t.color ? { backgroundColor: `${t.color}20`, color: t.color } : undefined}
-                >
-                  {t.tag}
-                  <button
-                    type="button"
-                    onClick={() => removeTag(t.tag)}
-                    className="hover:opacity-70"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </span>
               ))}
             </div>
-          )}
-          <div className="flex gap-2 items-center">
-            <div className="flex gap-1">
-              {TAG_COLORS.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => setTagColor(c)}
-                  className="w-4 h-4 rounded-full border-2 transition-transform"
-                  style={{
-                    backgroundColor: c,
-                    borderColor: tagColor === c ? "#fff" : "transparent",
-                    transform: tagColor === c ? "scale(1.2)" : undefined,
-                  }}
-                />
-              ))}
-            </div>
-            <input
-              className="input flex-1"
-              value={tagInput}
-              onChange={(e) => setTagInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTag(); } }}
-              placeholder="添加标签..."
-            />
-            <button type="button" onClick={addTag} className="btn-secondary text-xs">
-              添加
-            </button>
-          </div>
-        </section>
-
-        <section>
-          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">启动参数</h3>
-          <p className="text-xs text-gray-500 mb-2">启动时传给 Chromium 的自定义参数，例如 --load-extension、--disable-features</p>
-          {(form.launch_args ?? []).length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mb-3">
-              {(form.launch_args ?? []).map((arg, idx) => (
-                <span
-                  key={idx}
-                  className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-surface-3 text-gray-300 font-mono"
-                >
-                  {arg}
-                  <button
-                    type="button"
-                    onClick={() => removeLaunchArg(idx)}
-                    className="hover:opacity-70"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
-          <div className="flex gap-2">
-            <input
-              className="input flex-1 font-mono"
-              value={launchArgInput}
-              onChange={(e) => setLaunchArgInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addLaunchArg(); } }}
-              placeholder="--load-extension=/data/extensions/ublock"
-            />
-            <button type="button" onClick={addLaunchArg} className="btn-secondary text-xs">
-              添加
-            </button>
-          </div>
-        </section>
-
-        <section>
-          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">备注</h3>
-          <textarea
-            className="input min-h-[80px] resize-y"
-            value={form.notes ?? ""}
-            onChange={(e) => set("notes", e.target.value || null)}
-            placeholder="可选，写一些这个 profile 的说明..."
-          />
-        </section>
+          </aside>
+        </div>
       </div>
     </form>
   );

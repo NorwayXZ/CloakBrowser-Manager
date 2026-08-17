@@ -11,6 +11,8 @@
     margin: 0;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter",
       system-ui, sans-serif;
+    background: #f5f7fb;
+    color: #1e293b;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -23,11 +25,11 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: #333;
+    background: #cbd5e1;
     border-radius: 3px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #444;
+    background: #94a3b8;
   }
 
   /* Hide number input spinners */
@@ -49,18 +51,18 @@
     @apply btn bg-accent text-white hover:bg-accent-hover;
   }
   .btn-secondary {
-    @apply btn bg-surface-3 text-gray-200 hover:bg-surface-4;
+    @apply btn border border-border bg-white text-slate-700 hover:bg-slate-50;
   }
   .btn-danger {
-    @apply btn bg-red-600/20 text-red-400 hover:bg-red-600/30;
+    @apply btn bg-red-500 text-white hover:bg-red-600;
   }
   .input {
-    @apply w-full h-9 bg-surface-2 border border-border rounded-md px-3 py-2 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/50;
+    @apply w-full h-9 bg-white border border-slate-300 rounded-md px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30;
   }
   textarea.input {
     @apply h-auto;
   }
   .label {
-    @apply block text-xs font-medium text-gray-400 mb-1;
+    @apply block text-xs font-medium text-slate-500 mb-1;
   }
 }

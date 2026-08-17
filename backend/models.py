@@ -117,6 +117,7 @@ class ProfileResponse(BaseModel):
     vnc_ws_port: int | None = None
     cdp_url: str | None = None
     launch_mode: LaunchMode | None = None
+    proxy_geo: dict | None = None
 
 
 class LaunchResponse(BaseModel):
@@ -171,6 +172,7 @@ class ProfileStatusResponse(BaseModel):
     cdp_url: str | None = None
     browser_engine: str | None = None
     launch_mode: LaunchMode | None = None
+    proxy_geo: dict | None = None
 
 
 class ClipboardRequest(BaseModel):

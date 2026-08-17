@@ -128,6 +128,7 @@ def test_get_status_stopped():
         "cdp_url": None,
         "browser_engine": "cloakbrowser",
         "launch_mode": None,
+        "proxy_geo": None,
     }
 
 
@@ -152,4 +153,5 @@ def test_get_status_running():
         "cdp_url": "/api/profiles/abc/cdp",
         "browser_engine": "cloakbrowser",
         "launch_mode": "debug",
+        "proxy_geo": None,
     }

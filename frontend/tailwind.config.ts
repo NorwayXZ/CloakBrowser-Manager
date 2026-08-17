@@ -7,19 +7,19 @@ export default {
     extend: {
       colors: {
         surface: {
-          0: "#0a0a0a",
-          1: "#111111",
-          2: "#1a1a1a",
-          3: "#222222",
-          4: "#2a2a2a",
+          0: "#f5f7fb",
+          1: "#ffffff",
+          2: "#f8fafc",
+          3: "#eef2ff",
+          4: "#e2e8f0",
         },
         border: {
-          DEFAULT: "#2a2a2a",
-          hover: "#3a3a3a",
+          DEFAULT: "#e2e8f0",
+          hover: "#cbd5e1",
         },
         accent: {
-          DEFAULT: "#6366f1",
-          hover: "#818cf8",
+          DEFAULT: "#2f5bff",
+          hover: "#1f4be0",
         },
       },
     },

@@ -34,10 +34,10 @@ export function LoginPage({ onSuccess, initialUsername }: LoginPageProps) {
           <div className="h-10 w-10 rounded-lg bg-accent/10 flex items-center justify-center mb-3">
             <Lock className="h-5 w-5 text-accent" />
           </div>
-          <h1 className="text-lg font-semibold text-gray-100">
+          <h1 className="text-lg font-semibold text-slate-900">
             CloakBrowser Manager
           </h1>
-          <p className="text-xs text-gray-500 mt-1">输入管理员账号和密码</p>
+          <p className="text-xs text-slate-500 mt-1">输入管理员账号和密码</p>
         </div>
         <form onSubmit={handleSubmit} className="space-y-3">
           <input
