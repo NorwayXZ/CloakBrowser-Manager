@@ -270,9 +270,26 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
     }
   }, [launch]);
 
+  const handleBatchLaunchProfiles = useCallback(async (ids: string[], launchMode: LaunchMode) => {
+    for (const id of ids) {
+      await launch(id, launchMode);
+    }
+    setView("list");
+  }, [launch]);
+
   const handleStopProfile = useCallback(async (id: string) => {
     await stop(id);
     if (selectedId === id && view === "view") {
+      setSelectedId(null);
+      setView("list");
+    }
+  }, [selectedId, stop, view]);
+
+  const handleBatchStopProfiles = useCallback(async (ids: string[]) => {
+    for (const id of ids) {
+      await stop(id);
+    }
+    if (selectedId && ids.includes(selectedId) && view === "view") {
       setSelectedId(null);
       setView("list");
     }
@@ -342,7 +359,9 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
           onDelete={handleDeleteById}
           onUpdateNotes={handleUpdateNotes}
           onLaunch={handleLaunchProfile}
+          onBatchLaunch={handleBatchLaunchProfiles}
           onStop={handleStopProfile}
+          onBatchStop={handleBatchStopProfiles}
           onRefresh={refreshAll}
           onCreateGroup={handleCreateGroup}
           onDeleteGroup={handleDeleteGroup}

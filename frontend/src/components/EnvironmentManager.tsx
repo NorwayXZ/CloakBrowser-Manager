@@ -24,7 +24,6 @@ import {
   Square,
   StickyNote,
   Trash2,
-  Wifi,
   XCircle,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -45,7 +44,9 @@ interface EnvironmentManagerProps {
   onDelete: (id: string) => Promise<void>;
   onUpdateNotes: (id: string, notes: string | null) => Promise<void>;
   onLaunch: (id: string, mode: LaunchMode) => Promise<void>;
+  onBatchLaunch: (ids: string[], mode: LaunchMode) => Promise<void>;
   onStop: (id: string) => Promise<void>;
+  onBatchStop: (ids: string[]) => Promise<void>;
   onRefresh: () => Promise<void>;
   onCreateGroup: (name: string, color?: string | null) => Promise<void>;
   onDeleteGroup: (id: string) => Promise<void>;
@@ -214,7 +215,9 @@ export function EnvironmentManager({
   onDelete,
   onUpdateNotes,
   onLaunch,
+  onBatchLaunch,
   onStop,
+  onBatchStop,
   onRefresh,
   onCreateGroup,
   onDeleteGroup,
@@ -231,6 +234,8 @@ export function EnvironmentManager({
   const [groupFilter, setGroupFilter] = useState("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [batchMenuOpen, setBatchMenuOpen] = useState(false);
+  const [batchBusy, setBatchBusy] = useState<null | "launch" | "stop" | "duplicate" | "delete">(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
   const [savingNoteId, setSavingNoteId] = useState<string | null>(null);
@@ -270,6 +275,12 @@ export function EnvironmentManager({
 
   const runningCount = profiles.filter((profile) => profile.status === "running").length;
   const allFilteredSelected = filtered.length > 0 && filtered.every((profile) => selectedIds.has(profile.id));
+  const selectedProfiles = useMemo(
+    () => profiles.filter((profile) => selectedIds.has(profile.id)),
+    [profiles, selectedIds],
+  );
+  const selectedStoppedProfiles = selectedProfiles.filter((profile) => profile.status !== "running");
+  const selectedRunningProfiles = selectedProfiles.filter((profile) => profile.status === "running");
   const sectionTitle = {
     profiles: "环境管理",
     groups: "分组管理",
@@ -312,6 +323,54 @@ export function EnvironmentManager({
       setBusyId(null);
       setMenuOpenId(null);
     }
+  };
+
+  const runBatchAction = async (
+    kind: NonNullable<typeof batchBusy>,
+    action: () => Promise<void>,
+    clearSelection = false,
+  ) => {
+    setBatchBusy(kind);
+    try {
+      await action();
+      if (clearSelection) {
+        setSelectedIds(new Set());
+      }
+    } finally {
+      setBatchBusy(null);
+      setBatchMenuOpen(false);
+    }
+  };
+
+  const handleBatchLaunch = async () => {
+    const ids = selectedStoppedProfiles.map((profile) => profile.id);
+    if (ids.length === 0) return;
+    await runBatchAction("launch", () => onBatchLaunch(ids, "manual"));
+  };
+
+  const handleBatchStop = async () => {
+    const ids = selectedRunningProfiles.map((profile) => profile.id);
+    if (ids.length === 0) return;
+    await runBatchAction("stop", () => onBatchStop(ids));
+  };
+
+  const handleBatchDuplicate = async () => {
+    if (selectedProfiles.length === 0) return;
+    await runBatchAction("duplicate", async () => {
+      for (const profile of selectedProfiles) {
+        await onDuplicate(profile);
+      }
+    });
+  };
+
+  const handleBatchDelete = async () => {
+    if (selectedProfiles.length === 0) return;
+    if (!confirm(`确定删除选中的 ${selectedProfiles.length} 个浏览器吗？删除后会进入回收站。`)) return;
+    await runBatchAction("delete", async () => {
+      for (const profile of selectedProfiles) {
+        await onDelete(profile.id);
+      }
+    }, true);
   };
 
   const noteValue = (profile: Profile) => noteDrafts[profile.id] ?? profile.notes ?? "";
@@ -541,36 +600,70 @@ export function EnvironmentManager({
                 placeholder="搜索名称、代理、备注、UA"
               />
             </div>
-            <label className="flex h-11 items-center gap-2 rounded-md border border-border bg-white px-3 text-sm text-slate-600">
-              <input
-                type="checkbox"
-                className="h-4 w-4 rounded border-slate-300"
-                checked={runningCount > 0}
-                readOnly
-              />
+            <div className="flex h-11 items-center gap-2 rounded-md border border-border bg-white px-3 text-sm text-slate-600">
+              <StatusIndicator status={runningCount > 0 ? "running" : "stopped"} size="md" />
               <span>已打开 ({runningCount})</span>
-            </label>
+            </div>
           </div>
 
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <button
               className="btn-primary flex items-center gap-1.5 disabled:opacity-50"
-              disabled={selectedIds.size === 0}
+              disabled={selectedStoppedProfiles.length === 0 || batchBusy !== null}
+              onClick={() => void handleBatchLaunch()}
+              title={selectedStoppedProfiles.length > 0 ? `打开选中的 ${selectedStoppedProfiles.length} 个浏览器` : "请选择未打开的浏览器"}
             >
               <Play className="h-4 w-4" />
-              <span>打开</span>
+              <span>{batchBusy === "launch" ? "打开中..." : "打开"}</span>
             </button>
-            <button className="btn-secondary flex items-center gap-1.5 disabled:opacity-50" disabled>
-              <Wifi className="h-4 w-4" />
-              <span>窗口同步</span>
-            </button>
-            <button className="btn-secondary flex items-center gap-1.5 disabled:opacity-50" disabled={selectedIds.size === 0}>
+            <button
+              className="btn-secondary flex items-center gap-1.5 disabled:opacity-50"
+              disabled={selectedRunningProfiles.length === 0 || batchBusy !== null}
+              onClick={() => void handleBatchStop()}
+              title={selectedRunningProfiles.length > 0 ? `关闭选中的 ${selectedRunningProfiles.length} 个浏览器` : "请选择运行中的浏览器"}
+            >
               <Square className="h-4 w-4" />
-              <span>关闭</span>
+              <span>{batchBusy === "stop" ? "关闭中..." : "关闭"}</span>
             </button>
-            <button className="btn-secondary px-2.5" title="更多">
-              <MoreVertical className="h-4 w-4" />
-            </button>
+            <div className="relative">
+              <button
+                className="btn-secondary px-2.5 disabled:opacity-50"
+                title="更多批量操作"
+                disabled={selectedProfiles.length === 0 || batchBusy !== null}
+                onClick={() => setBatchMenuOpen((current) => !current)}
+              >
+                <MoreVertical className="h-4 w-4" />
+              </button>
+              {batchMenuOpen && selectedProfiles.length > 0 && (
+                <div className="absolute left-0 top-11 z-20 w-44 rounded-md border border-blue-200 bg-white p-1 shadow-xl">
+                  <button
+                    className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                    onClick={() => void handleBatchDuplicate()}
+                  >
+                    <Copy className="h-4 w-4" />
+                    <span>{batchBusy === "duplicate" ? "复制中..." : `复制选中 (${selectedProfiles.length})`}</span>
+                  </button>
+                  <button
+                    className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+                    onClick={() => void handleBatchDelete()}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    <span>{batchBusy === "delete" ? "删除中..." : `删除选中 (${selectedProfiles.length})`}</span>
+                  </button>
+                  <div className="my-1 border-t border-border" />
+                  <button
+                    className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                    onClick={() => {
+                      setSelectedIds(new Set());
+                      setBatchMenuOpen(false);
+                    }}
+                  >
+                    <XCircle className="h-4 w-4" />
+                    <span>清空选择</span>
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="min-h-0 flex-1 overflow-hidden rounded-md border border-border bg-white">
