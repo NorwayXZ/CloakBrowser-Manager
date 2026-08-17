@@ -1628,17 +1628,21 @@ class BrowserManager:
             resolved_timezone = profile.get("timezone") or None
             resolved_locale = profile.get("locale") or None
             proxy_geo: dict[str, Any] | None = None
-            if browser_proxy and profile.get("geoip"):
+            if browser_proxy:
                 try:
                     geo = await fetch_proxy_geo(browser_proxy)
                     proxy_geo = geo
-                    resolved_timezone = geo.get("timezone") or resolved_timezone
-                    resolved_locale = geo.get("suggested_locale") or resolved_locale
+                    if profile.get("geoip"):
+                        resolved_timezone = geo.get("timezone") or resolved_timezone
+                        resolved_locale = geo.get("suggested_locale") or resolved_locale
                     logger.info(
-                        "GeoIP applied for %s: timezone=%s locale=%s source=%s",
+                        "GeoIP detected for %s: ip=%s country=%s timezone=%s locale=%s applied=%s source=%s",
                         profile_id,
+                        geo.get("ip"),
+                        geo.get("country_code") or geo.get("country"),
                         resolved_timezone,
                         resolved_locale,
+                        bool(profile.get("geoip")),
                         geo.get("source"),
                     )
                 except Exception as exc:

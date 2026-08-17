@@ -40,17 +40,6 @@ const RESOLUTION_PRESETS: Record<string, { width: number; height: number }> = {
   "5120 × 2880 (外接 5K)": { width: 5120, height: 2880 },
 };
 
-const TAG_COLORS = [
-  "#6366f1", // indigo
-  "#22c55e", // green
-  "#f59e0b", // amber
-  "#ef4444", // red
-  "#06b6d4", // cyan
-  "#a855f7", // purple
-  "#f97316", // orange
-  "#ec4899", // pink
-];
-
 const GPU_PRESETS: Record<string, { vendor: string; renderer: string }> = {
   "Apple M1": {
     vendor: "Google Inc. (Apple)",
@@ -142,6 +131,19 @@ interface ProxyParts {
 
 const PROXY_SCHEMES: ProxyScheme[] = ["http", "https", "socks5"];
 
+const ACCOUNT_PLATFORM_OPTIONS = [
+  "阿里云",
+  "Amazon",
+  "Google",
+  "PayPal",
+  "Facebook",
+  "TikTok",
+  "Shopify",
+  "Stripe",
+  "Cloudflare",
+  "其他",
+];
+
 const DEFAULT_PROXY_PARTS: ProxyParts = {
   kind: "direct",
   scheme: "http",
@@ -174,6 +176,7 @@ function createDefaultForm(): ProfileCreateData {
     clipboard_sync: true,
     auto_launch: false,
     group_name: "未分组",
+    account_platform: null,
     cookies_json: null,
     startup_urls: [],
     launch_args: [],
@@ -284,8 +287,6 @@ export function ProfileForm({
 
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [tagInput, setTagInput] = useState("");
-  const [tagColor, setTagColor] = useState<string | null>("#6366f1");
   const [launchArgInput, setLaunchArgInput] = useState("");
   const [startupUrlsText, setStartupUrlsText] = useState("");
   const [draftProfileId, setDraftProfileId] = useState<string | null>(null);
@@ -316,6 +317,7 @@ export function ProfileForm({
         clipboard_sync: profile.clipboard_sync,
         auto_launch: profile.auto_launch,
         group_name: profile.group_name || "未分组",
+        account_platform: profile.account_platform,
         cookies_json: profile.cookies_json,
         startup_urls: profile.startup_urls ?? [],
         color_scheme: profile.color_scheme,
@@ -455,18 +457,6 @@ export function ProfileForm({
     ));
   };
 
-  const addTag = () => {
-    const tag = tagInput.trim();
-    if (!tag) return;
-    if (form.tags?.some((t) => t.tag === tag)) return;
-    set("tags", [...(form.tags ?? []), { tag, color: tagColor }]);
-    setTagInput("");
-  };
-
-  const removeTag = (tag: string) => {
-    set("tags", (form.tags ?? []).filter((t) => t.tag !== tag));
-  };
-
   const addLaunchArg = () => {
     const arg = launchArgInput.trim();
     if (!arg) return;
@@ -494,6 +484,7 @@ export function ProfileForm({
   const summaryRows = [
     ["浏览器", currentEngine === "system_chrome" ? "Google Chrome 原生" : "CloakBrowser / Chromium"],
     ["画像", selectedDeviceProfile.name],
+    ["账号平台", form.account_platform || "未设置"],
     ["User-Agent", form.user_agent || "跟随真实浏览器"],
     ["代理", form.proxy ? `${proxyLabel} · 已配置` : "未配置"],
     ["启动页面", (form.startup_urls ?? []).length > 0 ? `${form.startup_urls?.length} 个网址` : "默认自检页"],
@@ -558,7 +549,7 @@ export function ProfileForm({
                 <section className="rounded-md border border-border bg-white p-5">
                   <div className="mb-2 text-sm font-semibold text-slate-900">基础设置</div>
                   <SectionIntro>
-                    这里保存这个浏览器的身份信息。名称、分组只影响管理列表；浏览器模式、Apple 画像、User-Agent、Cookie 和启动页面会影响实际启动后的浏览器表现。
+                    这里保存这个浏览器的身份信息。名称、分组、账号平台用于管理列表；浏览器模式、Apple 画像、User-Agent、Cookie 和启动页面会影响实际启动后的浏览器表现。
                   </SectionIntro>
                   <div className="grid max-w-3xl grid-cols-[120px_minmax(0,1fr)] items-start gap-x-5 gap-y-4">
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">名称</label>
@@ -586,6 +577,23 @@ export function ProfileForm({
                         ))}
                       </select>
                       <FieldNote>用于左侧分组和列表筛选；需要新增分组时，在“分组管理”里创建。</FieldNote>
+                    </div>
+
+                    <label className="pt-2 text-right text-sm font-medium text-slate-600">账号平台</label>
+                    <div>
+                      <input
+                        className="input max-w-xs"
+                        list="account-platform-options"
+                        value={form.account_platform ?? ""}
+                        onChange={(e) => set("account_platform", e.target.value || null)}
+                        placeholder="例如 阿里云 / Amazon"
+                      />
+                      <datalist id="account-platform-options">
+                        {ACCOUNT_PLATFORM_OPTIONS.map((platform) => (
+                          <option key={platform} value={platform} />
+                        ))}
+                      </datalist>
+                      <FieldNote>用于列表页展示这个浏览器对应哪个平台账号；可以从建议里选，也可以自己输入。</FieldNote>
                     </div>
 
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">浏览器</label>
@@ -1029,7 +1037,7 @@ export function ProfileForm({
               <section className="rounded-md border border-border bg-white p-5">
                 <div className="mb-2 text-sm font-semibold text-slate-900">高级设置</div>
                 <SectionIntro>
-                  这些是启动体验和管理辅助项。不了解启动参数时建议保持默认；标签和颜色偏好可以放心改，只影响本地管理或浏览器偏好。
+                  这些是启动体验和管理辅助项。不了解启动参数时建议保持默认；颜色偏好只影响网页偏好，启动参数会直接传给浏览器。
                 </SectionIntro>
                 <div className="space-y-6">
                   <div className="grid max-w-3xl grid-cols-[120px_minmax(0,1fr)] items-start gap-x-5 gap-y-4">
@@ -1088,52 +1096,6 @@ export function ProfileForm({
                         <option value="no-preference">无偏好</option>
                       </select>
                       <FieldNote>对应网页里的 prefers-color-scheme 偏好；不确定就选跟随系统。</FieldNote>
-                    </div>
-
-                    <label className="pt-2 text-right text-sm font-medium text-slate-600">标签</label>
-                    <div>
-                      {(form.tags ?? []).length > 0 && (
-                        <div className="mb-3 flex flex-wrap gap-1.5">
-                          {(form.tags ?? []).map((t) => (
-                            <span
-                              key={t.tag}
-                              className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs"
-                              style={t.color ? { backgroundColor: `${t.color}20`, color: t.color } : undefined}
-                            >
-                              {t.tag}
-                              <button type="button" onClick={() => removeTag(t.tag)} className="hover:opacity-70">
-                                <X className="h-3 w-3" />
-                              </button>
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      <div className="flex max-w-2xl items-center gap-2">
-                        <div className="flex gap-1">
-                          {TAG_COLORS.map((c) => (
-                            <button
-                              key={c}
-                              type="button"
-                              onClick={() => setTagColor(c)}
-                              className="h-4 w-4 rounded-full border-2 transition-transform"
-                              style={{
-                                backgroundColor: c,
-                                borderColor: tagColor === c ? "#0f172a" : "transparent",
-                                transform: tagColor === c ? "scale(1.15)" : undefined,
-                              }}
-                            />
-                          ))}
-                        </div>
-                        <input
-                          className="input flex-1"
-                          value={tagInput}
-                          onChange={(e) => setTagInput(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTag(); } }}
-                          placeholder="添加标签..."
-                        />
-                        <button type="button" onClick={addTag} className="btn-secondary text-xs">添加</button>
-                      </div>
-                      <FieldNote>标签只用于本地列表筛选和识别，例如“美国”“店铺A”“测试”。</FieldNote>
                     </div>
 
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">启动参数</label>

@@ -214,6 +214,7 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
     clipboard_sync: profile.clipboard_sync,
     auto_launch: false,
     group_name: profile.group_name,
+    account_platform: profile.account_platform,
     cookies_json: profile.cookies_json,
     startup_urls: profile.startup_urls,
     color_scheme: profile.color_scheme,

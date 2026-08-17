@@ -35,6 +35,7 @@ class ProfileCreate(BaseModel):
     auto_launch: bool = False
     color_scheme: Literal["light", "dark", "no-preference"] | None = None
     group_name: str | None = "未分组"
+    account_platform: str | None = None
     cookies_json: str | None = None
     startup_urls: list[str] = Field(default_factory=list)
     launch_args: list[str] = Field(default_factory=list)
@@ -65,6 +66,7 @@ class ProfileUpdate(BaseModel):
     auto_launch: bool | None = None
     color_scheme: Literal["light", "dark", "no-preference"] | None = Field(default=None)
     group_name: str | None = Field(default=None)
+    account_platform: str | None = Field(default=None)
     cookies_json: str | None = Field(default=None)
     startup_urls: list[str] | None = None
     launch_args: list[str] | None = None
@@ -105,6 +107,7 @@ class ProfileResponse(BaseModel):
     clipboard_sync: bool = True
     auto_launch: bool = False
     group_name: str | None = "未分组"
+    account_platform: str | None = None
     cookies_json: str | None = None
     startup_urls: list[str] = []
 
@@ -119,6 +122,7 @@ class ProfileResponse(BaseModel):
     user_data_dir: str
     created_at: str
     updated_at: str
+    last_opened_at: str | None = None
     deleted_at: str | None = None
     tags: list[TagResponse] = []
     status: str = "stopped"  # "running" | "stopped"

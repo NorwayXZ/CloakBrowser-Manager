@@ -636,7 +636,10 @@ async def auth_logout(request: Request, response: Response):
 
 
 def _profile_response(profile: dict) -> ProfileResponse:
-    payload = {**profile, **browser_mgr.get_status(profile["id"], profile)}
+    status = browser_mgr.get_status(profile["id"], profile)
+    if not status.get("proxy_geo") and profile.get("proxy_geo"):
+        status["proxy_geo"] = profile.get("proxy_geo")
+    payload = {**profile, **status}
     payload["tags"] = [TagResponse(**tag) for tag in profile.get("tags", [])]
     return ProfileResponse(**payload)
 
@@ -791,6 +794,8 @@ async def launch_profile(
     except Exception as exc:
         logger.error("Failed to launch profile %s: %s", profile_id, exc)
         raise HTTPException(status_code=500, detail="Failed to launch browser")
+
+    db.mark_profile_opened(profile_id, running.proxy_geo)
 
     return LaunchResponse(
         profile_id=profile_id,

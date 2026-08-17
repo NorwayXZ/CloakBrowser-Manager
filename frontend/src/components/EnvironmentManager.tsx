@@ -2,21 +2,25 @@ import {
   Archive,
   Bell,
   Bug,
+  Clock3,
   Copy,
   Edit3,
   Folder,
   Globe2,
   KeyRound,
+  Laptop,
   LayoutGrid,
   ListChecks,
   LogOut,
+  MapPin,
   MoreVertical,
+  Pencil,
   Play,
   Plus,
   RefreshCw,
   Search,
   Square,
-  Tags,
+  StickyNote,
   Trash2,
   Wifi,
 } from "lucide-react";
@@ -97,18 +101,27 @@ function proxyHost(profile: Profile) {
 
 function locationText(profile: Profile) {
   const geo = profile.proxy_geo;
-  if (!geo) return profile.geoip ? "启动后检测" : "未检测";
-  return [geo.country_code, geo.country].filter(Boolean).join(" / ") || "未知地区";
+  if (!profile.proxy) return "未配置代理";
+  if (!geo) return "打开后检测";
+  const country = [geo.country_code, geo.country].filter(Boolean).join(" - ");
+  const city = [geo.region, geo.city].filter(Boolean).join(" / ");
+  return [country, city].filter(Boolean).join(" · ") || "未知地区";
 }
 
 function engineLabel(profile: Profile) {
   return profile.browser_engine === "cloakbrowser" ? "伪装画像" : "稳定原生";
 }
 
-function platformIcon(profile: Profile) {
-  if (profile.platform === "macos") return "●";
-  if (profile.platform === "windows") return "■";
-  return "◆";
+function accountPlatformText(profile: Profile) {
+  return profile.account_platform?.trim() || "-";
+}
+
+function noteText(profile: Profile) {
+  return profile.notes?.trim() || "-";
+}
+
+function lastOpenedText(profile: Profile) {
+  return profile.status === "running" ? "运行中" : formatDate(profile.last_opened_at || profile.updated_at);
 }
 
 export function EnvironmentManager({
@@ -156,6 +169,8 @@ export function EnvironmentManager({
       const haystack = [
         profile.name,
         profile.proxy ?? "",
+        profile.account_platform ?? "",
+        profile.notes ?? "",
         profile.user_agent ?? "",
         profile.locale ?? "",
         profile.timezone ?? "",
@@ -345,7 +360,7 @@ export function EnvironmentManager({
                 className="input h-11 pl-10"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="搜索名称、代理、UA、标签"
+                placeholder="搜索名称、代理、账号平台、备注、UA"
               />
             </div>
             <label className="flex h-11 items-center gap-2 rounded-md border border-border bg-white px-3 text-sm text-slate-600">
@@ -375,10 +390,6 @@ export function EnvironmentManager({
               <Square className="h-4 w-4" />
               <span>关闭</span>
             </button>
-            <button className="btn-secondary flex items-center gap-1.5 disabled:opacity-50" disabled={selectedIds.size === 0}>
-              <Tags className="h-4 w-4" />
-              <span>标签</span>
-            </button>
             <button className="btn-secondary px-2.5" title="更多">
               <MoreVertical className="h-4 w-4" />
             </button>
@@ -386,10 +397,21 @@ export function EnvironmentManager({
 
           <div className="min-h-0 flex-1 overflow-hidden rounded-md border border-border bg-white">
             <div className="h-full overflow-auto">
-              <table className="min-w-[1120px] w-full border-separate border-spacing-0 text-sm">
+              <table className="w-full min-w-[1320px] table-fixed border-separate border-spacing-0 text-sm">
+                <colgroup>
+                  <col className="w-12" />
+                  <col className="w-16" />
+                  <col className="w-32" />
+                  <col className="w-64" />
+                  <col className="w-72" />
+                  <col className="w-36" />
+                  <col className="w-44" />
+                  <col className="w-64" />
+                  <col className="w-64" />
+                </colgroup>
                 <thead className="sticky top-0 z-10 bg-slate-50 text-xs text-slate-500">
                   <tr>
-                    <th className="w-12 border-b border-border px-4 py-3 text-left">
+                    <th className="border-b border-border px-4 py-3 text-left">
                       <input
                         type="checkbox"
                         className="h-4 w-4 rounded border-slate-300"
@@ -397,14 +419,14 @@ export function EnvironmentManager({
                         onChange={toggleAllFiltered}
                       />
                     </th>
-                    <th className="w-20 border-b border-border px-3 py-3 text-left font-medium">编号</th>
-                    <th className="w-28 border-b border-border px-3 py-3 text-left font-medium">分组</th>
+                    <th className="border-b border-border px-3 py-3 text-left font-medium">编号</th>
+                    <th className="border-b border-border px-3 py-3 text-left font-medium">分组</th>
                     <th className="border-b border-border px-3 py-3 text-left font-medium">名称</th>
-                    <th className="w-56 border-b border-border px-3 py-3 text-left font-medium">IP / 代理</th>
-                    <th className="w-32 border-b border-border px-3 py-3 text-left font-medium">最近打开</th>
-                    <th className="w-36 border-b border-border px-3 py-3 text-left font-medium">账号平台</th>
-                    <th className="w-40 border-b border-border px-3 py-3 text-left font-medium">标签</th>
-                    <th className="w-64 border-b border-border px-3 py-3 text-left font-medium">操作</th>
+                    <th className="border-b border-border px-3 py-3 text-left font-medium">IP / 代理</th>
+                    <th className="border-b border-border px-3 py-3 text-left font-medium">最近打开</th>
+                    <th className="border-b border-border px-3 py-3 text-left font-medium">账号平台</th>
+                    <th className="border-b border-border px-3 py-3 text-left font-medium">备注</th>
+                    <th className="border-b border-border px-3 py-3 text-left font-medium">操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -428,54 +450,97 @@ export function EnvironmentManager({
                       <td className="border-b border-border px-3 py-3 align-middle text-slate-600">
                         {index + 1}
                       </td>
-                      <td className="border-b border-border px-3 py-3 align-middle text-slate-700">{profile.group_name || "未分组"}</td>
                       <td className="border-b border-border px-3 py-3 align-middle">
-                        <div className="flex min-w-0 items-center gap-2">
+                        <button
+                          className="max-w-full truncate rounded px-1.5 py-1 text-left text-slate-700 hover:bg-slate-100 hover:text-accent"
+                          onClick={() => onEdit(profile.id)}
+                          title="编辑分组"
+                        >
+                          {profile.group_name || "未分组"}
+                        </button>
+                      </td>
+                      <td className="border-b border-border px-3 py-3 align-middle">
+                        <div className="flex min-w-0 items-start gap-2">
                           <StatusIndicator status={profile.status} />
-                          <span className="text-blue-600">{platformIcon(profile)}</span>
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-blue-50 text-blue-600">
+                            <Laptop className="h-4 w-4" />
+                          </div>
                           <div className="min-w-0">
                             <button
-                              className="block max-w-[240px] truncate text-left font-medium text-slate-900 hover:text-accent"
+                              className="block max-w-[180px] truncate text-left font-semibold text-slate-900 hover:text-accent"
                               onClick={() => onEdit(profile.id)}
                               title={profile.name}
                             >
                               {profile.name}
                             </button>
-                            <div className="text-xs text-slate-400">{engineLabel(profile)}</div>
+                            <button
+                              className="mt-1 inline-flex items-center gap-1 text-xs text-slate-400 hover:text-accent"
+                              onClick={() => onEdit(profile.id)}
+                              title="编辑名称"
+                            >
+                              <Pencil className="h-3 w-3" />
+                              <span>{engineLabel(profile)} · 编辑名称</span>
+                            </button>
                           </div>
                         </div>
                       </td>
                       <td className="border-b border-border px-3 py-3 align-middle">
-                        <div className="font-medium text-slate-800">{proxyHost(profile)}</div>
-                        <div className="mt-0.5 flex items-center gap-2 text-xs text-slate-500">
-                          <span className="rounded bg-slate-100 px-1.5 py-0.5">{proxyType(profile)}</span>
-                          <span>{locationText(profile)}</span>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <button
+                            className="truncate text-left font-semibold text-slate-900 hover:text-accent"
+                            onClick={() => onEdit(profile.id)}
+                            title="修改代理"
+                          >
+                            {proxyHost(profile)}
+                          </button>
+                          <button
+                            className="shrink-0 rounded border border-border p-1 text-slate-400 hover:border-accent hover:text-accent"
+                            onClick={() => onEdit(profile.id)}
+                            title="修改代理"
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </button>
+                        </div>
+                        <div className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-slate-500">
+                          <span className="rounded bg-slate-100 px-1.5 py-0.5 font-medium">{proxyType(profile)}</span>
+                          <MapPin className="h-3 w-3 shrink-0 text-slate-400" />
+                          <span className="truncate" title={locationText(profile)}>{locationText(profile)}</span>
                         </div>
                       </td>
-                      <td className="border-b border-border px-3 py-3 align-middle text-slate-600">
-                        {profile.status === "running" ? "运行中" : formatDate(profile.updated_at)}
-                      </td>
-                      <td className="border-b border-border px-3 py-3 align-middle text-slate-500">-</td>
                       <td className="border-b border-border px-3 py-3 align-middle">
-                        <div className="flex flex-wrap gap-1">
-                          {profile.tags.length === 0 ? (
-                            <span className="text-slate-400">-</span>
-                          ) : profile.tags.map((tag) => (
-                            <span
-                              key={tag.tag}
-                              className="rounded px-1.5 py-0.5 text-xs"
-                              style={tag.color ? { backgroundColor: `${tag.color}1f`, color: tag.color } : undefined}
-                            >
-                              {tag.tag}
-                            </span>
-                          ))}
+                        <div className="inline-flex items-center gap-1.5 text-slate-600">
+                          <Clock3 className="h-3.5 w-3.5 text-slate-400" />
+                          <span>{lastOpenedText(profile)}</span>
                         </div>
+                      </td>
+                      <td className="border-b border-border px-3 py-3 align-middle">
+                        <button
+                          className={`max-w-full truncate rounded px-2 py-1 text-left ${
+                            profile.account_platform
+                              ? "bg-blue-50 text-blue-700 hover:bg-blue-100"
+                              : "text-slate-400 hover:bg-slate-100 hover:text-accent"
+                          }`}
+                          onClick={() => onEdit(profile.id)}
+                          title="编辑账号平台"
+                        >
+                          {accountPlatformText(profile)}
+                        </button>
+                      </td>
+                      <td className="border-b border-border px-3 py-3 align-middle">
+                        <button
+                          className="flex max-w-full items-center gap-1.5 rounded px-2 py-1 text-left text-slate-600 hover:bg-slate-100 hover:text-accent"
+                          onClick={() => onEdit(profile.id)}
+                          title={noteText(profile)}
+                        >
+                          <StickyNote className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                          <span className="truncate">{noteText(profile)}</span>
+                        </button>
                       </td>
                       <td className="relative border-b border-border px-3 py-3 align-middle">
                         <div className="flex items-center gap-2">
                           {profile.status === "running" ? (
                             <button
-                              className="btn-danger flex items-center gap-1.5 px-2.5"
+                              className="btn-danger flex h-9 min-w-20 items-center justify-center gap-1.5 whitespace-nowrap px-3"
                               disabled={busyId === profile.id}
                               onClick={() => void runRowAction(profile.id, () => onStop(profile.id))}
                             >
@@ -484,7 +549,7 @@ export function EnvironmentManager({
                             </button>
                           ) : (
                             <button
-                              className="btn-primary flex items-center gap-1.5 px-2.5"
+                              className="btn-primary flex h-9 min-w-20 items-center justify-center gap-1.5 whitespace-nowrap px-3"
                               disabled={busyId === profile.id}
                               onClick={() => void runRowAction(profile.id, () => onLaunch(profile.id, "manual"))}
                             >
@@ -494,7 +559,7 @@ export function EnvironmentManager({
                           )}
                           {profile.status !== "running" && profile.browser_engine !== "cloakbrowser" && (
                             <button
-                              className="btn-secondary flex items-center gap-1.5 px-2.5"
+                              className="btn-secondary flex h-9 min-w-20 items-center justify-center gap-1.5 whitespace-nowrap px-3"
                               disabled={busyId === profile.id}
                               title="带 CDP 打开，用于排查 console、cookie 和指纹自检"
                               onClick={() => void runRowAction(profile.id, () => onLaunch(profile.id, "debug"))}
@@ -504,14 +569,14 @@ export function EnvironmentManager({
                             </button>
                           )}
                           <button
-                            className="btn-secondary px-2.5"
+                            className="btn-secondary flex h-9 w-9 items-center justify-center px-0"
                             title="编辑"
                             onClick={() => onEdit(profile.id)}
                           >
                             <Edit3 className="h-3.5 w-3.5" />
                           </button>
                           <button
-                            className="btn-secondary px-2.5"
+                            className="btn-secondary flex h-9 w-9 items-center justify-center px-0"
                             title="更多"
                             onClick={() => setMenuOpenId((current) => current === profile.id ? null : profile.id)}
                           >

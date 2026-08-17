@@ -46,11 +46,19 @@ const fakeProfile = {
   headless: false,
   geoip: false,
   clipboard_sync: true,
+  auto_launch: false,
+  group_name: "未分组",
+  account_platform: null,
+  cookies_json: null,
+  startup_urls: [],
   color_scheme: null,
+  launch_args: [],
   notes: null,
   user_data_dir: "/data/profiles/abc-123",
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
+  last_opened_at: null,
+  deleted_at: null,
   tags: [],
   status: "stopped" as const,
   runtime_mode: "docker" as const,
@@ -58,6 +66,7 @@ const fakeProfile = {
   vnc_ws_port: null,
   cdp_url: null,
   launch_mode: null,
+  proxy_geo: null,
 };
 
 beforeEach(() => {

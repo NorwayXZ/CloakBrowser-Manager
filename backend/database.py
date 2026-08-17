@@ -58,9 +58,12 @@ def init_db():
                 auto_launch BOOLEAN DEFAULT 0,
                 color_scheme TEXT,
                 group_name TEXT DEFAULT '未分组',
+                account_platform TEXT,
                 cookies_json TEXT,
                 startup_urls TEXT DEFAULT '[]',
                 launch_args TEXT DEFAULT '[]',
+                last_opened_at TEXT,
+                proxy_geo_json TEXT,
                 deleted_at TEXT,
                 notes TEXT,
                 user_data_dir TEXT NOT NULL,
@@ -120,11 +123,20 @@ def init_db():
         if "group_name" not in cols:
             conn.execute("ALTER TABLE profiles ADD COLUMN group_name TEXT DEFAULT '未分组'")
             conn.commit()
+        if "account_platform" not in cols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN account_platform TEXT")
+            conn.commit()
         if "cookies_json" not in cols:
             conn.execute("ALTER TABLE profiles ADD COLUMN cookies_json TEXT")
             conn.commit()
         if "startup_urls" not in cols:
             conn.execute("ALTER TABLE profiles ADD COLUMN startup_urls TEXT DEFAULT '[]'")
+            conn.commit()
+        if "last_opened_at" not in cols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN last_opened_at TEXT")
+            conn.commit()
+        if "proxy_geo_json" not in cols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN proxy_geo_json TEXT")
             conn.commit()
         if "deleted_at" not in cols:
             conn.execute("ALTER TABLE profiles ADD COLUMN deleted_at TEXT")
@@ -141,6 +153,26 @@ def init_db():
 
 def _now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def _load_json_list(raw: str | None) -> list[Any]:
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return []
+    return data if isinstance(data, list) else []
+
+
+def _load_json_dict(raw: str | None) -> dict[str, Any] | None:
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def get_setting(key: str) -> str | None:
@@ -188,9 +220,10 @@ def create_profile(
                 id, name, browser_engine, device_profile, fingerprint_seed, proxy, timezone, locale, platform,
                 user_agent, screen_width, screen_height, gpu_vendor, gpu_renderer,
                 hardware_concurrency, humanize, human_preset, headless, geoip,
-                clipboard_sync, auto_launch, color_scheme, group_name, cookies_json, startup_urls, launch_args, notes,
+                clipboard_sync, auto_launch, color_scheme, group_name, account_platform,
+                cookies_json, startup_urls, launch_args, notes,
                 user_data_dir, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 profile_id, name,
                 fields.get("browser_engine", "auto"),
@@ -214,6 +247,7 @@ def create_profile(
                 fields.get("auto_launch", False),
                 fields.get("color_scheme"),
                 fields.get("group_name") or "未分组",
+                fields.get("account_platform"),
                 fields.get("cookies_json"),
                 json.dumps(fields.get("startup_urls") or []),
                 json.dumps(fields.get("launch_args") or []),
@@ -237,8 +271,9 @@ def get_profile(profile_id: str) -> dict[str, Any] | None:
         if not row:
             return None
         profile = dict(row)
-        profile["startup_urls"] = json.loads(profile.get("startup_urls") or "[]")
-        profile["launch_args"] = json.loads(profile.get("launch_args") or "[]")
+        profile["startup_urls"] = _load_json_list(profile.get("startup_urls"))
+        profile["launch_args"] = _load_json_list(profile.get("launch_args"))
+        profile["proxy_geo"] = _load_json_dict(profile.get("proxy_geo_json"))
         tags = conn.execute(
             "SELECT tag, color FROM profile_tags WHERE profile_id = ?",
             (profile_id,),
@@ -249,8 +284,9 @@ def get_profile(profile_id: str) -> dict[str, Any] | None:
 
 def _hydrate_profile(row: sqlite3.Row) -> dict[str, Any]:
     profile = dict(row)
-    profile["startup_urls"] = json.loads(profile.get("startup_urls") or "[]")
-    profile["launch_args"] = json.loads(profile.get("launch_args") or "[]")
+    profile["startup_urls"] = _load_json_list(profile.get("startup_urls"))
+    profile["launch_args"] = _load_json_list(profile.get("launch_args"))
+    profile["proxy_geo"] = _load_json_dict(profile.get("proxy_geo_json"))
     with get_db() as conn:
         tags = conn.execute(
             "SELECT tag, color FROM profile_tags WHERE profile_id = ?",
@@ -298,7 +334,7 @@ def update_profile(profile_id: str, **fields: Any) -> dict[str, Any] | None:
         "name", "browser_engine", "device_profile", "fingerprint_seed", "proxy", "timezone", "locale", "platform",
         "user_agent", "screen_width", "screen_height", "gpu_vendor", "gpu_renderer",
         "hardware_concurrency", "humanize", "human_preset", "headless", "geoip",
-        "clipboard_sync", "auto_launch", "color_scheme", "group_name", "cookies_json",
+        "clipboard_sync", "auto_launch", "color_scheme", "group_name", "account_platform", "cookies_json",
         "startup_urls", "launch_args", "notes",
     ):
         if col in fields:
@@ -327,6 +363,27 @@ def update_profile(profile_id: str, **fields: Any) -> dict[str, Any] | None:
             conn.commit()
 
     return get_profile(profile_id)
+
+
+def mark_profile_opened(profile_id: str, proxy_geo: dict[str, Any] | None = None) -> None:
+    now = _now()
+    with get_db() as conn:
+        conn.execute(
+            """
+            UPDATE profiles
+            SET last_opened_at = ?,
+                proxy_geo_json = COALESCE(?, proxy_geo_json),
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                now,
+                json.dumps(proxy_geo, ensure_ascii=False) if proxy_geo else None,
+                now,
+                profile_id,
+            ),
+        )
+        conn.commit()
 
 
 def delete_profile(profile_id: str) -> bool:

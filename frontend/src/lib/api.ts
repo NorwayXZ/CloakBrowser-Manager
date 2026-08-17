@@ -31,6 +31,7 @@ export interface Profile {
   clipboard_sync: boolean;
   auto_launch: boolean;
   group_name: string | null;
+  account_platform: string | null;
   cookies_json: string | null;
   startup_urls: string[];
   color_scheme: string | null;
@@ -39,6 +40,7 @@ export interface Profile {
   user_data_dir: string;
   created_at: string;
   updated_at: string;
+  last_opened_at: string | null;
   deleted_at: string | null;
   tags: { tag: string; color: string | null }[];
   status: "running" | "stopped";
@@ -72,6 +74,7 @@ export interface ProfileCreateData {
   clipboard_sync?: boolean;
   auto_launch?: boolean;
   group_name?: string | null;
+  account_platform?: string | null;
   cookies_json?: string | null;
   startup_urls?: string[];
   color_scheme?: string | null;

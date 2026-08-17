@@ -80,6 +80,7 @@ def test_create_profile_all_fields(tmp_db: Path):
         headless=True,
         geoip=True,
         color_scheme="dark",
+        account_platform="阿里云",
         notes="test note",
     )
     assert p["proxy"] == "http://host:8080"
@@ -89,6 +90,7 @@ def test_create_profile_all_fields(tmp_db: Path):
     assert p["humanize"] == 1  # SQLite stores bool as int
     assert p["human_preset"] == "careful"
     assert p["color_scheme"] == "dark"
+    assert p["account_platform"] == "阿里云"
 
 
 def test_create_profile_with_tags(tmp_db: Path):
@@ -115,6 +117,25 @@ def test_create_profile_defaults(tmp_db: Path):
     assert p["human_preset"] == "default"
     assert p["startup_urls"] == []
     assert p["launch_args"] == []
+    assert p["last_opened_at"] is None
+    assert p["proxy_geo"] is None
+
+
+def test_mark_profile_opened_persists_time_and_proxy_geo(tmp_db: Path):
+    p = db.create_profile("Opened")
+    geo = {
+        "ip": "68.77.201.34",
+        "country_code": "US",
+        "country": "美国",
+        "region": "California",
+        "city": "Los Angeles",
+        "timezone": "America/Los_Angeles",
+        "source": "test",
+    }
+    db.mark_profile_opened(p["id"], geo)
+    fetched = db.get_profile(p["id"])
+    assert fetched["last_opened_at"] is not None
+    assert fetched["proxy_geo"] == geo
 
 
 def test_create_profile_with_startup_urls(tmp_db: Path):

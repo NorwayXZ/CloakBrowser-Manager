@@ -799,3 +799,39 @@ async def test_launch_applies_locale_timezone_to_process_and_page(
     init_scripts = [call.args[0] for call in context.add_init_script.await_args_list]
     assert any("Navigator.prototype" in script for script in init_scripts)
     assert any("Date.prototype.getTimezoneOffset" in script for script in init_scripts)
+
+
+@pytest.mark.asyncio
+async def test_launch_detects_proxy_geo_without_applying_locale_when_geoip_off(
+    monkeypatch,
+    tmp_path: Path,
+):
+    from backend import browser_manager as module
+
+    context = MagicMock()
+    context.pages = []
+    context.add_init_script = AsyncMock()
+    manager = BrowserManager(NATIVE_RUNTIME)
+    manager._wait_for_cdp = AsyncMock()
+    launch = AsyncMock(return_value=context)
+    geo = {
+        "ip": "68.77.201.34",
+        "country_code": "US",
+        "country": "United States",
+        "timezone": "America/Chicago",
+        "suggested_locale": "en-US",
+        "source": "test",
+    }
+    monkeypatch.setattr(module, "launch_persistent_context_async", launch)
+    monkeypatch.setattr(module, "fetch_proxy_geo", AsyncMock(return_value=geo))
+
+    profile = _launch_profile(tmp_path)
+    profile["proxy"] = "http://proxy.example:8080"
+    profile["geoip"] = False
+
+    running = await manager.launch(profile)
+
+    assert running.proxy_geo == geo
+    options = launch.await_args.kwargs
+    assert options["timezone"] is None
+    assert options["locale"] is None
