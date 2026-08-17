@@ -111,7 +111,7 @@ def test_create_profile_defaults(tmp_db: Path):
     assert p["platform"] == "windows"
     assert p["screen_width"] == 1920
     assert p["screen_height"] == 1080
-    assert p["humanize"] == 0
+    assert p["humanize"] == 1
     assert p["headless"] == 0
     assert p["geoip"] == 0
     assert p["human_preset"] == "default"

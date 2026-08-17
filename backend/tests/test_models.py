@@ -26,7 +26,7 @@ def test_profile_create_minimal():
     assert p.platform == "windows"
     assert p.screen_width == 1920
     assert p.screen_height == 1080
-    assert p.humanize is False
+    assert p.humanize is True
     assert p.headless is False
     assert p.geoip is False
     assert p.human_preset == "default"

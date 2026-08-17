@@ -29,6 +29,7 @@ def test_create_profile(app_client: TestClient):
     data = resp.json()
     assert data["name"] == "Test"
     assert data["status"] == "stopped"
+    assert data["humanize"] is True
     assert "id" in data
     assert len(data["id"]) == 36  # UUID
 

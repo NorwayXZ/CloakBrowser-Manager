@@ -1,4 +1,4 @@
-import { ArrowLeft, Globe, Loader2, RefreshCw, Save, Trash2, Wifi, X } from "lucide-react";
+import { ArrowLeft, ClipboardCheck, Globe, Loader2, MousePointer2, Plus, RefreshCw, Save, Settings2, Trash2, Wifi, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import {
   api,
@@ -169,7 +169,7 @@ function SectionIntro({ children }: { children: ReactNode }) {
 function createDefaultForm(): ProfileCreateData {
   return applyDeviceProfile({
     name: "",
-    humanize: false,
+    humanize: true,
     human_preset: "default",
     headless: false,
     geoip: false,
@@ -288,6 +288,7 @@ export function ProfileForm({
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [launchArgInput, setLaunchArgInput] = useState("");
+  const [launchArgsOpen, setLaunchArgsOpen] = useState(false);
   const [startupUrlsText, setStartupUrlsText] = useState("");
   const [draftProfileId, setDraftProfileId] = useState<string | null>(null);
 
@@ -328,11 +329,13 @@ export function ProfileForm({
       setStartupUrlsText((profile.startup_urls ?? []).join("\n"));
       setProxyParts(parseProxy(profile.proxy));
       setDraftProfileId(profile.id);
+      setLaunchArgsOpen((profile.launch_args ?? []).length > 0);
     } else {
       setForm(createDefaultForm());
       setStartupUrlsText("");
       setProxyParts({ ...DEFAULT_PROXY_PARTS });
       setDraftProfileId(null);
+      setLaunchArgsOpen(false);
     }
     setProxyTest(null);
     setProxyTestError(null);
@@ -462,6 +465,7 @@ export function ProfileForm({
     if (!arg) return;
     if ((form.launch_args ?? []).includes(arg)) return;
     set("launch_args", [...(form.launch_args ?? []), arg]);
+    setLaunchArgsOpen(true);
     setLaunchArgInput("");
   };
 
@@ -1037,50 +1041,79 @@ export function ProfileForm({
               <section className="rounded-md border border-border bg-white p-5">
                 <div className="mb-2 text-sm font-semibold text-slate-900">高级设置</div>
                 <SectionIntro>
-                  这些是启动体验和管理辅助项。不了解启动参数时建议保持默认；颜色偏好只影响网页偏好，启动参数会直接传给浏览器。
+                  默认已经按日常本地使用调好：真人操作辅助和 VNC 剪贴板同步会自动开启；启动参数属于工程级选项，不清楚用途就保持为空。
                 </SectionIntro>
                 <div className="space-y-6">
                   <div className="grid max-w-3xl grid-cols-[120px_minmax(0,1fr)] items-start gap-x-5 gap-y-4">
-                    <label className="pt-2 text-right text-sm font-medium text-slate-600">行为</label>
+                    <label className="pt-2 text-right text-sm font-medium text-slate-600">行为辅助</label>
                     <div className="space-y-3">
-                      <label className="flex items-center gap-2 text-sm text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={form.humanize ?? false}
-                          onChange={(e) => set("humanize", e.target.checked)}
-                          className="rounded border-slate-300"
-                        />
-                        模拟真人鼠标、键盘和滚动行为
-                      </label>
+                      <div className="border-b border-slate-100 pb-3">
+                        <label className="flex items-start gap-3 text-sm text-slate-800">
+                          <input
+                            type="checkbox"
+                            checked={form.humanize ?? false}
+                            onChange={(e) => set("humanize", e.target.checked)}
+                            className="mt-1 rounded border-slate-300"
+                          />
+                          <span className="min-w-0">
+                            <span className="flex items-center gap-1.5 font-medium">
+                              <MousePointer2 className="h-4 w-4 text-accent" />
+                              模拟真人鼠标、键盘和滚动行为
+                            </span>
+                            <span className="mt-1 block text-xs leading-5 text-slate-500">
+                              新建浏览器默认开启，让 Manager 控制和 VNC 远程操作更自然平滑；它不等于保证通过网站风控。
+                            </span>
+                          </span>
+                        </label>
+                      </div>
                       {form.humanize && (
-                        <select
-                          className="input max-w-sm"
-                          value={form.human_preset}
-                          onChange={(e) => set("human_preset", e.target.value)}
-                        >
-                          <option value="default">默认（正常速度）</option>
-                          <option value="careful">谨慎（更慢、更稳）</option>
-                        </select>
+                        <div className="grid max-w-xl grid-cols-[92px_minmax(0,1fr)] items-center gap-3">
+                          <div className="text-xs font-medium text-slate-500">行为速度</div>
+                          <select
+                            className="input"
+                            value={form.human_preset}
+                            onChange={(e) => set("human_preset", e.target.value)}
+                          >
+                            <option value="default">默认（正常速度）</option>
+                            <option value="careful">谨慎（更慢、更稳）</option>
+                          </select>
+                        </div>
                       )}
-                      <FieldNote>这些选项只影响 Manager 启动和远程/VNC 操作体验，不会替你绕过网站风控判断。</FieldNote>
-                      <label className="flex items-center gap-2 text-sm text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={form.clipboard_sync ?? true}
-                          onChange={(e) => set("clipboard_sync", e.target.checked)}
-                          className="rounded border-slate-300"
-                        />
-                        默认启用 VNC 剪贴板同步
-                      </label>
-                      <label className="flex items-center gap-2 text-sm text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={form.auto_launch ?? false}
-                          onChange={(e) => set("auto_launch", e.target.checked)}
-                          className="rounded border-slate-300"
-                        />
-                        Manager 启动后自动打开
-                      </label>
+                      <div className="border-b border-slate-100 py-3">
+                        <label className="flex items-start gap-3 text-sm text-slate-800">
+                          <input
+                            type="checkbox"
+                            checked={form.clipboard_sync ?? true}
+                            onChange={(e) => set("clipboard_sync", e.target.checked)}
+                            className="mt-1 rounded border-slate-300"
+                          />
+                          <span className="min-w-0">
+                            <span className="flex items-center gap-1.5 font-medium">
+                              <ClipboardCheck className="h-4 w-4 text-accent" />
+                              默认启用 VNC 剪贴板同步
+                            </span>
+                            <span className="mt-1 block text-xs leading-5 text-slate-500">
+                              用远程/VNC 画面时，可以在本机和浏览器之间复制粘贴文本；本机原生 Chrome 窗口基本无感，保持开启即可。
+                            </span>
+                          </span>
+                        </label>
+                      </div>
+                      <div className="pt-3">
+                        <label className="flex items-start gap-3 text-sm text-slate-800">
+                          <input
+                            type="checkbox"
+                            checked={form.auto_launch ?? false}
+                            onChange={(e) => set("auto_launch", e.target.checked)}
+                            className="mt-1 rounded border-slate-300"
+                          />
+                          <span className="min-w-0">
+                            <span className="font-medium">Manager 启动后自动打开</span>
+                            <span className="mt-1 block text-xs leading-5 text-slate-500">
+                              只有常用固定浏览器才建议开启；否则 Manager 启动时会自动把这个浏览器拉起来。
+                            </span>
+                          </span>
+                        </label>
+                      </div>
                     </div>
 
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">颜色偏好</label>
@@ -1098,34 +1131,54 @@ export function ProfileForm({
                       <FieldNote>对应网页里的 prefers-color-scheme 偏好；不确定就选跟随系统。</FieldNote>
                     </div>
 
-                    <label className="pt-2 text-right text-sm font-medium text-slate-600">启动参数</label>
+                    <label className="pt-2 text-right text-sm font-medium text-slate-600">高级启动</label>
                     <div>
-                      {(form.launch_args ?? []).length > 0 && (
-                        <div className="mb-3 flex flex-wrap gap-1.5">
-                          {(form.launch_args ?? []).map((arg, idx) => (
-                            <span
-                              key={idx}
-                              className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-1 font-mono text-xs text-slate-700"
-                            >
-                              {arg}
-                              <button type="button" onClick={() => removeLaunchArg(idx)} className="hover:opacity-70">
-                                <X className="h-3 w-3" />
-                              </button>
-                            </span>
-                          ))}
+                      <details
+                        className="group max-w-2xl border-t border-slate-100 pt-3"
+                        open={launchArgsOpen}
+                        onToggle={(e) => setLaunchArgsOpen(e.currentTarget.open)}
+                      >
+                        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium text-slate-700">
+                          <span className="flex items-center gap-1.5">
+                            <Settings2 className="h-4 w-4 text-slate-400" />
+                            启动参数
+                          </span>
+                          <span className="text-xs font-normal text-slate-400 group-open:hidden">展开</span>
+                          <span className="hidden text-xs font-normal text-slate-400 group-open:inline">收起</span>
+                        </summary>
+                        <div className="mt-3">
+                          {(form.launch_args ?? []).length > 0 && (
+                            <div className="mb-3 flex flex-wrap gap-1.5">
+                              {(form.launch_args ?? []).map((arg, idx) => (
+                                <span
+                                  key={idx}
+                                  className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-1 font-mono text-xs text-slate-700"
+                                >
+                                  {arg}
+                                  <button type="button" onClick={() => removeLaunchArg(idx)} className="hover:opacity-70" title="移除启动参数">
+                                    <X className="h-3 w-3" />
+                                  </button>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          <div className="flex gap-2">
+                            <input
+                              className="input flex-1 font-mono"
+                              value={launchArgInput}
+                              onChange={(e) => setLaunchArgInput(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addLaunchArg(); } }}
+                              placeholder="--load-extension=/path/to/extension"
+                            />
+                            <button type="button" onClick={addLaunchArg} className="btn-secondary px-2.5" title="添加启动参数">
+                              <Plus className="h-4 w-4" />
+                            </button>
+                          </div>
+                          <FieldNote>
+                            这里会把参数直接追加给 Chrome，常见用途是加载本地扩展或临时实验开关；普通用户留空最稳。
+                          </FieldNote>
                         </div>
-                      )}
-                      <div className="flex max-w-2xl gap-2">
-                        <input
-                          className="input flex-1 font-mono"
-                          value={launchArgInput}
-                          onChange={(e) => setLaunchArgInput(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addLaunchArg(); } }}
-                          placeholder="--load-extension=/data/extensions/ublock"
-                        />
-                        <button type="button" onClick={addLaunchArg} className="btn-secondary text-xs">添加</button>
-                      </div>
-                      <FieldNote>给 Chrome 追加命令行参数；除扩展路径、窗口参数等明确用途外，不建议随意添加。</FieldNote>
+                      </details>
                     </div>
                   </div>
                 </div>

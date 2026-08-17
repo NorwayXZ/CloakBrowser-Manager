@@ -27,7 +27,7 @@ class ProfileCreate(BaseModel):
     gpu_vendor: str | None = None
     gpu_renderer: str | None = None
     hardware_concurrency: int | None = None
-    humanize: bool = False
+    humanize: bool = True
     human_preset: Literal["default", "careful"] = "default"
     headless: bool = False
     geoip: bool = False
@@ -100,7 +100,7 @@ class ProfileResponse(BaseModel):
     gpu_vendor: str | None = None
     gpu_renderer: str | None = None
     hardware_concurrency: int | None = None
-    humanize: bool = False
+    humanize: bool = True
     human_preset: str = "default"
     headless: bool = False
     geoip: bool = False
