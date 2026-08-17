@@ -23,6 +23,8 @@ jobs:
       - run: python -m pytest backend/tests -q
       - name: Native runtime smoke
         if: matrix.os != 'ubuntu-latest'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/native_runtime_smoke.py
 
   frontend:

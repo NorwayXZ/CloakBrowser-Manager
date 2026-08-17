@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import base64
 import json
+import ssl
+import urllib.error
 
 import pytest
 
@@ -126,6 +128,37 @@ def test_find_xray_data_dir_requires_both_dat_files(tmp_path):
 
     (binary_dir / "geosite.dat").write_bytes(b"geosite")
     assert find_xray_data_dir(binary, tmp_path) == binary_dir
+
+
+def test_github_api_headers_use_actions_token(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "ci-token")
+
+    headers = xray_runtime._github_api_headers()
+
+    assert headers["Authorization"] == "Bearer ci-token"
+
+
+def test_release_asset_resolution_falls_back_when_api_is_rate_limited(monkeypatch):
+    def rate_limited(*args, **kwargs):
+        raise urllib.error.HTTPError(
+            xray_runtime.XRAY_GITHUB_API,
+            403,
+            "rate limit exceeded",
+            hdrs=None,
+            fp=None,
+        )
+
+    monkeypatch.setattr(xray_runtime.urllib.request, "urlopen", rate_limited)
+
+    name = "Xray-macos-arm64-v8a.zip"
+    assets, release_tag = xray_runtime._resolve_xray_release_assets(
+        name,
+        context=ssl.create_default_context(),
+    )
+
+    assert release_tag == "latest-direct"
+    assert assets[name].endswith(f"/releases/latest/download/{name}")
+    assert assets[f"{name}.dgst"].endswith(f"/{name}.dgst")
 
 
 @pytest.mark.asyncio

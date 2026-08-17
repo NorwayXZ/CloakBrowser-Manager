@@ -40,6 +40,7 @@
 
 - Xray 官方压缩包安装时必须同时取得可执行文件、`geoip.dat` 和 `geosite.dat`。
 - 已有 Xray 但缺数据文件时会自动重新下载完整运行包。
+- GitHub API 限流时会回退到官方 `releases/latest/download`，并通过对应 `.dgst` 的 SHA-256 值校验下载包。
 - 启动 Xray 时设置资源目录和工作目录；macOS/Windows CI 都真实执行 `xray version`。
 
 ## 7. 内核升级与版本验证

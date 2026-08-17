@@ -20,6 +20,7 @@ import shutil
 import socket
 import ssl
 import stat
+import urllib.error
 import urllib.request
 import zipfile
 from dataclasses import dataclass
@@ -31,6 +32,7 @@ logger = logging.getLogger("cloakbrowser.manager.xray")
 
 XRAY_SCHEMES = frozenset({"ss", "vmess", "vless", "trojan"})
 XRAY_GITHUB_API = "https://api.github.com/repos/XTLS/Xray-core/releases/latest"
+XRAY_GITHUB_LATEST_DOWNLOAD = "https://github.com/XTLS/Xray-core/releases/latest/download"
 XRAY_BINARY_ENV = "CLOAKBROWSER_XRAY_PATH"
 XRAY_DATA_FILES = ("geoip.dat", "geosite.dat")
 
@@ -455,18 +457,53 @@ def _release_asset_name() -> str:
     raise XrayProxyError(f"当前系统暂不支持自动安装 Xray：{system}")
 
 
+def _github_api_headers() -> dict[str, str]:
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "CloakBrowser-Manager",
+    }
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+def _resolve_xray_release_assets(
+    asset_name: str,
+    *,
+    context: ssl.SSLContext,
+) -> tuple[dict[str, str], str]:
+    request = urllib.request.Request(XRAY_GITHUB_API, headers=_github_api_headers())
+    try:
+        with urllib.request.urlopen(request, context=context, timeout=30) as response:
+            release = json.load(response)
+        assets = {
+            str(asset.get("name")): str(asset.get("browser_download_url"))
+            for asset in release.get("assets", [])
+            if isinstance(asset, dict)
+        }
+        if assets.get(asset_name):
+            return assets, str(release.get("tag_name") or "unknown")
+        raise XrayProxyError(f"Xray 官方版本中没有找到 {asset_name}")
+    except XrayProxyError:
+        raise
+    except Exception as exc:
+        logger.warning(
+            "GitHub release API unavailable (%s); using official latest asset URLs",
+            exc,
+        )
+        base = XRAY_GITHUB_LATEST_DOWNLOAD.rstrip("/")
+        return {
+            asset_name: f"{base}/{asset_name}",
+            f"{asset_name}.dgst": f"{base}/{asset_name}.dgst",
+        }, "latest-direct"
+
+
 def _download_xray_binary_sync(data_dir: Path) -> Path:
     target_dir = data_dir / "xray"
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / _binary_name()
     asset_name = _release_asset_name()
-    request = urllib.request.Request(
-        XRAY_GITHUB_API,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "CloakBrowser-Manager",
-        },
-    )
     try:
         # certifi is provided by the Manager dependencies and avoids the
         # incomplete system CA bundle found in some Python installations.
@@ -476,17 +513,7 @@ def _download_xray_binary_sync(data_dir: Path) -> Path:
     except Exception:
         context = ssl.create_default_context()
 
-    try:
-        with urllib.request.urlopen(request, context=context, timeout=30) as response:
-            release = json.load(response)
-    except Exception as exc:
-        raise XrayProxyError(f"读取 Xray 官方版本失败：{exc}") from exc
-
-    assets = {
-        str(asset.get("name")): str(asset.get("browser_download_url"))
-        for asset in release.get("assets", [])
-        if isinstance(asset, dict)
-    }
+    assets, release_tag = _resolve_xray_release_assets(asset_name, context=context)
     download_url = assets.get(asset_name)
     if not download_url:
         raise XrayProxyError(f"Xray 官方版本中没有找到 {asset_name}")
@@ -506,10 +533,11 @@ def _download_xray_binary_sync(data_dir: Path) -> Path:
         if digest_url:
             digest_text = download(digest_url).decode("utf-8", errors="replace")
             match = re.search(r"SHA2-256=\s*([0-9a-fA-F]{64})", digest_text)
-            if match:
-                actual_digest = hashlib.sha256(archive_bytes).hexdigest()
-                if actual_digest.lower() != match.group(1).lower():
-                    raise XrayProxyError("Xray 下载文件校验失败")
+            if not match:
+                raise XrayProxyError("Xray 摘要文件中没有 SHA2-256 校验值")
+            actual_digest = hashlib.sha256(archive_bytes).hexdigest()
+            if actual_digest.lower() != match.group(1).lower():
+                raise XrayProxyError("Xray 下载文件校验失败")
         archive_path.write_bytes(archive_bytes)
         with zipfile.ZipFile(archive_path) as archive:
             member = next(
@@ -545,7 +573,7 @@ def _download_xray_binary_sync(data_dir: Path) -> Path:
         raise XrayProxyError(f"下载或解压 Xray 失败：{exc}") from exc
     finally:
         archive_path.unlink(missing_ok=True)
-    logger.info("Installed Xray core %s at %s", release.get("tag_name"), target)
+    logger.info("Installed Xray core %s at %s", release_tag, target)
     return target
 
 
