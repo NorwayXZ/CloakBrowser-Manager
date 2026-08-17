@@ -25,7 +25,7 @@ import {
   Trash2,
   XCircle,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { LaunchMode, Profile, ProfileGroup, ProxyPreset } from "../lib/api";
 import { StatusIndicator } from "./StatusIndicator";
 
@@ -251,6 +251,30 @@ export function EnvironmentManager({
   const [proxyBatchText, setProxyBatchText] = useState("");
   const [proxyError, setProxyError] = useState<string | null>(null);
   const [proxySaving, setProxySaving] = useState(false);
+
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!(event.target instanceof Element)) return;
+      const insideBatchMenu = event.target.closest("[data-batch-menu-trigger], [data-batch-menu-panel]");
+      const insideRowMenu = event.target.closest("[data-row-menu-trigger], [data-row-menu-panel]");
+      if (!insideBatchMenu) setBatchMenuOpen(false);
+      if (!insideRowMenu) setMenuOpenId(null);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setBatchMenuOpen(false);
+        setMenuOpenId(null);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -627,21 +651,28 @@ export function EnvironmentManager({
                 title="更多批量操作"
                 disabled={selectedProfiles.length === 0 || batchBusy !== null}
                 onClick={() => setBatchMenuOpen((current) => !current)}
+                data-batch-menu-trigger="true"
               >
                 <MoreVertical className="h-4 w-4" />
               </button>
               {batchMenuOpen && selectedProfiles.length > 0 && (
-                <div className="absolute left-0 top-11 z-20 w-44 rounded-md border border-blue-200 bg-white p-1 shadow-xl">
+                <div className="absolute left-0 top-11 z-20 w-44 rounded-md border border-blue-200 bg-white p-1 shadow-xl" data-batch-menu-panel="true">
                   <button
                     className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-                    onClick={() => void handleBatchDuplicate()}
+                    onClick={() => {
+                      setBatchMenuOpen(false);
+                      void handleBatchDuplicate();
+                    }}
                   >
                     <Copy className="h-4 w-4" />
                     <span>{batchBusy === "duplicate" ? "复制中..." : `复制选中 (${selectedProfiles.length})`}</span>
                   </button>
                   <button
                     className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
-                    onClick={() => void handleBatchDelete()}
+                    onClick={() => {
+                      setBatchMenuOpen(false);
+                      void handleBatchDelete();
+                    }}
                   >
                     <Trash2 className="h-4 w-4" />
                     <span>{batchBusy === "delete" ? "删除中..." : `删除选中 (${selectedProfiles.length})`}</span>
@@ -842,6 +873,7 @@ export function EnvironmentManager({
                           <button
                             className="btn-secondary flex h-9 w-9 items-center justify-center px-0"
                             title="更多"
+                            data-row-menu-trigger="true"
                             onClick={() => setMenuOpenId((current) => current === profile.id ? null : profile.id)}
                           >
                             <MoreVertical className="h-3.5 w-3.5" />
@@ -849,24 +881,33 @@ export function EnvironmentManager({
                         </div>
 
                         {menuOpenId === profile.id && (
-                          <div className="absolute right-3 top-12 z-20 w-44 rounded-md border border-blue-200 bg-white p-1 shadow-xl">
+                          <div className="absolute right-3 top-12 z-20 w-44 rounded-md border border-blue-200 bg-white p-1 shadow-xl" data-row-menu-panel="true">
                             <button
                               className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm text-accent hover:bg-accent/10"
-                              onClick={() => onEdit(profile.id)}
+                              onClick={() => {
+                                setMenuOpenId(null);
+                                onEdit(profile.id);
+                              }}
                             >
                               <Edit3 className="h-4 w-4" />
                               <span>编辑</span>
                             </button>
                             <button
                               className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-                              onClick={() => void runRowAction(profile.id, () => onDuplicate(profile))}
+                              onClick={() => {
+                                setMenuOpenId(null);
+                                void runRowAction(profile.id, () => onDuplicate(profile));
+                              }}
                             >
                               <Copy className="h-4 w-4" />
                               <span>复制</span>
                             </button>
                             <button
                               className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
-                              onClick={() => void handleDelete(profile)}
+                              onClick={() => {
+                                setMenuOpenId(null);
+                                void handleDelete(profile);
+                              }}
                             >
                               <Trash2 className="h-4 w-4" />
                               <span>删除</span>
@@ -874,14 +915,20 @@ export function EnvironmentManager({
                             <div className="my-1 border-t border-border" />
                             <button
                               className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-                              onClick={() => onEdit(profile.id)}
+                              onClick={() => {
+                                setMenuOpenId(null);
+                                onEdit(profile.id);
+                              }}
                             >
                               <Globe2 className="h-4 w-4" />
                               <span>修改代理</span>
                             </button>
                             <button
                               className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-                              onClick={() => onEdit(profile.id)}
+                              onClick={() => {
+                                setMenuOpenId(null);
+                                onEdit(profile.id);
+                              }}
                             >
                               <ListChecks className="h-4 w-4" />
                               <span>修改指纹</span>
