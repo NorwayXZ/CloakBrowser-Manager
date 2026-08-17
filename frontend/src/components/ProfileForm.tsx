@@ -707,7 +707,7 @@ export function ProfileForm({
                       </select>
                       <div className="mt-1 text-xs text-accent">
                         {currentEngine === "system_chrome"
-                          ? "日常启动不打开 CDP，Windows/macOS 都会优先使用本机真实 Chrome。"
+                          ? "日常启动默认不打开 CDP，只是原生真 Chrome；一旦这个配置需要跟随代理的时区/语言，Manager 会自动切到调试启动。"
                           : "启用画像参数，适合继续调试指纹一致性。"}
                       </div>
                     </div>

@@ -6,7 +6,7 @@ import asyncio
 import json
 import subprocess
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 
@@ -787,9 +787,15 @@ async def test_launch_applies_locale_timezone_to_process_and_page(
 ):
     from backend import browser_manager as module
 
+    page = MagicMock()
+    session = MagicMock()
+    session.send = AsyncMock()
+    session.detach = AsyncMock()
     context = MagicMock()
-    context.pages = []
+    context.pages = [page]
     context.add_init_script = AsyncMock()
+    context.on = MagicMock()
+    context.new_cdp_session = AsyncMock(return_value=session)
     manager = BrowserManager(NATIVE_RUNTIME)
     manager._wait_for_cdp = AsyncMock()
     launch = AsyncMock(return_value=context)
@@ -808,10 +814,46 @@ async def test_launch_applies_locale_timezone_to_process_and_page(
     assert "--accept-lang=en-US,en" in options["args"]
     assert options["env"]["TZ"] == "America/New_York"
     assert options["env"]["LANG"] == "en_US.UTF-8"
+    assert context.new_cdp_session.await_count == 1
+    assert context.on.called
+    assert session.send.await_args_list == [
+        call("Emulation.setTimezoneOverride", {"timezoneId": "America/New_York"}),
+        call("Emulation.setLocaleOverride", {"locale": "en-US"}),
+    ]
 
-    init_scripts = [call.args[0] for call in context.add_init_script.await_args_list]
+    init_scripts = [item.args[0] for item in context.add_init_script.await_args_list]
     assert any("Navigator.prototype" in script for script in init_scripts)
     assert any("Date.prototype.getTimezoneOffset" in script for script in init_scripts)
+
+
+@pytest.mark.asyncio
+async def test_system_chrome_manual_launch_falls_back_to_debug_when_spoofing_is_needed(
+    monkeypatch,
+    tmp_path: Path,
+):
+    from backend import browser_manager as module
+
+    context = MagicMock()
+    context.pages = []
+    context.add_init_script = AsyncMock()
+    context.on = MagicMock()
+    manager = BrowserManager(NATIVE_RUNTIME)
+    manager._wait_for_cdp = AsyncMock()
+    launch = AsyncMock(return_value=context)
+    manual_launch = MagicMock(side_effect=AssertionError("manual path should not be used"))
+    monkeypatch.setattr(module, "_launch_system_chrome_persistent_context_async", launch)
+    monkeypatch.setattr(module, "_launch_system_chrome_manual_process", manual_launch)
+
+    profile = _launch_profile(tmp_path)
+    profile["browser_engine"] = "system_chrome"
+    profile["timezone"] = "America/New_York"
+
+    running = await manager.launch(profile, launch_mode="manual")
+
+    assert running.launch_mode == "debug"
+    assert launch.await_count == 1
+    manual_launch.assert_not_called()
+    assert context.on.called
 
 
 @pytest.mark.asyncio

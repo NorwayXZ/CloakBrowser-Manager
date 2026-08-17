@@ -1480,6 +1480,45 @@ CDP_START_ATTEMPTS = 3
 CDP_READY_TIMEOUT = 10.0
 
 
+async def _apply_cdp_locale_timezone_overrides(
+    context: Any,
+    *,
+    profile_id: str,
+    locale: str | None,
+    timezone: str | None,
+) -> None:
+    """Apply browser-level locale/timezone overrides to a CDP-backed context."""
+    if not locale and not timezone:
+        return
+
+    new_cdp_session = getattr(context, "new_cdp_session", None)
+    if not callable(new_cdp_session):
+        return
+
+    async def patch_page(page: Any) -> None:
+        session = None
+        try:
+            session = await new_cdp_session(page)
+            if timezone:
+                await session.send("Emulation.setTimezoneOverride", {"timezoneId": timezone})
+            if locale:
+                await session.send("Emulation.setLocaleOverride", {"locale": locale})
+        except Exception as exc:
+            logger.debug("CDP locale/timezone override skipped for %s: %s", profile_id, exc)
+        finally:
+            if session is not None:
+                with suppress(Exception):
+                    await session.detach()
+
+    for page in list(getattr(context, "pages", []) or []):
+        await patch_page(page)
+
+    try:
+        context.on("page", lambda page: asyncio.create_task(patch_page(page)))
+    except Exception as exc:
+        logger.debug("Could not register CDP page hook for %s: %s", profile_id, exc)
+
+
 @dataclass
 class RunningProfile:
     profile_id: str
@@ -1707,13 +1746,25 @@ class BrowserManager:
                     "height": profile.get("screen_height", 1080) - 133,
                 }
 
+            needs_browser_level_spoofing = bool(resolved_timezone or resolved_locale)
             use_manual_system_chrome = (
                 requested_launch_mode == "manual"
                 and self.runtime.runtime_mode == "native"
                 and browser_engine == "system_chrome"
                 and display is None
                 and not bool(profile.get("headless", False))
+                and not needs_browser_level_spoofing
             )
+            if (
+                requested_launch_mode == "manual"
+                and browser_engine == "system_chrome"
+                and needs_browser_level_spoofing
+            ):
+                logger.info(
+                    "Profile %s needs browser-level locale/timezone spoofing; "
+                    "using debug launch instead of manual system Chrome",
+                    profile_id,
+                )
 
             effective_launch_mode = "manual" if use_manual_system_chrome else "debug"
             startup_urls = _startup_urls_for_profile(profile, profile_id)
@@ -1792,6 +1843,12 @@ class BrowserManager:
                     locale=resolved_locale,
                     timezone=resolved_timezone,
                     platform=profile.get("platform"),
+                )
+                await _apply_cdp_locale_timezone_overrides(
+                    context,
+                    profile_id=profile_id,
+                    locale=resolved_locale,
+                    timezone=resolved_timezone,
                 )
                 if fingerprint_init_js:
                     init_scripts.append(fingerprint_init_js)
