@@ -107,6 +107,10 @@ export function FingerprintReportButton({
                     </div>
                   </div>
 
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600">
+                    这里的“预期语言 / 时区”是浏览器层值，System 时区仍然是本机系统时区，不会被 Manager 修改。
+                  </div>
+
                   {report.proxy_geo && (
                     <div className="rounded-md bg-surface-2 p-3 text-xs">
                       <div className="text-slate-500 mb-1">代理地区</div>

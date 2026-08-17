@@ -1632,16 +1632,32 @@ class BrowserManager:
                 try:
                     geo = await fetch_proxy_geo(browser_proxy)
                     proxy_geo = geo
-                    if profile.get("geoip"):
-                        resolved_timezone = geo.get("timezone") or resolved_timezone
-                        resolved_locale = geo.get("suggested_locale") or resolved_locale
+                    proxy_timezone = geo.get("timezone") or None
+                    proxy_locale = geo.get("suggested_locale") or None
+                    applied_timezone = False
+                    applied_locale = False
+                    if proxy_timezone and (profile.get("geoip") or not resolved_timezone):
+                        resolved_timezone = proxy_timezone
+                        applied_timezone = True
+                    if proxy_locale and (profile.get("geoip") or not resolved_locale):
+                        resolved_locale = proxy_locale
+                        applied_locale = True
                     logger.info(
-                        "GeoIP detected for %s: ip=%s country=%s timezone=%s locale=%s applied=%s source=%s",
+                        (
+                            "GeoIP detected for %s: ip=%s country=%s "
+                            "proxy_timezone=%s proxy_locale=%s resolved_timezone=%s "
+                            "resolved_locale=%s applied_timezone=%s applied_locale=%s "
+                            "geoip_enabled=%s source=%s"
+                        ),
                         profile_id,
                         geo.get("ip"),
                         geo.get("country_code") or geo.get("country"),
+                        proxy_timezone,
+                        proxy_locale,
                         resolved_timezone,
                         resolved_locale,
+                        applied_timezone,
+                        applied_locale,
                         bool(profile.get("geoip")),
                         geo.get("source"),
                     )

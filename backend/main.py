@@ -970,7 +970,7 @@ async def profile_start_page(profile_id: str):
       <div>
         <div class="eyebrow">CloakBrowser Manager</div>
         <h1>{profile_name}</h1>
-        <p class="subtitle">启动信息页：先确认代理出口、时间和语言是否一致。</p>
+        <p class="subtitle">启动信息页：先确认代理出口、浏览器时区和语言是否和代理地区一致。System 时区不会被修改。</p>
       </div>
       <div class="status">{html.escape(status)}</div>
     </header>

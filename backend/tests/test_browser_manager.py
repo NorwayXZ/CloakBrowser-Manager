@@ -815,7 +815,7 @@ async def test_launch_applies_locale_timezone_to_process_and_page(
 
 
 @pytest.mark.asyncio
-async def test_launch_detects_proxy_geo_without_applying_locale_when_geoip_off(
+async def test_launch_uses_proxy_geo_when_geoip_off(
     monkeypatch,
     tmp_path: Path,
 ):
@@ -846,5 +846,7 @@ async def test_launch_detects_proxy_geo_without_applying_locale_when_geoip_off(
 
     assert running.proxy_geo == geo
     options = launch.await_args.kwargs
-    assert options["timezone"] is None
-    assert options["locale"] is None
+    assert options["timezone"] == "America/Chicago"
+    assert options["locale"] == "en-US"
+    assert running.effective_timezone == "America/Chicago"
+    assert running.effective_locale == "en-US"

@@ -531,6 +531,13 @@ export function ProfileForm({
     : form.gpu_renderer?.includes("Renderer: ")
     ? rendererName?.replace(", Unspecified Version)", ")")
     : form.gpu_renderer ?? "真实设备";
+  const proxyGeoFallbackLabel = form.geoip ? "代理 IP 自动覆盖" : "代理 IP 自动补全";
+  const effectiveTimezonePreview = form.timezone
+    || proxyTest?.timezone
+    || (form.proxy ? proxyGeoFallbackLabel : "未设置");
+  const effectiveLocalePreview = form.locale
+    || proxyTest?.suggested_locale
+    || (form.proxy ? proxyGeoFallbackLabel : "未设置");
 
   const handleDeviceProfileChange = (id: string) => {
     const nextProfile = platformProfiles.find((preset) => preset.id === id) ?? getDeviceProfile(getDefaultDeviceProfileId(allowedPlatform));
@@ -579,8 +586,8 @@ export function ProfileForm({
     ["User-Agent", form.user_agent || "跟随真实浏览器"],
     ["代理", form.proxy ? `${proxyLabel} · 已配置` : "未配置"],
     ["启动页面", (form.startup_urls ?? []).length > 0 ? `${form.startup_urls?.length} 个网址` : "默认自检页"],
-    ["时区", form.geoip ? "基于 IP" : form.timezone || "未设置"],
-    ["语言", form.geoip ? "基于 IP" : form.locale || "未设置"],
+    ["时区", effectiveTimezonePreview],
+    ["语言", effectiveLocalePreview],
     ["分辨率", `${form.screen_width ?? 1920} × ${form.screen_height ?? 1080}`],
     ["Canvas", currentEngine === "system_chrome" ? "真实" : "按画像"],
     ["WebGL 图像", currentEngine === "system_chrome" ? "真实" : "按画像"],
@@ -597,7 +604,7 @@ export function ProfileForm({
     ["屏幕", `${form.screen_width ?? selectedDeviceProfile.screen_width} × ${form.screen_height ?? selectedDeviceProfile.screen_height}`],
     ["CPU", summaryCpu],
     ["GPU", summaryGpu],
-    ["语言/时区", form.geoip ? "代理 IP 自动匹配" : `${form.locale || "未设置"} / ${form.timezone || "未设置"}`],
+    ["语言/时区", `${effectiveLocalePreview} / ${effectiveTimezonePreview}`],
     ["Canvas / Audio", currentEngine === "system_chrome" ? "真实浏览器输出" : "按同一画像稳定输出"],
   ];
 
@@ -922,7 +929,7 @@ export function ProfileForm({
                         {form.proxy ? form.proxy : "填写代理后可检查出口 IP、国家、时区和语言"}
                       </span>
                     </div>
-                    <FieldNote>保存前建议先检查一次；检查结果可以一键写入时区和语言，也会帮你判断代理是否连通。</FieldNote>
+                    <FieldNote>保存前建议先检查一次；检查结果可以一键写入时区和语言。即使不点“应用”，启动时也会尽量跟随代理地区。</FieldNote>
                     {proxyTestError && <div className="text-xs text-red-600">{proxyTestError}</div>}
                     {proxyTest && (
                       <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
@@ -961,7 +968,7 @@ export function ProfileForm({
                         placeholder="zh-CN"
                       />
                     </div>
-                    <FieldNote>左边填 IANA 时区，例如 Asia/Taipei；右边填浏览器语言，例如 zh-TW 或 en-US。</FieldNote>
+                    <FieldNote>左边填 IANA 时区，例如 Asia/Taipei；右边填浏览器语言，例如 zh-TW 或 en-US。留空时会先跟随代理地区，手动填写会作为优先值。</FieldNote>
                   </div>
 
                   <label className="pt-2 text-right text-sm font-medium text-slate-600">跟随 IP</label>
@@ -975,7 +982,7 @@ export function ProfileForm({
                       />
                       根据代理 IP 自动匹配时区和语言区域
                     </label>
-                    <FieldNote>启动前会查询当前代理出口，能拿到时区和建议语言时会覆盖上面的手动值。</FieldNote>
+                    <FieldNote>勾选后会强制覆盖上面的手动值；不勾选时，只要时区/语言留空，启动时也会尽量跟随代理。</FieldNote>
                   </div>
                 </div>
               </section>
