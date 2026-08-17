@@ -3,6 +3,7 @@ import { useProfiles } from "./hooks/useProfiles";
 import {
   api,
   setOnUnauthorized,
+  type HostOS,
   type LaunchMode,
   type ProfileCreateData,
   type ProfileGroup,
@@ -32,6 +33,14 @@ function errorMessage(err: unknown) {
 function isMissingManagerApi(err: unknown) {
   const message = errorMessage(err).toLowerCase();
   return errorStatus(err) === 404 || message === "not found" || message.includes("not found");
+}
+
+function detectClientHostOS(): HostOS {
+  if (typeof navigator === "undefined") return "macos";
+  const hint = `${navigator.platform || ""} ${navigator.userAgent || ""}`.toLowerCase();
+  if (hint.includes("win")) return "windows";
+  if (hint.includes("mac")) return "macos";
+  return "linux";
 }
 
 export default function App() {
@@ -134,6 +143,7 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
   const [proxyPresets, setProxyPresets] = useState<ProxyPreset[]>([]);
   const [trashProfiles, setTrashProfiles] = useState<Profile[]>([]);
   const [managerError, setManagerError] = useState<string | null>(null);
+  const [hostOS, setHostOS] = useState<HostOS>(() => detectClientHostOS());
 
   const selected = profiles.find((p) => p.id === selectedId) ?? null;
 
@@ -142,12 +152,16 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
   );
 
   const loadManagerData = useCallback(async () => {
-    const [groupsResult, proxyPresetsResult, trashProfilesResult] = await Promise.allSettled([
+    const [statusResult, groupsResult, proxyPresetsResult, trashProfilesResult] = await Promise.allSettled([
+      api.getStatus(),
       api.listGroups(),
       api.listProxyPresets(),
       api.listDeletedProfiles(),
     ]);
 
+    if (statusResult.status === "fulfilled") {
+      setHostOS(statusResult.value.host_os);
+    }
     setGroups(groupsResult.status === "fulfilled" ? groupsResult.value : []);
     setProxyPresets(proxyPresetsResult.status === "fulfilled" ? proxyPresetsResult.value : []);
     setTrashProfiles(trashProfilesResult.status === "fulfilled" ? trashProfilesResult.value : []);
@@ -380,6 +394,7 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
           profile={null}
           groups={groups}
           proxyPresets={proxyPresets}
+          hostOS={hostOS}
           onSave={handleCreate}
           onCancel={() => setView("list")}
         />
@@ -390,6 +405,7 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
           profile={selected}
           groups={groups}
           proxyPresets={proxyPresets}
+          hostOS={hostOS}
           onSave={handleUpdate}
           onDelete={handleFormDelete}
           onCancel={() => {

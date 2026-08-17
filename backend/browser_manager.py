@@ -1537,7 +1537,7 @@ class BrowserManager:
                 BROWSER_ENGINE_ENV,
                 configured,
             )
-        if self.runtime.runtime_mode == "native" and self.runtime.host_os == "macos":
+        if self.runtime.runtime_mode == "native" and self.runtime.host_os in {"macos", "windows"}:
             return "system_chrome"
         return "cloakbrowser"
 

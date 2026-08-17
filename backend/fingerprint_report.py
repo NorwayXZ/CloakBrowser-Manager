@@ -449,16 +449,22 @@ def analyze_fingerprint(
             message="UA Client Hints are missing in a secure context",
         )
 
-    if ua_data and expected_platform == "macos" and ua_data.get("platform") not in ("macOS", "macos"):
-        _add_issue(
-            issues,
-            severity="warning",
-            signal="navigator.userAgentData.platform",
-            scope="main",
-            expected="macOS",
-            actual=ua_data.get("platform"),
-            message="UA-CH platform does not match the profile platform",
-        )
+    if ua_data:
+        expected_ua_ch_platform = None
+        if expected_platform == "macos":
+            expected_ua_ch_platform = "macOS"
+        elif expected_platform == "windows":
+            expected_ua_ch_platform = "Windows"
+        if expected_ua_ch_platform and ua_data.get("platform") != expected_ua_ch_platform:
+            _add_issue(
+                issues,
+                severity="warning",
+                signal="navigator.userAgentData.platform",
+                scope="main",
+                expected=expected_ua_ch_platform,
+                actual=ua_data.get("platform"),
+                message="UA-CH platform does not match the profile platform",
+            )
 
     user_agent = str(nav.get("userAgent") or "")
     platform = str(nav.get("platform") or "")
@@ -472,6 +478,17 @@ def analyze_fingerprint(
                 expected="Macintosh UA + MacIntel",
                 actual={"userAgent": user_agent, "platform": platform},
                 message="macOS profile should expose a coherent Mac user agent and platform",
+            )
+    elif expected_platform == "windows":
+        if "Windows NT" not in user_agent or platform not in ("Win32", "Win64"):
+            _add_issue(
+                issues,
+                severity="error",
+                signal="platform",
+                scope="main",
+                expected="Windows NT UA + Win32/Win64",
+                actual={"userAgent": user_agent, "platform": platform},
+                message="Windows profile should expose a coherent Windows user agent and platform",
             )
 
     if expected_hardware_concurrency and nav.get("hardwareConcurrency") != expected_hardware_concurrency:

@@ -1,9 +1,12 @@
-import type { BrowserEngine, ProfileCreateData } from "./api";
+import type { BrowserEngine, HostOS, ProfileCreateData } from "./api";
 
 export type DeviceProfileId = string;
+export type DevicePlatform = "macos" | "windows";
 
 export type DeviceProfileFamily =
   | "原生"
+  | "Windows 笔记本"
+  | "Windows 台式机"
   | "MacBook Air"
   | "MacBook Pro"
   | "iMac"
@@ -16,7 +19,7 @@ export interface DeviceProfilePreset {
   name: string;
   family: DeviceProfileFamily;
   chip: string;
-  platform: "macos";
+  platform: DevicePlatform;
   screen_width: number;
   screen_height: number;
   hardware_concurrency: number | null;
@@ -27,9 +30,16 @@ export interface DeviceProfilePreset {
 }
 
 const APPLE_GPU_VENDOR = "Google Inc. (Apple)";
+const WINDOWS_INTEL_GPU_VENDOR = "Google Inc. (Intel)";
+const WINDOWS_NVIDIA_GPU_VENDOR = "Google Inc. (NVIDIA)";
+const WINDOWS_AMD_GPU_VENDOR = "Google Inc. (AMD)";
 
 function appleRenderer(chip: string): string {
   return `ANGLE (Apple, ANGLE Metal Renderer: Apple ${chip}, Unspecified Version)`;
+}
+
+function windowsRenderer(vendor: "Intel" | "NVIDIA" | "AMD", renderer: string): string {
+  return `ANGLE (${vendor}, ${renderer} Direct3D11 vs_5_0 ps_5_0, D3D11)`;
 }
 
 function appleProfile(
@@ -57,6 +67,33 @@ function appleProfile(
   };
 }
 
+function windowsProfile(
+  id: string,
+  family: DeviceProfileFamily,
+  name: string,
+  cpu: string,
+  screenWidth: number,
+  screenHeight: number,
+  cpuThreads: number,
+  gpuVendor: string,
+  gpuRenderer: string,
+): DeviceProfilePreset {
+  return {
+    id,
+    name,
+    family,
+    chip: cpu,
+    platform: "windows",
+    screen_width: screenWidth,
+    screen_height: screenHeight,
+    hardware_concurrency: cpuThreads,
+    gpu_vendor: gpuVendor,
+    gpu_renderer: gpuRenderer,
+    user_agent: null,
+    color_scheme: null,
+  };
+}
+
 export const DEVICE_PROFILES: DeviceProfilePreset[] = [
   {
     id: "native_macos",
@@ -72,6 +109,109 @@ export const DEVICE_PROFILES: DeviceProfilePreset[] = [
     user_agent: null,
     color_scheme: null,
   },
+  {
+    id: "native_windows",
+    name: "真实 Windows 原生",
+    family: "原生",
+    chip: "Native",
+    platform: "windows",
+    screen_width: 1920,
+    screen_height: 1080,
+    hardware_concurrency: null,
+    gpu_vendor: null,
+    gpu_renderer: null,
+    user_agent: null,
+    color_scheme: null,
+  },
+
+  windowsProfile(
+    "win_laptop_iris_xe_2256",
+    "Windows 笔记本",
+    "Windows 笔记本 · Intel Iris Xe · 2256×1504",
+    "Intel Core i5 / i7 U 系列",
+    2256,
+    1504,
+    8,
+    WINDOWS_INTEL_GPU_VENDOR,
+    windowsRenderer("Intel", "Intel(R) Iris(R) Xe Graphics"),
+  ),
+  windowsProfile(
+    "win_laptop_iris_xe_1920",
+    "Windows 笔记本",
+    "Windows 笔记本 · Intel Iris Xe · 1920×1200",
+    "Intel Core i5 / i7 P 系列",
+    1920,
+    1200,
+    12,
+    WINDOWS_INTEL_GPU_VENDOR,
+    windowsRenderer("Intel", "Intel(R) Iris(R) Xe Graphics"),
+  ),
+  windowsProfile(
+    "win_laptop_arc_2880",
+    "Windows 笔记本",
+    "Windows 笔记本 · Intel Arc · 2880×1800",
+    "Intel Core Ultra 5 / 7",
+    2880,
+    1800,
+    16,
+    WINDOWS_INTEL_GPU_VENDOR,
+    windowsRenderer("Intel", "Intel(R) Arc(TM) Graphics"),
+  ),
+  windowsProfile(
+    "win_laptop_rtx_4060_2560",
+    "Windows 笔记本",
+    "Windows 游戏本 · RTX 4060 Laptop · 2560×1600",
+    "Intel Core i7 / Ryzen 7 H 系列",
+    2560,
+    1600,
+    16,
+    WINDOWS_NVIDIA_GPU_VENDOR,
+    windowsRenderer("NVIDIA", "NVIDIA GeForce RTX 4060 Laptop GPU"),
+  ),
+  windowsProfile(
+    "win_desktop_uhd_770_1080",
+    "Windows 台式机",
+    "Windows 台式机 · Intel UHD 770 · 1920×1080",
+    "Intel Core i5 / i7 台式机",
+    1920,
+    1080,
+    16,
+    WINDOWS_INTEL_GPU_VENDOR,
+    windowsRenderer("Intel", "Intel(R) UHD Graphics 770"),
+  ),
+  windowsProfile(
+    "win_desktop_rtx_3060_1440",
+    "Windows 台式机",
+    "Windows 台式机 · RTX 3060 · 2560×1440",
+    "Intel Core i5 / Ryzen 5 台式机",
+    2560,
+    1440,
+    12,
+    WINDOWS_NVIDIA_GPU_VENDOR,
+    windowsRenderer("NVIDIA", "NVIDIA GeForce RTX 3060"),
+  ),
+  windowsProfile(
+    "win_desktop_rtx_4060_1440",
+    "Windows 台式机",
+    "Windows 台式机 · RTX 4060 · 2560×1440",
+    "Intel Core i7 / Ryzen 7 台式机",
+    2560,
+    1440,
+    16,
+    WINDOWS_NVIDIA_GPU_VENDOR,
+    windowsRenderer("NVIDIA", "NVIDIA GeForce RTX 4060"),
+  ),
+  windowsProfile(
+    "win_desktop_rx_6600_1440",
+    "Windows 台式机",
+    "Windows 台式机 · Radeon RX 6600 · 2560×1440",
+    "AMD Ryzen 5 / Ryzen 7 台式机",
+    2560,
+    1440,
+    16,
+    WINDOWS_AMD_GPU_VENDOR,
+    windowsRenderer("AMD", "AMD Radeon RX 6600"),
+  ),
 
   appleProfile("mba_13_m1_2020", "MacBook Air", "MacBook Air 13 M1 (2020)", "M1", 2560, 1600, 8),
   appleProfile("mba_13_m2_2022", "MacBook Air", "MacBook Air 13 M2 (2022)", "M2", 2560, 1664, 8),
@@ -131,6 +271,8 @@ export const DEVICE_PROFILES: DeviceProfilePreset[] = [
 
 export const DEVICE_PROFILE_FAMILIES: DeviceProfileFamily[] = [
   "原生",
+  "Windows 笔记本",
+  "Windows 台式机",
   "MacBook Air",
   "MacBook Pro",
   "iMac",
@@ -140,9 +282,31 @@ export const DEVICE_PROFILE_FAMILIES: DeviceProfileFamily[] = [
 ];
 
 export const DEFAULT_DEVICE_PROFILE_ID: DeviceProfileId = "native_macos";
+export const DEFAULT_DEVICE_PROFILE_IDS: Record<DevicePlatform, DeviceProfileId> = {
+  macos: "native_macos",
+  windows: "native_windows",
+};
+
+export function getDevicePlatformForHost(hostOS?: HostOS | null): DevicePlatform {
+  return hostOS === "windows" ? "windows" : "macos";
+}
+
+export function getDefaultDeviceProfileId(hostOS?: HostOS | DevicePlatform | null): DeviceProfileId {
+  return hostOS === "windows" ? DEFAULT_DEVICE_PROFILE_IDS.windows : DEFAULT_DEVICE_PROFILE_IDS.macos;
+}
 
 export function getDeviceProfile(id?: string | null): DeviceProfilePreset {
   return DEVICE_PROFILES.find((profile) => profile.id === id) ?? DEVICE_PROFILES[0]!;
+}
+
+export function getDeviceProfilesForPlatform(platform: DevicePlatform): DeviceProfilePreset[] {
+  return DEVICE_PROFILES.filter((profile) => profile.platform === platform);
+}
+
+export function getDeviceProfileFamiliesForPlatform(platform: DevicePlatform): DeviceProfileFamily[] {
+  return DEVICE_PROFILE_FAMILIES.filter((family) => (
+    DEVICE_PROFILES.some((profile) => profile.platform === platform && profile.family === family)
+  ));
 }
 
 export function randomFingerprintSeed() {
@@ -164,7 +328,7 @@ export function applyDeviceProfile(
     ...current,
     browser_engine: browserEngine,
     device_profile: preset.id,
-    platform: "macos",
+    platform: preset.platform,
     screen_width: preset.screen_width,
     screen_height: preset.screen_height,
     gpu_vendor: isNative ? null : preset.gpu_vendor,

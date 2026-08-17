@@ -10,6 +10,13 @@ interface ProfileListProps {
   onNew: () => void;
 }
 
+function platformLabel(platform: string) {
+  if (platform === "windows") return "Windows";
+  if (platform === "macos") return "macOS";
+  if (platform === "linux") return "Linux";
+  return platform || "未知";
+}
+
 export function ProfileList({ profiles, selectedId, onSelect, onNew }: ProfileListProps) {
   const [search, setSearch] = useState("");
 
@@ -67,7 +74,7 @@ export function ProfileList({ profiles, selectedId, onSelect, onNew }: ProfileLi
               <span className="text-sm font-medium truncate">{profile.name}</span>
             </div>
             <div className="flex items-center gap-2 mt-1 ml-4">
-              <span className="text-xs text-gray-500 capitalize">{profile.platform}</span>
+              <span className="text-xs text-gray-500">{platformLabel(profile.platform)}</span>
               <span className="text-xs text-gray-600">·</span>
               <span className="text-xs text-gray-500">
                 {profile.browser_engine === "cloakbrowser" ? "伪装" : "原生"}

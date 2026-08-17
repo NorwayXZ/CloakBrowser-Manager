@@ -215,6 +215,18 @@ def test_docker_system_chrome_profile_uses_cloakbrowser_runtime():
     assert manager._browser_engine({"browser_engine": "system_chrome"}) == "cloakbrowser"
 
 
+def test_native_windows_auto_uses_system_chrome():
+    manager = BrowserManager(NATIVE_RUNTIME)
+
+    assert manager._browser_engine({}) == "system_chrome"
+
+
+def test_native_macos_auto_uses_system_chrome(tmp_path: Path):
+    manager = BrowserManager(RuntimeConfig("macos", "native", "native-window", tmp_path))
+
+    assert manager._browser_engine({"browser_engine": "auto"}) == "system_chrome"
+
+
 # ── launch_args appended to extra_args ────────────────────────────────────────
 
 
@@ -259,6 +271,7 @@ def _launch_profile(tmp_path: Path) -> dict:
         "user_data_dir": str(tmp_path / "profile-1"),
         "screen_width": 1920,
         "screen_height": 1080,
+        "browser_engine": "cloakbrowser",
         "launch_args": [],
     }
 

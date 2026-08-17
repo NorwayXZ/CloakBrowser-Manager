@@ -6,6 +6,7 @@
 
 - 程序代码保存在你从 GitHub 下载或克隆的项目文件夹里。
 - 浏览器画像数据不保存在项目文件夹里，而是保存在系统用户目录。
+- macOS 电脑只显示 macOS 画像；Windows 电脑只显示 Windows 画像，不跨系统混用。
 - 默认卸载只删除运行环境，不删除画像、Cookie 和登录状态。
 - 彻底删除数据前，请先备份整个 `CloakBrowser Manager` 文件夹。
 - 这是本地 Windows / macOS 使用教程，不是服务器部署教程。
@@ -16,7 +17,7 @@
 
 1. **Google Chrome**
    - 下载地址：`https://www.google.com/chrome/`
-   - macOS 的稳定原生模式会调用本机 Chrome。
+   - Windows / macOS 的稳定原生模式会调用本机 Chrome。
 
 2. **Python 3.10 或更高版本**
    - 下载地址：`https://www.python.org/downloads/`

@@ -2,6 +2,7 @@ import { ArrowLeft, ClipboardCheck, Globe, Loader2, MousePointer2, Plus, Refresh
 import { useEffect, useState, type ReactNode } from "react";
 import {
   api,
+  type HostOS,
   type Profile,
   type ProfileCreateData,
   type ProfileGroup,
@@ -10,9 +11,11 @@ import {
 } from "../lib/api";
 import {
   applyDeviceProfile,
-  DEFAULT_DEVICE_PROFILE_ID,
-  DEVICE_PROFILE_FAMILIES,
-  DEVICE_PROFILES,
+  type DevicePlatform,
+  getDefaultDeviceProfileId,
+  getDeviceProfileFamiliesForPlatform,
+  getDeviceProfilesForPlatform,
+  getDevicePlatformForHost,
   getDeviceProfile,
   randomFingerprintSeed,
 } from "../lib/deviceProfiles";
@@ -25,10 +28,15 @@ interface ProfileFormProps {
   onDelete?: () => Promise<void>;
   onCancel: () => void;
   onDraftChange?: (data: ProfileCreateData) => void;
+  hostOS?: HostOS | null;
 }
 
 const RESOLUTION_PRESETS: Record<string, { width: number; height: number }> = {
   "1280 × 720 (原生窗口)": { width: 1280, height: 720 },
+  "1920 × 1080 (Windows 常见)": { width: 1920, height: 1080 },
+  "1920 × 1200 (Windows 笔记本)": { width: 1920, height: 1200 },
+  "2256 × 1504 (Surface / 高分屏笔记本)": { width: 2256, height: 1504 },
+  "2880 × 1800 (Windows 高分屏笔记本)": { width: 2880, height: 1800 },
   "2560 × 1600 (MacBook Air/Pro 13)": { width: 2560, height: 1600 },
   "2560 × 1664 (MacBook Air 13)": { width: 2560, height: 1664 },
   "2880 × 1864 (MacBook Air 15)": { width: 2880, height: 1864 },
@@ -113,6 +121,34 @@ const GPU_PRESETS: Record<string, { vendor: string; renderer: string }> = {
     vendor: "Google Inc. (Apple)",
     renderer: "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Max, Unspecified Version)",
   },
+  "Windows Intel Iris Xe": {
+    vendor: "Google Inc. (Intel)",
+    renderer: "ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  },
+  "Windows Intel Arc Graphics": {
+    vendor: "Google Inc. (Intel)",
+    renderer: "ANGLE (Intel, Intel(R) Arc(TM) Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  },
+  "Windows Intel UHD 770": {
+    vendor: "Google Inc. (Intel)",
+    renderer: "ANGLE (Intel, Intel(R) UHD Graphics 770 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  },
+  "Windows NVIDIA RTX 3060": {
+    vendor: "Google Inc. (NVIDIA)",
+    renderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  },
+  "Windows NVIDIA RTX 4060": {
+    vendor: "Google Inc. (NVIDIA)",
+    renderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  },
+  "Windows NVIDIA RTX 4060 Laptop": {
+    vendor: "Google Inc. (NVIDIA)",
+    renderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 Laptop GPU Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  },
+  "Windows AMD Radeon RX 6600": {
+    vendor: "Google Inc. (AMD)",
+    renderer: "ANGLE (AMD, AMD Radeon RX 6600 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  },
 };
 
 type ProxyKind = "direct" | "xray";
@@ -166,7 +202,11 @@ function SectionIntro({ children }: { children: ReactNode }) {
   );
 }
 
-function createDefaultForm(): ProfileCreateData {
+function platformLabel(platform: DevicePlatform): string {
+  return platform === "windows" ? "Windows" : "macOS";
+}
+
+function createDefaultForm(hostOS?: HostOS | null): ProfileCreateData {
   return applyDeviceProfile({
     name: "",
     humanize: true,
@@ -181,7 +221,7 @@ function createDefaultForm(): ProfileCreateData {
     startup_urls: [],
     launch_args: [],
     tags: [],
-  }, getDeviceProfile(DEFAULT_DEVICE_PROFILE_ID));
+  }, getDeviceProfile(getDefaultDeviceProfileId(hostOS)));
 }
 
 function isProxyScheme(value: string): value is ProxyScheme {
@@ -286,10 +326,12 @@ export function ProfileForm({
   onDelete,
   onCancel,
   onDraftChange,
+  hostOS,
 }: ProfileFormProps) {
   const isEdit = profile !== null;
+  const allowedPlatform = getDevicePlatformForHost(hostOS);
 
-  const [form, setForm] = useState<ProfileCreateData>(() => createDefaultForm());
+  const [form, setForm] = useState<ProfileCreateData>(() => createDefaultForm(hostOS));
   const [proxyParts, setProxyParts] = useState<ProxyParts>(() => parseProxy(profile?.proxy));
   const [proxyTest, setProxyTest] = useState<ProxyTestResult | null>(null);
   const [proxyTestError, setProxyTestError] = useState<string | null>(null);
@@ -306,7 +348,7 @@ export function ProfileForm({
     if (profile) {
       const browserEngine = normalizeFormEngine(profile.browser_engine);
       const deviceProfile = getDeviceProfile(profile.device_profile);
-      setForm({
+      const baseForm: ProfileCreateData = {
         name: profile.name,
         browser_engine: browserEngine,
         device_profile: deviceProfile.id,
@@ -314,7 +356,7 @@ export function ProfileForm({
         proxy: profile.proxy,
         timezone: profile.timezone,
         locale: profile.locale,
-        platform: "macos",
+        platform: profile.platform,
         user_agent: profile.user_agent,
         screen_width: profile.screen_width,
         screen_height: profile.screen_height,
@@ -335,13 +377,21 @@ export function ProfileForm({
         launch_args: profile.launch_args ?? [],
         notes: profile.notes,
         tags: profile.tags ?? [],
-      });
+      };
+      const coercedDeviceProfile = deviceProfile.platform === allowedPlatform
+        ? deviceProfile
+        : getDeviceProfile(getDefaultDeviceProfileId(allowedPlatform));
+      setForm(
+        (baseForm.platform === allowedPlatform && deviceProfile.platform === allowedPlatform)
+          ? baseForm
+          : applyDeviceProfile(baseForm, coercedDeviceProfile),
+      );
       setStartupUrlsText((profile.startup_urls ?? []).join("\n"));
       setProxyParts(parseProxy(profile.proxy));
       setDraftProfileId(profile.id);
       setLaunchArgsOpen((profile.launch_args ?? []).length > 0);
     } else {
-      setForm(createDefaultForm());
+      setForm(createDefaultForm(hostOS));
       setStartupUrlsText("");
       setProxyParts({ ...DEFAULT_PROXY_PARTS });
       setDraftProfileId(null);
@@ -349,7 +399,7 @@ export function ProfileForm({
     }
     setProxyTest(null);
     setProxyTestError(null);
-  }, [profile?.id]);
+  }, [allowedPlatform, hostOS, profile?.id]);
 
   useEffect(() => {
     if (profile && draftProfileId === profile.id) {
@@ -366,7 +416,10 @@ export function ProfileForm({
     if (!form.name.trim()) return;
     setSaving(true);
     try {
-      await onSave(form);
+      const safeForm = form.platform === allowedPlatform && form.device_profile === selectedDeviceProfile.id
+        ? form
+        : applyDeviceProfile(form, selectedDeviceProfile);
+      await onSave(safeForm);
     } finally {
       setSaving(false);
     }
@@ -396,12 +449,14 @@ export function ProfileForm({
   };
 
   const randomizeDeviceProfile = () => {
-    const profilePool = DEVICE_PROFILES.filter((preset) => (
-      preset.id !== DEFAULT_DEVICE_PROFILE_ID && preset.id !== form.device_profile
+    const defaultProfileId = getDefaultDeviceProfileId(allowedPlatform);
+    const platformProfiles = getDeviceProfilesForPlatform(allowedPlatform);
+    const profilePool = platformProfiles.filter((preset) => (
+      preset.id !== defaultProfileId && preset.id !== form.device_profile
     ));
-    const fallbackPool = DEVICE_PROFILES.filter((preset) => preset.id !== DEFAULT_DEVICE_PROFILE_ID);
+    const fallbackPool = platformProfiles.filter((preset) => preset.id !== defaultProfileId);
     const pool = profilePool.length > 0 ? profilePool : fallbackPool;
-    const nextProfile = pool[Math.floor(Math.random() * pool.length)] ?? getDeviceProfile(DEFAULT_DEVICE_PROFILE_ID);
+    const nextProfile = pool[Math.floor(Math.random() * pool.length)] ?? getDeviceProfile(defaultProfileId);
     setForm((prev) => applyDeviceProfile(
       { ...prev, fingerprint_seed: randomFingerprintSeed() },
       nextProfile,
@@ -461,7 +516,12 @@ export function ProfileForm({
   )?.[0] ?? "custom";
 
   const currentEngine = normalizeFormEngine(form.browser_engine);
-  const selectedDeviceProfile = getDeviceProfile(form.device_profile);
+  const platformProfiles = getDeviceProfilesForPlatform(allowedPlatform);
+  const platformFamilies = getDeviceProfileFamiliesForPlatform(allowedPlatform);
+  const rawSelectedDeviceProfile = getDeviceProfile(form.device_profile);
+  const selectedDeviceProfile = rawSelectedDeviceProfile.platform === allowedPlatform
+    ? rawSelectedDeviceProfile
+    : getDeviceProfile(getDefaultDeviceProfileId(allowedPlatform));
   const rendererName = form.gpu_renderer?.split("Renderer: ")[1] ?? form.gpu_renderer;
   const summaryCpu = currentEngine === "system_chrome"
     ? "真实设备"
@@ -473,13 +533,16 @@ export function ProfileForm({
     : form.gpu_renderer ?? "真实设备";
 
   const handleDeviceProfileChange = (id: string) => {
-    setForm((prev) => applyDeviceProfile(prev, getDeviceProfile(id)));
+    const nextProfile = platformProfiles.find((preset) => preset.id === id) ?? getDeviceProfile(getDefaultDeviceProfileId(allowedPlatform));
+    setForm((prev) => applyDeviceProfile(prev, nextProfile));
   };
 
   const handleEngineChange = (engine: "system_chrome" | "cloakbrowser") => {
     setForm((prev) => applyDeviceProfile(
       { ...prev, browser_engine: engine },
-      getDeviceProfile(prev.device_profile ?? DEFAULT_DEVICE_PROFILE_ID),
+      selectedDeviceProfile.platform === allowedPlatform
+        ? selectedDeviceProfile
+        : getDeviceProfile(getDefaultDeviceProfileId(allowedPlatform)),
     ));
   };
 
@@ -510,6 +573,7 @@ export function ProfileForm({
 
   const summaryRows = [
     ["浏览器", currentEngine === "system_chrome" ? "Google Chrome 原生" : "CloakBrowser / Chromium"],
+    ["系统", platformLabel(allowedPlatform)],
     ["画像", selectedDeviceProfile.name],
     ["账号平台", form.account_platform || "未设置"],
     ["User-Agent", form.user_agent || "跟随真实浏览器"],
@@ -527,8 +591,9 @@ export function ProfileForm({
 
   const fingerprintPreviewRows = [
     ["运行模式", currentEngine === "system_chrome" ? "系统 Chrome 原生" : "CloakBrowser 画像"],
+    ["操作系统", platformLabel(allowedPlatform)],
     ["设备画像", selectedDeviceProfile.name],
-    ["Apple 芯片", selectedDeviceProfile.chip],
+    ["CPU / 芯片", selectedDeviceProfile.chip],
     ["屏幕", `${form.screen_width ?? selectedDeviceProfile.screen_width} × ${form.screen_height ?? selectedDeviceProfile.screen_height}`],
     ["CPU", summaryCpu],
     ["GPU", summaryGpu],
@@ -576,7 +641,7 @@ export function ProfileForm({
                 <section className="rounded-md border border-border bg-white p-5">
                   <div className="mb-2 text-sm font-semibold text-slate-900">基础设置</div>
                   <SectionIntro>
-                    这里保存这个浏览器的身份信息。名称、分组、账号平台用于管理列表；浏览器模式、Apple 画像、User-Agent、Cookie 和启动页面会影响实际启动后的浏览器表现。
+                    这里保存这个浏览器的身份信息。名称、分组、账号平台用于管理列表；浏览器模式、当前系统画像、User-Agent、Cookie 和启动页面会影响实际启动后的浏览器表现。
                   </SectionIntro>
                   <div className="grid max-w-3xl grid-cols-[120px_minmax(0,1fr)] items-start gap-x-5 gap-y-4">
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">名称</label>
@@ -635,7 +700,7 @@ export function ProfileForm({
                       </select>
                       <div className="mt-1 text-xs text-accent">
                         {currentEngine === "system_chrome"
-                          ? "日常启动不打开 CDP，更接近手动打开真实 Chrome。"
+                          ? "日常启动不打开 CDP，Windows/macOS 都会优先使用本机真实 Chrome。"
                           : "启用画像参数，适合继续调试指纹一致性。"}
                       </div>
                     </div>
@@ -643,27 +708,27 @@ export function ProfileForm({
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">操作系统</label>
                     <div>
                       <div className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
-                        macOS
+                        {platformLabel(allowedPlatform)}
                       </div>
-                      <FieldNote>当前本地版本主线只做 macOS Apple Silicon 画像；如果以后支持 Windows / Linux，会在这里直接变成可选项。</FieldNote>
+                      <FieldNote>已按当前电脑隔离：macOS 只显示 macOS 画像，Windows 只显示 Windows 画像，避免跨系统画像互相打架。</FieldNote>
                     </div>
 
-                    <label className="pt-2 text-right text-sm font-medium text-slate-600">Apple 画像</label>
+                    <label className="pt-2 text-right text-sm font-medium text-slate-600">设备画像</label>
                     <div>
                       <select
                         className="input max-w-xl"
                         value={selectedDeviceProfile.id}
                         onChange={(e) => handleDeviceProfileChange(e.target.value)}
                       >
-                        {DEVICE_PROFILE_FAMILIES.map((family) => (
+                        {platformFamilies.map((family) => (
                           <optgroup key={family} label={family}>
-                            {DEVICE_PROFILES.filter((preset) => preset.family === family).map((preset) => (
+                            {platformProfiles.filter((preset) => preset.family === family).map((preset) => (
                               <option key={preset.id} value={preset.id}>{preset.name}</option>
                             ))}
                           </optgroup>
                         ))}
                       </select>
-                      <FieldNote>一键套用屏幕、CPU、GPU 等 Apple 设备组合；原生模式主要作为管理元信息，伪装画像模式会写入可控参数。</FieldNote>
+                      <FieldNote>一键套用屏幕、CPU、GPU 等同平台设备组合；原生模式主要作为管理元信息，伪装画像模式会写入可控参数。</FieldNote>
                     </div>
 
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">User-Agent</label>
@@ -920,7 +985,7 @@ export function ProfileForm({
               <section className="rounded-md border border-border bg-white p-5">
                 <div className="mb-2 text-sm font-semibold text-slate-900">指纹配置</div>
                 <div className="mb-5 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-800">
-                  设备画像决定 Mac 型号、屏幕、CPU、GPU 这些看得见的参数；稳定种子只决定同一画像里的 Canvas / Audio 等稳定细节。改完需要保存并重新启动浏览器才会影响实际打开的浏览器。
+                  设备画像决定当前系统下的屏幕、CPU、GPU 这些看得见的参数；稳定种子只决定同一画像里的 Canvas / Audio 等稳定细节。改完需要保存并重新启动浏览器才会影响实际打开的浏览器。
                 </div>
                 <div className="mb-5 grid max-w-3xl grid-cols-2 gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs">
                   {fingerprintPreviewRows.map(([label, value]) => (
@@ -947,7 +1012,7 @@ export function ProfileForm({
                     </div>
                     <div className="mt-1 text-xs text-slate-500">
                       {currentEngine === "cloakbrowser"
-                        ? "它不会改变上面的设备画像、CPU、GPU 或分辨率；只让同一套画像的细节输出保持稳定。想换整套 Mac 画像，用右侧概要里的“随机设备画像”。"
+                        ? "它不会改变上面的设备画像、CPU、GPU 或分辨率；只让同一套画像的细节输出保持稳定。想换整套画像，用右侧概要里的“随机设备画像”。"
                         : "原生模式使用真实 Chrome 和真实硬件输出，这个值主要用于记录，不会强行改变你的真实 CPU、GPU 或 Canvas。"}
                     </div>
                   </div>
@@ -970,7 +1035,7 @@ export function ProfileForm({
                       ))}
                       <option value="custom">自定义</option>
                     </select>
-                    <div className="mt-1 text-xs text-slate-500">分辨率要和设备画像匹配，例如 MacBook Pro 14 更适合 3024 × 1964 这类屏幕。</div>
+                    <div className="mt-1 text-xs text-slate-500">分辨率要和设备画像匹配，例如 Windows 笔记本常见 1920 × 1200，MacBook Pro 14 常见 3024 × 1964。</div>
                   </div>
 
                   {currentResolution === "custom" && (
@@ -1005,7 +1070,7 @@ export function ProfileForm({
                       onChange={(e) => set("hardware_concurrency", e.target.value ? Number(e.target.value) : null)}
                       placeholder="按画像或真实设备"
                     />
-                    <div className="mt-1 text-xs text-slate-500">留空表示稳定原生使用真实 CPU；伪装画像会按 Apple Silicon 预设推荐线程数。</div>
+                    <div className="mt-1 text-xs text-slate-500">留空表示稳定原生使用真实 CPU；伪装画像会按当前系统画像预设推荐线程数。</div>
                   </div>
 
                   <label className="pt-2 text-right text-sm font-medium text-slate-600">GPU 预设</label>
@@ -1044,7 +1109,7 @@ export function ProfileForm({
                       onChange={(e) => set("gpu_renderer", e.target.value || null)}
                       placeholder="按画像或真实设备"
                     />
-                    <div className="mt-1 text-xs text-slate-500">这是 WebGL 元数据里最显眼的硬件信息，必须和 macOS/Apple 芯片画像保持一致。</div>
+                    <div className="mt-1 text-xs text-slate-500">这是 WebGL 元数据里最显眼的硬件信息，必须和当前系统画像保持一致。</div>
                   </div>
                 </div>
               </section>

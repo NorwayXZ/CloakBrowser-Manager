@@ -9,7 +9,7 @@
 你需要先安装这些东西：
 
 1. **Google Chrome**
-   - macOS 稳定原生模式会调用你电脑里的 Chrome。
+   - Windows / macOS 稳定原生模式会调用你电脑里的 Chrome。
    - 下载地址：[https://www.google.com/chrome/](https://www.google.com/chrome/)
 
 2. **Python 3.10 或更高版本**
@@ -251,6 +251,7 @@ Ctrl + C
 7. 选择浏览器模式：
    - `系统 Chrome 原生模式`：更稳，优先使用本机真实 Chrome
    - `CloakBrowser 画像模式`：可以使用设备画像、GPU、CPU 等参数
+   - macOS 电脑只显示 macOS 画像；Windows 电脑只显示 Windows 画像，不跨系统混用
 8. 点击保存
 9. 回到首页，点击 `打开`
 
