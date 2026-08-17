@@ -59,6 +59,8 @@ def init_db():
                 color_scheme TEXT,
                 group_name TEXT DEFAULT '未分组',
                 cookies_json TEXT,
+                startup_urls TEXT DEFAULT '[]',
+                launch_args TEXT DEFAULT '[]',
                 deleted_at TEXT,
                 notes TEXT,
                 user_data_dir TEXT NOT NULL,
@@ -120,6 +122,9 @@ def init_db():
             conn.commit()
         if "cookies_json" not in cols:
             conn.execute("ALTER TABLE profiles ADD COLUMN cookies_json TEXT")
+            conn.commit()
+        if "startup_urls" not in cols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN startup_urls TEXT DEFAULT '[]'")
             conn.commit()
         if "deleted_at" not in cols:
             conn.execute("ALTER TABLE profiles ADD COLUMN deleted_at TEXT")
@@ -183,9 +188,9 @@ def create_profile(
                 id, name, browser_engine, device_profile, fingerprint_seed, proxy, timezone, locale, platform,
                 user_agent, screen_width, screen_height, gpu_vendor, gpu_renderer,
                 hardware_concurrency, humanize, human_preset, headless, geoip,
-                clipboard_sync, auto_launch, color_scheme, group_name, cookies_json, launch_args, notes,
+                clipboard_sync, auto_launch, color_scheme, group_name, cookies_json, startup_urls, launch_args, notes,
                 user_data_dir, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 profile_id, name,
                 fields.get("browser_engine", "auto"),
@@ -210,6 +215,7 @@ def create_profile(
                 fields.get("color_scheme"),
                 fields.get("group_name") or "未分组",
                 fields.get("cookies_json"),
+                json.dumps(fields.get("startup_urls") or []),
                 json.dumps(fields.get("launch_args") or []),
                 fields.get("notes"),
                 user_data_dir, now, now,
@@ -231,6 +237,7 @@ def get_profile(profile_id: str) -> dict[str, Any] | None:
         if not row:
             return None
         profile = dict(row)
+        profile["startup_urls"] = json.loads(profile.get("startup_urls") or "[]")
         profile["launch_args"] = json.loads(profile.get("launch_args") or "[]")
         tags = conn.execute(
             "SELECT tag, color FROM profile_tags WHERE profile_id = ?",
@@ -242,6 +249,7 @@ def get_profile(profile_id: str) -> dict[str, Any] | None:
 
 def _hydrate_profile(row: sqlite3.Row) -> dict[str, Any]:
     profile = dict(row)
+    profile["startup_urls"] = json.loads(profile.get("startup_urls") or "[]")
     profile["launch_args"] = json.loads(profile.get("launch_args") or "[]")
     with get_db() as conn:
         tags = conn.execute(
@@ -278,7 +286,9 @@ def update_profile(profile_id: str, **fields: Any) -> dict[str, Any] | None:
     # Only update fields that were explicitly provided
     update_cols = []
     update_vals = []
-    # Pre-serialize launch_args to JSON before the generic update loop
+    # Pre-serialize list fields to JSON before the generic update loop
+    if "startup_urls" in fields:
+        fields["startup_urls"] = json.dumps(fields["startup_urls"] or [])
     if "launch_args" in fields:
         fields["launch_args"] = json.dumps(fields["launch_args"] or [])
     if fields.get("fingerprint_seed") is None:
@@ -288,7 +298,8 @@ def update_profile(profile_id: str, **fields: Any) -> dict[str, Any] | None:
         "name", "browser_engine", "device_profile", "fingerprint_seed", "proxy", "timezone", "locale", "platform",
         "user_agent", "screen_width", "screen_height", "gpu_vendor", "gpu_renderer",
         "hardware_concurrency", "humanize", "human_preset", "headless", "geoip",
-        "clipboard_sync", "auto_launch", "color_scheme", "group_name", "cookies_json", "launch_args", "notes",
+        "clipboard_sync", "auto_launch", "color_scheme", "group_name", "cookies_json",
+        "startup_urls", "launch_args", "notes",
     ):
         if col in fields:
             update_cols.append(f"{col} = ?")

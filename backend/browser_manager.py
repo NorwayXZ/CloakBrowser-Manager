@@ -186,6 +186,33 @@ def _parse_profile_cookies(raw: str | None) -> list[dict[str, Any]]:
     return cookies
 
 
+def _clean_startup_urls(raw_urls: Any) -> list[str]:
+    """Return only web URLs that can be passed to Chrome as startup tabs."""
+    if not isinstance(raw_urls, list):
+        return []
+    urls: list[str] = []
+    for raw in raw_urls:
+        url = str(raw or "").strip()
+        if not url:
+            continue
+        if "://" in url and not url.startswith(("http://", "https://")):
+            continue
+        if not url.startswith(("http://", "https://")):
+            url = f"https://{url}"
+        parsed = urlparse(url)
+        hostname = parsed.hostname or ""
+        if parsed.scheme in {"http", "https"} and parsed.netloc and not hostname.startswith("-"):
+            urls.append(url)
+    return urls
+
+
+def _startup_urls_for_profile(profile: dict[str, Any], profile_id: str) -> list[str]:
+    urls = _clean_startup_urls(profile.get("startup_urls"))
+    if urls:
+        return urls
+    return [NATIVE_START_PAGE_TEMPLATE.format(profile_id=profile_id)]
+
+
 def _playwright_proxy(proxy: str | None) -> dict[str, str] | None:
     if not proxy:
         return None
@@ -399,6 +426,7 @@ def _launch_system_chrome_manual_process(
     locale: str | None = None,
     env: dict[str, str] | None = None,
     start_url: str | None = None,
+    start_urls: list[str] | None = None,
     **_: Any,
 ) -> subprocess.Popen[Any]:
     """Launch installed Chrome without opening a DevTools/CDP control channel."""
@@ -418,6 +446,8 @@ def _launch_system_chrome_manual_process(
     )
     if start_url:
         chrome_args.append(start_url)
+    for url in start_urls or []:
+        chrome_args.append(url)
     return subprocess.Popen(
         [os.fspath(chrome_path), *chrome_args],
         **_chrome_popen_kwargs(env),
@@ -574,21 +604,25 @@ async def _launch_system_chrome_persistent_context_async(
     return context
 
 
-async def _open_native_start_page(context: Any, profile_id: str) -> None:
-    """Open the local profile page only when no real tab was restored."""
+async def _open_native_start_page(
+    context: Any,
+    profile_id: str,
+    startup_urls: list[str] | None = None,
+) -> None:
+    """Open startup pages only when no real tab was restored."""
     try:
         pages = list(getattr(context, "pages", []) or [])
         if any(str(getattr(page, "url", "") or "") not in BLANK_PAGE_URLS for page in pages):
             return
-        page = pages[0] if pages else await context.new_page()
-        if str(getattr(page, "url", "") or "") not in BLANK_PAGE_URLS:
-            return
-        await page.goto(
-            NATIVE_START_PAGE_TEMPLATE.format(profile_id=profile_id),
-            wait_until="domcontentloaded",
-        )
+        urls = startup_urls or [NATIVE_START_PAGE_TEMPLATE.format(profile_id=profile_id)]
+        first_page = pages[0] if pages else await context.new_page()
+        for idx, url in enumerate(urls):
+            page = first_page if idx == 0 else await context.new_page()
+            if idx == 0 and str(getattr(page, "url", "") or "") not in BLANK_PAGE_URLS:
+                continue
+            await page.goto(url, wait_until="domcontentloaded")
         try:
-            await page.bring_to_front()
+            await first_page.bring_to_front()
         except Exception:
             pass
     except Exception as exc:
@@ -1662,14 +1696,15 @@ class BrowserManager:
             )
 
             effective_launch_mode = "manual" if use_manual_system_chrome else "debug"
+            startup_urls = _startup_urls_for_profile(profile, profile_id)
 
             if use_manual_system_chrome:
-                start_url = None
+                manual_start_urls: list[str] = []
                 if not _has_restorable_chrome_session(user_data_dir):
-                    start_url = NATIVE_START_PAGE_TEMPLATE.format(profile_id=profile_id)
+                    manual_start_urls = startup_urls
                 browser_process = _launch_system_chrome_manual_process(
                     **launch_options,
-                    start_url=start_url,
+                    start_urls=manual_start_urls,
                 )
             else:
                 debug_args = [*extra_args, "--remote-debugging-address=127.0.0.1"]
@@ -1792,7 +1827,7 @@ class BrowserManager:
                 and not bool(profile.get("headless", False))
                 and context is not None
             ):
-                await _open_native_start_page(context, profile_id)
+                await _open_native_start_page(context, profile_id, startup_urls)
 
             logger.info(
                 "Launched profile %s (runtime=%s, mode=%s, display=%s, ws_port=%s, cdp_port=%s)",

@@ -215,6 +215,7 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
     auto_launch: false,
     group_name: profile.group_name,
     cookies_json: profile.cookies_json,
+    startup_urls: profile.startup_urls,
     color_scheme: profile.color_scheme,
     launch_args: profile.launch_args,
     notes: profile.notes,

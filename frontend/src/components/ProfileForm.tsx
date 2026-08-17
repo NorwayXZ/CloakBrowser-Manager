@@ -1,5 +1,5 @@
 import { ArrowLeft, Globe, Loader2, RefreshCw, Save, Trash2, Wifi, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   api,
   type Profile,
@@ -152,6 +152,18 @@ const DEFAULT_PROXY_PARTS: ProxyParts = {
   raw: "",
 };
 
+function FieldNote({ children }: { children: ReactNode }) {
+  return <div className="mt-1 text-xs leading-5 text-slate-500">{children}</div>;
+}
+
+function SectionIntro({ children }: { children: ReactNode }) {
+  return (
+    <div className="mb-5 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
+      {children}
+    </div>
+  );
+}
+
 function createDefaultForm(): ProfileCreateData {
   return applyDeviceProfile({
     name: "",
@@ -163,6 +175,7 @@ function createDefaultForm(): ProfileCreateData {
     auto_launch: false,
     group_name: "未分组",
     cookies_json: null,
+    startup_urls: [],
     launch_args: [],
     tags: [],
   }, getDeviceProfile(DEFAULT_DEVICE_PROFILE_ID));
@@ -274,6 +287,7 @@ export function ProfileForm({
   const [tagInput, setTagInput] = useState("");
   const [tagColor, setTagColor] = useState<string | null>("#6366f1");
   const [launchArgInput, setLaunchArgInput] = useState("");
+  const [startupUrlsText, setStartupUrlsText] = useState("");
   const [draftProfileId, setDraftProfileId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -303,15 +317,18 @@ export function ProfileForm({
         auto_launch: profile.auto_launch,
         group_name: profile.group_name || "未分组",
         cookies_json: profile.cookies_json,
+        startup_urls: profile.startup_urls ?? [],
         color_scheme: profile.color_scheme,
         launch_args: profile.launch_args ?? [],
         notes: profile.notes,
         tags: profile.tags ?? [],
       });
+      setStartupUrlsText((profile.startup_urls ?? []).join("\n"));
       setProxyParts(parseProxy(profile.proxy));
       setDraftProfileId(profile.id);
     } else {
       setForm(createDefaultForm());
+      setStartupUrlsText("");
       setProxyParts({ ...DEFAULT_PROXY_PARTS });
       setDraftProfileId(null);
     }
@@ -462,14 +479,24 @@ export function ProfileForm({
     set("launch_args", (form.launch_args ?? []).filter((_, i) => i !== idx));
   };
 
+  const updateStartupUrls = (value: string) => {
+    setStartupUrlsText(value);
+    set("startup_urls", value
+      .split(/\r?\n/)
+      .map((url) => url.trim())
+      .filter(Boolean));
+  };
+
   const proxyLabel = proxyParts.kind === "xray"
     ? (proxyParts.raw ? proxyParts.raw.split("://", 1)[0]?.toUpperCase() ?? "Xray" : "Xray 链接")
     : proxyParts.scheme.toUpperCase();
 
   const summaryRows = [
     ["浏览器", currentEngine === "system_chrome" ? "Google Chrome 原生" : "CloakBrowser / Chromium"],
+    ["画像", selectedDeviceProfile.name],
     ["User-Agent", form.user_agent || "跟随真实浏览器"],
     ["代理", form.proxy ? `${proxyLabel} · 已配置` : "未配置"],
+    ["启动页面", (form.startup_urls ?? []).length > 0 ? `${form.startup_urls?.length} 个网址` : "默认自检页"],
     ["时区", form.geoip ? "基于 IP" : form.timezone || "未设置"],
     ["语言", form.geoip ? "基于 IP" : form.locale || "未设置"],
     ["分辨率", `${form.screen_width ?? 1920} × ${form.screen_height ?? 1080}`],
@@ -478,6 +505,17 @@ export function ProfileForm({
     ["WebGL 元数据", summaryGpu],
     ["CPU", summaryCpu],
     ["资料夹", isEdit ? "独立保存" : "创建后生成"],
+  ];
+
+  const fingerprintPreviewRows = [
+    ["运行模式", currentEngine === "system_chrome" ? "系统 Chrome 原生" : "CloakBrowser 画像"],
+    ["设备画像", selectedDeviceProfile.name],
+    ["Apple 芯片", selectedDeviceProfile.chip],
+    ["屏幕", `${form.screen_width ?? selectedDeviceProfile.screen_width} × ${form.screen_height ?? selectedDeviceProfile.screen_height}`],
+    ["CPU", summaryCpu],
+    ["GPU", summaryGpu],
+    ["语言/时区", form.geoip ? "代理 IP 自动匹配" : `${form.locale || "未设置"} / ${form.timezone || "未设置"}`],
+    ["Canvas / Audio", currentEngine === "system_chrome" ? "真实浏览器输出" : "按同一画像稳定输出"],
   ];
 
   return (
@@ -518,28 +556,37 @@ export function ProfileForm({
             {(
               <>
                 <section className="rounded-md border border-border bg-white p-5">
-                  <div className="mb-5 text-sm font-semibold text-slate-900">基础设置</div>
+                  <div className="mb-2 text-sm font-semibold text-slate-900">基础设置</div>
+                  <SectionIntro>
+                    这里保存这个浏览器的身份信息。名称、分组只影响管理列表；浏览器模式、Apple 画像、User-Agent、Cookie 和启动页面会影响实际启动后的浏览器表现。
+                  </SectionIntro>
                   <div className="grid max-w-3xl grid-cols-[120px_minmax(0,1fr)] items-start gap-x-5 gap-y-4">
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">名称</label>
-                    <input
-                      className="input"
-                      value={form.name}
-                      onChange={(e) => set("name", e.target.value)}
-                      placeholder="例如 Amazon Seller #1"
-                      required
-                    />
+                    <div>
+                      <input
+                        className="input"
+                        value={form.name}
+                        onChange={(e) => set("name", e.target.value)}
+                        placeholder="例如 Amazon Seller #1"
+                        required
+                      />
+                      <FieldNote>只用于你自己识别这个浏览器，不会写入网页指纹。</FieldNote>
+                    </div>
 
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">分组</label>
-                    <select
-                      className="input max-w-xs"
-                      value={form.group_name || "未分组"}
-                      onChange={(e) => set("group_name", e.target.value)}
-                    >
-                      <option value="未分组">未分组</option>
-                      {groups.map((group) => (
-                        <option key={group.id} value={group.name}>{group.name}</option>
-                      ))}
-                    </select>
+                    <div>
+                      <select
+                        className="input max-w-xs"
+                        value={form.group_name || "未分组"}
+                        onChange={(e) => set("group_name", e.target.value)}
+                      >
+                        <option value="未分组">未分组</option>
+                        {groups.map((group) => (
+                          <option key={group.id} value={group.name}>{group.name}</option>
+                        ))}
+                      </select>
+                      <FieldNote>用于左侧分组和列表筛选；需要新增分组时，在“分组管理”里创建。</FieldNote>
+                    </div>
 
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">浏览器</label>
                     <div>
@@ -559,46 +606,67 @@ export function ProfileForm({
                     </div>
 
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">操作系统</label>
-                    <div className="flex flex-wrap gap-2">
-                      {["windows", "macos", "linux"].map((platform) => (
-                        <button
-                          key={platform}
-                          type="button"
-                          onClick={() => platform === "macos" && set("platform", "macos")}
-                          disabled={platform !== "macos"}
-                          className={`rounded-md border px-4 py-2 text-sm font-medium ${
-                            form.platform === platform
-                              ? "border-accent bg-accent/10 text-accent"
-                              : "border-slate-300 bg-white text-slate-400"
-                          } disabled:opacity-50`}
-                        >
-                          {platform === "macos" ? "macOS" : platform === "windows" ? "Windows" : "Linux"}
-                        </button>
-                      ))}
+                    <div>
+                      <div className="flex flex-wrap gap-2">
+                        {["windows", "macos", "linux"].map((platform) => (
+                          <button
+                            key={platform}
+                            type="button"
+                            onClick={() => platform === "macos" && set("platform", "macos")}
+                            disabled={platform !== "macos"}
+                            className={`rounded-md border px-4 py-2 text-sm font-medium ${
+                              form.platform === platform
+                                ? "border-accent bg-accent/10 text-accent"
+                                : "border-slate-300 bg-white text-slate-400"
+                            } disabled:opacity-50`}
+                          >
+                            {platform === "macos" ? "macOS" : platform === "windows" ? "Windows" : "Linux"}
+                          </button>
+                        ))}
+                      </div>
+                      <FieldNote>当前本地版本主线只做 macOS Apple Silicon 画像；Windows/Linux 按钮保留为后续扩展入口。</FieldNote>
                     </div>
 
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">Apple 画像</label>
-                    <select
-                      className="input max-w-xl"
-                      value={selectedDeviceProfile.id}
-                      onChange={(e) => handleDeviceProfileChange(e.target.value)}
-                    >
-                      {DEVICE_PROFILE_FAMILIES.map((family) => (
-                        <optgroup key={family} label={family}>
-                          {DEVICE_PROFILES.filter((preset) => preset.family === family).map((preset) => (
-                            <option key={preset.id} value={preset.id}>{preset.name}</option>
-                          ))}
-                        </optgroup>
-                      ))}
-                    </select>
+                    <div>
+                      <select
+                        className="input max-w-xl"
+                        value={selectedDeviceProfile.id}
+                        onChange={(e) => handleDeviceProfileChange(e.target.value)}
+                      >
+                        {DEVICE_PROFILE_FAMILIES.map((family) => (
+                          <optgroup key={family} label={family}>
+                            {DEVICE_PROFILES.filter((preset) => preset.family === family).map((preset) => (
+                              <option key={preset.id} value={preset.id}>{preset.name}</option>
+                            ))}
+                          </optgroup>
+                        ))}
+                      </select>
+                      <FieldNote>一键套用屏幕、CPU、GPU 等 Apple 设备组合；原生模式主要作为管理元信息，伪装画像模式会写入可控参数。</FieldNote>
+                    </div>
 
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">User-Agent</label>
-                    <input
-                      className="input max-w-3xl font-mono text-xs"
-                      value={form.user_agent ?? ""}
-                      onChange={(e) => set("user_agent", e.target.value || null)}
-                      placeholder="留空则跟随真实浏览器"
-                    />
+                    <div>
+                      <input
+                        className="input max-w-3xl font-mono text-xs"
+                        value={form.user_agent ?? ""}
+                        onChange={(e) => set("user_agent", e.target.value || null)}
+                        placeholder="留空则跟随真实浏览器"
+                      />
+                      <FieldNote>建议留空跟随真实 Chrome；手动改错版本、系统或架构，反而会让 UA 和真实能力不一致。</FieldNote>
+                    </div>
+
+                    <label className="pt-2 text-right text-sm font-medium text-slate-600">启动页面</label>
+                    <div>
+                      <textarea
+                        className="input min-h-24 max-w-3xl resize-y font-mono text-xs"
+                        value={startupUrlsText}
+                        onChange={(e) => updateStartupUrls(e.target.value)}
+                        placeholder={"每行一个网址，例如：\nhttps://ip.skk.moe/\nhttps://pixelscan.net/fingerprint-check"}
+                        spellCheck={false}
+                      />
+                      <FieldNote>没有恢复上次标签页时打开这些页面；留空会打开本地 IP、时间、语言自检页。</FieldNote>
+                    </div>
 
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">Cookie</label>
                     <div>
@@ -609,16 +677,19 @@ export function ProfileForm({
                         placeholder='粘贴 Cookie JSON，例如 [{"name":"sid","value":"...","domain":".example.com","path":"/"}]'
                         spellCheck={false}
                       />
-                      <div className="mt-1 text-xs text-slate-500">Cookie 会随配置保存；调试启动或伪装画像启动时会尝试导入，日常原生手动启动只保存不注入。</div>
+                      <FieldNote>Cookie 会随配置保存；调试启动或伪装画像启动时会尝试导入，日常原生手动启动只保存不强行注入。</FieldNote>
                     </div>
 
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">备注</label>
-                    <textarea
-                      className="input min-h-20 max-w-3xl resize-y"
-                      value={form.notes ?? ""}
-                      onChange={(e) => set("notes", e.target.value || null)}
-                      placeholder="可选，写一些这个浏览器的用途..."
-                    />
+                    <div>
+                      <textarea
+                        className="input min-h-20 max-w-3xl resize-y"
+                        value={form.notes ?? ""}
+                        onChange={(e) => set("notes", e.target.value || null)}
+                        placeholder="可选，写一些这个浏览器的用途..."
+                      />
+                      <FieldNote>只保存在 Manager 里，方便记录账号用途、注意事项或代理来源。</FieldNote>
+                    </div>
                   </div>
                 </section>
               </>
@@ -626,45 +697,54 @@ export function ProfileForm({
 
             {(
               <section className="rounded-md border border-border bg-white p-5">
-                <div className="mb-5 text-sm font-semibold text-slate-900">代理信息</div>
+                <div className="mb-2 text-sm font-semibold text-slate-900">代理信息</div>
+                <SectionIntro>
+                  代理决定出口 IP，也会影响时区和语言建议。普通 HTTP/HTTPS/SOCKS5 直接填主机端口；VLESS、VMess、Trojan、Shadowsocks 使用 Xray 链接。
+                </SectionIntro>
                 <div className="grid max-w-3xl grid-cols-[120px_minmax(0,1fr)] items-start gap-x-5 gap-y-4">
                   <label className="pt-2 text-right text-sm font-medium text-slate-600">代理方式</label>
-                  <div className="flex max-w-xl rounded-md bg-slate-100 p-1">
-                    {[
-                      ["direct", "自定义"],
-                      ["xray", "Xray 链接"],
-                    ].map(([kind, label]) => (
-                      <button
-                        key={kind}
-                        type="button"
-                        onClick={() => updateProxyKind(kind as ProxyKind)}
-                        className={`h-9 flex-1 rounded text-sm font-medium ${
-                          proxyParts.kind === kind ? "bg-white text-accent shadow-sm" : "text-slate-600"
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
+                  <div>
+                    <div className="flex max-w-xl rounded-md bg-slate-100 p-1">
+                      {[
+                        ["direct", "自定义"],
+                        ["xray", "Xray 链接"],
+                      ].map(([kind, label]) => (
+                        <button
+                          key={kind}
+                          type="button"
+                          onClick={() => updateProxyKind(kind as ProxyKind)}
+                          className={`h-9 flex-1 rounded text-sm font-medium ${
+                            proxyParts.kind === kind ? "bg-white text-accent shadow-sm" : "text-slate-600"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    <FieldNote>自定义适合已有 HTTP/HTTPS/SOCKS5 代理；Xray 链接会启动本地内核并转成本机 SOCKS5 给浏览器使用。</FieldNote>
                   </div>
 
                   <label className="pt-2 text-right text-sm font-medium text-slate-600">已保存代理</label>
-                  <select
-                    className="input max-w-xl"
-                    value=""
-                    onChange={(e) => {
-                      const preset = proxyPresets.find((item) => item.id === e.target.value);
-                      if (!preset) return;
-                      set("proxy", preset.proxy);
-                      setProxyParts(parseProxy(preset.proxy));
-                      setProxyTest(null);
-                      setProxyTestError(null);
-                    }}
-                  >
-                    <option value="">选择保存的代理...</option>
-                    {proxyPresets.map((preset) => (
-                      <option key={preset.id} value={preset.id}>{preset.name} · {preset.mode.toUpperCase()}</option>
-                    ))}
-                  </select>
+                  <div>
+                    <select
+                      className="input max-w-xl"
+                      value=""
+                      onChange={(e) => {
+                        const preset = proxyPresets.find((item) => item.id === e.target.value);
+                        if (!preset) return;
+                        set("proxy", preset.proxy);
+                        setProxyParts(parseProxy(preset.proxy));
+                        setProxyTest(null);
+                        setProxyTestError(null);
+                      }}
+                    >
+                      <option value="">选择保存的代理...</option>
+                      {proxyPresets.map((preset) => (
+                        <option key={preset.id} value={preset.id}>{preset.name} · {preset.mode.toUpperCase()}</option>
+                      ))}
+                    </select>
+                    <FieldNote>从“代理管理”保存的代理会出现在这里，选择后会自动填入当前浏览器。</FieldNote>
+                  </div>
 
                   {proxyParts.kind === "xray" ? (
                     <>
@@ -683,48 +763,60 @@ export function ProfileForm({
                   ) : (
                     <>
                       <label className="pt-2 text-right text-sm font-medium text-slate-600">代理类型</label>
-                      <select
-                        className="input max-w-sm"
-                        value={proxyParts.scheme}
-                        onChange={(e) => updateProxyPart("scheme", e.target.value as ProxyScheme)}
-                      >
-                        <option value="http">HTTP</option>
-                        <option value="https">HTTPS</option>
-                        <option value="socks5">SOCKS5</option>
-                      </select>
+                      <div>
+                        <select
+                          className="input max-w-sm"
+                          value={proxyParts.scheme}
+                          onChange={(e) => updateProxyPart("scheme", e.target.value as ProxyScheme)}
+                        >
+                          <option value="http">HTTP</option>
+                          <option value="https">HTTPS</option>
+                          <option value="socks5">SOCKS5</option>
+                        </select>
+                        <FieldNote>浏览器原生支持这三类代理；带账号密码的 SOCKS5 会自动走本地桥接，避免 Chrome 认证不稳定。</FieldNote>
+                      </div>
 
                       <label className="pt-2 text-right text-sm font-medium text-slate-600">主机:端口</label>
-                      <div className="grid max-w-xl grid-cols-[1fr_120px] gap-3">
-                        <input
-                          className="input"
-                          value={proxyParts.host}
-                          onChange={(e) => updateProxyPart("host", e.target.value)}
-                          placeholder="192.168.100.1"
-                        />
-                        <input
-                          className="input no-spin"
-                          value={proxyParts.port}
-                          onChange={(e) => updateProxyPart("port", e.target.value)}
-                          placeholder="1090"
-                        />
+                      <div>
+                        <div className="grid max-w-xl grid-cols-[1fr_120px] gap-3">
+                          <input
+                            className="input"
+                            value={proxyParts.host}
+                            onChange={(e) => updateProxyPart("host", e.target.value)}
+                            placeholder="192.168.100.1"
+                          />
+                          <input
+                            className="input no-spin"
+                            value={proxyParts.port}
+                            onChange={(e) => updateProxyPart("port", e.target.value)}
+                            placeholder="1090"
+                          />
+                        </div>
+                        <FieldNote>软路由 Passwall、本机 Xray 或机场面板给出的可用地址都填这里；局域网地址要保证本机能连通。</FieldNote>
                       </div>
 
                       <label className="pt-2 text-right text-sm font-medium text-slate-600">代理账号</label>
-                      <input
-                        className="input max-w-xl"
-                        value={proxyParts.username}
-                        onChange={(e) => updateProxyPart("username", e.target.value)}
-                        placeholder="可选"
-                      />
+                      <div>
+                        <input
+                          className="input max-w-xl"
+                          value={proxyParts.username}
+                          onChange={(e) => updateProxyPart("username", e.target.value)}
+                          placeholder="可选"
+                        />
+                        <FieldNote>没有认证就留空；这里会自动拼进代理地址，不需要手动写 user:pass@。</FieldNote>
+                      </div>
 
                       <label className="pt-2 text-right text-sm font-medium text-slate-600">代理密码</label>
-                      <input
-                        className="input max-w-xl"
-                        type="password"
-                        value={proxyParts.password}
-                        onChange={(e) => updateProxyPart("password", e.target.value)}
-                        placeholder="可选"
-                      />
+                      <div>
+                        <input
+                          className="input max-w-xl"
+                          type="password"
+                          value={proxyParts.password}
+                          onChange={(e) => updateProxyPart("password", e.target.value)}
+                          placeholder="可选"
+                        />
+                        <FieldNote>密码只用于代理认证；保存后会写入本地配置数据库，请不要把项目目录公开上传。</FieldNote>
+                      </div>
                     </>
                   )}
 
@@ -744,6 +836,7 @@ export function ProfileForm({
                         {form.proxy ? form.proxy : "填写代理后可检查出口 IP、国家、时区和语言"}
                       </span>
                     </div>
+                    <FieldNote>保存前建议先检查一次；检查结果可以一键写入时区和语言，也会帮你判断代理是否连通。</FieldNote>
                     {proxyTestError && <div className="text-xs text-red-600">{proxyTestError}</div>}
                     {proxyTest && (
                       <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
@@ -767,136 +860,177 @@ export function ProfileForm({
                   </div>
 
                   <label className="pt-2 text-right text-sm font-medium text-slate-600">时区语言</label>
-                  <div className="grid max-w-xl grid-cols-2 gap-3">
-                    <input
-                      className="input"
-                      value={form.timezone ?? ""}
-                      onChange={(e) => set("timezone", e.target.value || null)}
-                      placeholder="Asia/Shanghai"
-                    />
-                    <input
-                      className="input"
-                      value={form.locale ?? ""}
-                      onChange={(e) => set("locale", e.target.value || null)}
-                      placeholder="zh-CN"
-                    />
+                  <div>
+                    <div className="grid max-w-xl grid-cols-2 gap-3">
+                      <input
+                        className="input"
+                        value={form.timezone ?? ""}
+                        onChange={(e) => set("timezone", e.target.value || null)}
+                        placeholder="Asia/Shanghai"
+                      />
+                      <input
+                        className="input"
+                        value={form.locale ?? ""}
+                        onChange={(e) => set("locale", e.target.value || null)}
+                        placeholder="zh-CN"
+                      />
+                    </div>
+                    <FieldNote>左边填 IANA 时区，例如 Asia/Taipei；右边填浏览器语言，例如 zh-TW 或 en-US。</FieldNote>
                   </div>
 
                   <label className="pt-2 text-right text-sm font-medium text-slate-600">跟随 IP</label>
-                  <label className="flex items-center gap-2 text-sm text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={form.geoip ?? false}
-                      onChange={(e) => set("geoip", e.target.checked)}
-                      className="rounded border-slate-300"
-                    />
-                    根据代理 IP 自动匹配时区和语言区域
-                  </label>
+                  <div>
+                    <label className="flex items-center gap-2 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={form.geoip ?? false}
+                        onChange={(e) => set("geoip", e.target.checked)}
+                        className="rounded border-slate-300"
+                      />
+                      根据代理 IP 自动匹配时区和语言区域
+                    </label>
+                    <FieldNote>启动前会查询当前代理出口，能拿到时区和建议语言时会覆盖上面的手动值。</FieldNote>
+                  </div>
                 </div>
               </section>
             )}
 
             {(
               <section className="rounded-md border border-border bg-white p-5">
-                <div className="mb-5 text-sm font-semibold text-slate-900">指纹配置</div>
+                <div className="mb-2 text-sm font-semibold text-slate-900">指纹配置</div>
+                <div className="mb-5 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-800">
+                  稳定原生模式会优先使用真实 Chrome、真实 Canvas/GPU/CPU。伪装画像模式才会使用下面的设备画像参数。这里不是越随机越好，重点是让屏幕、CPU、GPU、UA、语言和代理地区彼此合理。
+                </div>
+                <div className="mb-5 grid max-w-3xl grid-cols-2 gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs">
+                  {fingerprintPreviewRows.map(([label, value]) => (
+                    <div key={label} className="grid grid-cols-[86px_minmax(0,1fr)] gap-2 rounded bg-white px-3 py-2">
+                      <span className="text-slate-400">{label}</span>
+                      <span className="break-words font-medium text-slate-700">{value}</span>
+                    </div>
+                  ))}
+                </div>
                 <div className="grid max-w-3xl grid-cols-[120px_minmax(0,1fr)] items-start gap-x-5 gap-y-4">
-                  <label className="pt-2 text-right text-sm font-medium text-slate-600">指纹种子</label>
-                  <div className="flex max-w-sm gap-2">
-                    <input
-                      className="input flex-1 no-spin"
-                      type="number"
-                      value={form.fingerprint_seed ?? ""}
-                      onChange={(e) => set("fingerprint_seed", e.target.value ? Number(e.target.value) : null)}
-                      placeholder="自动随机"
-                    />
-                    <button type="button" onClick={randomizeSeed} className="btn-secondary px-2.5" title="随机生成种子">
-                      <RefreshCw className="h-4 w-4" />
-                    </button>
+                  <label className="pt-2 text-right text-sm font-medium text-slate-600">画像生成码</label>
+                  <div>
+                    <div className="flex max-w-sm gap-2">
+                      <input
+                        className="input flex-1 no-spin"
+                        type="number"
+                        value={form.fingerprint_seed ?? ""}
+                        onChange={(e) => set("fingerprint_seed", e.target.value ? Number(e.target.value) : null)}
+                        placeholder="自动随机"
+                      />
+                      <button type="button" onClick={randomizeSeed} className="btn-secondary px-2.5" title="重新生成画像码">
+                        <RefreshCw className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500">同一个生成码会让同一套画像保持稳定；点击刷新会换一套画像。日常原生模式下它主要用于记录，不会强行改真实硬件。</div>
                   </div>
 
                   <label className="pt-2 text-right text-sm font-medium text-slate-600">分辨率</label>
-                  <select
-                    className="input max-w-xl"
-                    value={currentResolution}
-                    onChange={(e) => {
-                      const preset = RESOLUTION_PRESETS[e.target.value];
-                      if (preset) {
-                        set("screen_width", preset.width);
-                        set("screen_height", preset.height);
-                      }
-                    }}
-                  >
-                    {Object.keys(RESOLUTION_PRESETS).map((name) => (
-                      <option key={name} value={name}>{name}</option>
-                    ))}
-                    <option value="custom">自定义</option>
-                  </select>
+                  <div>
+                    <select
+                      className="input max-w-xl"
+                      value={currentResolution}
+                      onChange={(e) => {
+                        const preset = RESOLUTION_PRESETS[e.target.value];
+                        if (preset) {
+                          set("screen_width", preset.width);
+                          set("screen_height", preset.height);
+                        }
+                      }}
+                    >
+                      {Object.keys(RESOLUTION_PRESETS).map((name) => (
+                        <option key={name} value={name}>{name}</option>
+                      ))}
+                      <option value="custom">自定义</option>
+                    </select>
+                    <div className="mt-1 text-xs text-slate-500">分辨率要和设备画像匹配，例如 MacBook Pro 14 更适合 3024 × 1964 这类屏幕。</div>
+                  </div>
 
                   {currentResolution === "custom" && (
                     <>
                       <label className="pt-2 text-right text-sm font-medium text-slate-600">宽高</label>
-                      <div className="grid max-w-sm grid-cols-2 gap-3">
-                        <input
-                          className="input no-spin"
-                          type="number"
-                          value={form.screen_width ?? 1920}
-                          onChange={(e) => set("screen_width", Number(e.target.value))}
-                        />
-                        <input
-                          className="input no-spin"
-                          type="number"
-                          value={form.screen_height ?? 1080}
-                          onChange={(e) => set("screen_height", Number(e.target.value))}
-                        />
+                      <div>
+                        <div className="grid max-w-sm grid-cols-2 gap-3">
+                          <input
+                            className="input no-spin"
+                            type="number"
+                            value={form.screen_width ?? 1920}
+                            onChange={(e) => set("screen_width", Number(e.target.value))}
+                          />
+                          <input
+                            className="input no-spin"
+                            type="number"
+                            value={form.screen_height ?? 1080}
+                            onChange={(e) => set("screen_height", Number(e.target.value))}
+                          />
+                        </div>
+                        <FieldNote>自定义宽高会直接影响窗口尺寸和 screen 相关字段，建议只填真实设备常见比例。</FieldNote>
                       </div>
                     </>
                   )}
 
                   <label className="pt-2 text-right text-sm font-medium text-slate-600">CPU</label>
-                  <input
-                    className="input max-w-sm no-spin"
-                    type="number"
-                    value={form.hardware_concurrency ?? ""}
-                    onChange={(e) => set("hardware_concurrency", e.target.value ? Number(e.target.value) : null)}
-                    placeholder="按画像或真实设备"
-                  />
+                  <div>
+                    <input
+                      className="input max-w-sm no-spin"
+                      type="number"
+                      value={form.hardware_concurrency ?? ""}
+                      onChange={(e) => set("hardware_concurrency", e.target.value ? Number(e.target.value) : null)}
+                      placeholder="按画像或真实设备"
+                    />
+                    <div className="mt-1 text-xs text-slate-500">留空表示稳定原生使用真实 CPU；伪装画像会按 Apple Silicon 预设推荐线程数。</div>
+                  </div>
 
                   <label className="pt-2 text-right text-sm font-medium text-slate-600">GPU 预设</label>
-                  <select
-                    className="input max-w-xl"
-                    value=""
-                    onChange={(e) => {
-                      if (e.target.value) applyGpuPreset(e.target.value);
-                    }}
-                  >
-                    <option value="">选择预设...</option>
-                    {Object.keys(GPU_PRESETS).map((name) => (
-                      <option key={name} value={name}>{name}</option>
-                    ))}
-                  </select>
+                  <div>
+                    <select
+                      className="input max-w-xl"
+                      value=""
+                      onChange={(e) => {
+                        if (e.target.value) applyGpuPreset(e.target.value);
+                      }}
+                    >
+                      <option value="">选择预设...</option>
+                      {Object.keys(GPU_PRESETS).map((name) => (
+                        <option key={name} value={name}>{name}</option>
+                      ))}
+                    </select>
+                    <div className="mt-1 text-xs text-slate-500">GPU 预设会同时填充厂商和渲染器，避免厂商、芯片和 WebGL 信息互相打架。</div>
+                  </div>
 
                   <label className="pt-2 text-right text-sm font-medium text-slate-600">GPU 厂商</label>
-                  <input
-                    className="input max-w-3xl"
-                    value={form.gpu_vendor ?? ""}
-                    onChange={(e) => set("gpu_vendor", e.target.value || null)}
-                    placeholder="按画像或真实设备"
-                  />
+                  <div>
+                    <input
+                      className="input max-w-3xl"
+                      value={form.gpu_vendor ?? ""}
+                      onChange={(e) => set("gpu_vendor", e.target.value || null)}
+                      placeholder="按画像或真实设备"
+                    />
+                    <div className="mt-1 text-xs text-slate-500">通常不用手动改；只有选择伪装画像并且明确知道目标设备时才建议填写。</div>
+                  </div>
 
                   <label className="pt-2 text-right text-sm font-medium text-slate-600">GPU 渲染器</label>
-                  <input
-                    className="input max-w-3xl"
-                    value={form.gpu_renderer ?? ""}
-                    onChange={(e) => set("gpu_renderer", e.target.value || null)}
-                    placeholder="按画像或真实设备"
-                  />
+                  <div>
+                    <input
+                      className="input max-w-3xl"
+                      value={form.gpu_renderer ?? ""}
+                      onChange={(e) => set("gpu_renderer", e.target.value || null)}
+                      placeholder="按画像或真实设备"
+                    />
+                    <div className="mt-1 text-xs text-slate-500">这是 WebGL 元数据里最显眼的硬件信息，必须和 macOS/Apple 芯片画像保持一致。</div>
+                  </div>
                 </div>
               </section>
             )}
 
             {(
               <section className="rounded-md border border-border bg-white p-5">
-                <div className="mb-5 text-sm font-semibold text-slate-900">高级设置</div>
+                <div className="mb-2 text-sm font-semibold text-slate-900">高级设置</div>
+                <SectionIntro>
+                  这些是启动体验和管理辅助项。不了解启动参数时建议保持默认；标签和颜色偏好可以放心改，只影响本地管理或浏览器偏好。
+                </SectionIntro>
                 <div className="space-y-6">
                   <div className="grid max-w-3xl grid-cols-[120px_minmax(0,1fr)] items-start gap-x-5 gap-y-4">
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">行为</label>
@@ -920,6 +1054,7 @@ export function ProfileForm({
                           <option value="careful">谨慎（更慢、更稳）</option>
                         </select>
                       )}
+                      <FieldNote>这些选项只影响 Manager 启动和远程/VNC 操作体验，不会替你绕过网站风控判断。</FieldNote>
                       <label className="flex items-center gap-2 text-sm text-slate-700">
                         <input
                           type="checkbox"
@@ -941,16 +1076,19 @@ export function ProfileForm({
                     </div>
 
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">颜色偏好</label>
-                    <select
-                      className="input max-w-sm"
-                      value={form.color_scheme ?? ""}
-                      onChange={(e) => set("color_scheme", e.target.value || null)}
-                    >
-                      <option value="">跟随系统</option>
-                      <option value="light">浅色</option>
-                      <option value="dark">深色</option>
-                      <option value="no-preference">无偏好</option>
-                    </select>
+                    <div>
+                      <select
+                        className="input max-w-sm"
+                        value={form.color_scheme ?? ""}
+                        onChange={(e) => set("color_scheme", e.target.value || null)}
+                      >
+                        <option value="">跟随系统</option>
+                        <option value="light">浅色</option>
+                        <option value="dark">深色</option>
+                        <option value="no-preference">无偏好</option>
+                      </select>
+                      <FieldNote>对应网页里的 prefers-color-scheme 偏好；不确定就选跟随系统。</FieldNote>
+                    </div>
 
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">标签</label>
                     <div>
@@ -995,6 +1133,7 @@ export function ProfileForm({
                         />
                         <button type="button" onClick={addTag} className="btn-secondary text-xs">添加</button>
                       </div>
+                      <FieldNote>标签只用于本地列表筛选和识别，例如“美国”“店铺A”“测试”。</FieldNote>
                     </div>
 
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">启动参数</label>
@@ -1024,6 +1163,7 @@ export function ProfileForm({
                         />
                         <button type="button" onClick={addLaunchArg} className="btn-secondary text-xs">添加</button>
                       </div>
+                      <FieldNote>给 Chrome 追加命令行参数；除扩展路径、窗口参数等明确用途外，不建议随意添加。</FieldNote>
                     </div>
                   </div>
                 </div>

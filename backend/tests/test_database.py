@@ -113,7 +113,25 @@ def test_create_profile_defaults(tmp_db: Path):
     assert p["headless"] == 0
     assert p["geoip"] == 0
     assert p["human_preset"] == "default"
+    assert p["startup_urls"] == []
     assert p["launch_args"] == []
+
+
+def test_create_profile_with_startup_urls(tmp_db: Path):
+    p = db.create_profile("WithUrls", startup_urls=["https://ip.skk.moe/", "example.com"])
+    assert p["startup_urls"] == ["https://ip.skk.moe/", "example.com"]
+
+
+def test_update_profile_startup_urls(tmp_db: Path):
+    p = db.create_profile("Urls")
+    updated = db.update_profile(p["id"], startup_urls=["https://example.com"])
+    assert updated["startup_urls"] == ["https://example.com"]
+
+
+def test_update_profile_startup_urls_none_becomes_empty(tmp_db: Path):
+    p = db.create_profile("Urls", startup_urls=["https://example.com"])
+    updated = db.update_profile(p["id"], startup_urls=None)
+    assert updated["startup_urls"] == []
 
 
 def test_create_profile_with_launch_args(tmp_db: Path):

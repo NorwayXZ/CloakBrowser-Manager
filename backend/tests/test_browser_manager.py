@@ -15,11 +15,13 @@ from backend.browser_manager import (
     _build_locale_timezone_env,
     _build_fingerprint_init_script,
     _build_worker_fingerprint_patch,
+    _clean_startup_urls,
     _init_profile_defaults,
     _launch_system_chrome_manual_process,
     _launch_system_chrome_persistent_context_async,
     _normalize_proxy,
     _playwright_proxy,
+    _startup_urls_for_profile,
     _sync_profile_locale,
     _sync_session_restore,
     _validate_proxy,
@@ -127,6 +129,25 @@ def test_playwright_proxy_bypasses_manager_loopback():
         "server": "http://proxy.example:8080",
         "bypass": "127.0.0.1,localhost,[::1]",
     }
+
+
+# ── startup URLs ─────────────────────────────────────────────────────────────
+
+
+def test_clean_startup_urls_keeps_web_urls_and_normalizes_domains():
+    assert _clean_startup_urls([
+        "https://ip.skk.moe/",
+        "example.com/path",
+        "chrome://settings",
+        "--bad-flag",
+        "",
+    ]) == ["https://ip.skk.moe/", "https://example.com/path"]
+
+
+def test_startup_urls_for_profile_falls_back_to_local_status_page():
+    assert _startup_urls_for_profile({"startup_urls": []}, "profile-1") == [
+        "http://127.0.0.1:8080/profile/profile-1/start",
+    ]
 
 
 # ── _build_fingerprint_args ──────────────────────────────────────────────────

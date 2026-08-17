@@ -32,6 +32,7 @@ export interface Profile {
   auto_launch: boolean;
   group_name: string | null;
   cookies_json: string | null;
+  startup_urls: string[];
   color_scheme: string | null;
   launch_args: string[];
   notes: string | null;
@@ -72,6 +73,7 @@ export interface ProfileCreateData {
   auto_launch?: boolean;
   group_name?: string | null;
   cookies_json?: string | null;
+  startup_urls?: string[];
   color_scheme?: string | null;
   launch_args?: string[];
   notes?: string | null;

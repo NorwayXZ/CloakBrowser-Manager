@@ -36,6 +36,7 @@ class ProfileCreate(BaseModel):
     color_scheme: Literal["light", "dark", "no-preference"] | None = None
     group_name: str | None = "未分组"
     cookies_json: str | None = None
+    startup_urls: list[str] = Field(default_factory=list)
     launch_args: list[str] = Field(default_factory=list)
     notes: str | None = None
     tags: list[TagCreate] | None = None
@@ -65,6 +66,7 @@ class ProfileUpdate(BaseModel):
     color_scheme: Literal["light", "dark", "no-preference"] | None = Field(default=None)
     group_name: str | None = Field(default=None)
     cookies_json: str | None = Field(default=None)
+    startup_urls: list[str] | None = None
     launch_args: list[str] | None = None
     notes: str | None = Field(default=None)
     tags: list[TagCreate] | None = None
@@ -104,6 +106,7 @@ class ProfileResponse(BaseModel):
     auto_launch: bool = False
     group_name: str | None = "未分组"
     cookies_json: str | None = None
+    startup_urls: list[str] = []
 
     @field_validator("clipboard_sync", mode="before")
     @classmethod
