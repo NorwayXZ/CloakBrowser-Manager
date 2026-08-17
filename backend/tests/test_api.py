@@ -397,6 +397,59 @@ def test_profile_launch_args_get(app_client: TestClient):
     assert resp.json()["launch_args"] == ["--flag"]
 
 
+def test_purge_deleted_profile_removes_it_from_trash(app_client: TestClient):
+    created = app_client.post("/api/profiles", json={"name": "Trash me"}).json()
+    profile_id = created["id"]
+    assert app_client.delete(f"/api/profiles/{profile_id}").status_code == 200
+    assert any(item["id"] == profile_id for item in app_client.get("/api/profiles/trash").json())
+
+    response = app_client.delete(f"/api/profiles/{profile_id}/purge")
+
+    assert response.status_code == 200
+    assert not any(item["id"] == profile_id for item in app_client.get("/api/profiles/trash").json())
+
+
+def test_configuration_export_and_import(app_client: TestClient):
+    app_client.post("/api/groups", json={"name": "美国账号"})
+    app_client.post("/api/proxy-presets", json={
+        "name": "US SOCKS",
+        "proxy": "socks5://127.0.0.1:1080",
+        "mode": "socks5",
+    })
+    app_client.post("/api/profiles", json={
+        "name": "Portable",
+        "group_name": "美国账号",
+        "cookies_json": '[{"name":"sid","value":"abc","domain":"example.com"}]',
+    })
+
+    backup_response = app_client.get("/api/configuration/export")
+    assert backup_response.status_code == 200
+    backup = backup_response.json()
+    assert backup["format"] == "cloakbrowser-manager-configuration"
+    assert backup["includes_browser_user_data"] is False
+    assert any(item["name"] == "Portable" for item in backup["profiles"])
+
+    import_response = app_client.post("/api/configuration/import", json=backup)
+    assert import_response.status_code == 200
+    assert import_response.json()["profiles"] >= 1
+    assert len([item for item in app_client.get("/api/profiles").json() if item["name"] == "Portable"]) == 2
+
+
+def test_configuration_import_rejects_unknown_format(app_client: TestClient):
+    response = app_client.post("/api/configuration/import", json={"format": "unknown"})
+    assert response.status_code == 400
+
+
+def test_configuration_import_requires_stopped_browsers(app_client: TestClient):
+    created = app_client.post("/api/profiles", json={"name": "Running"}).json()
+    main.browser_mgr.running[created["id"]] = MagicMock(spec=RunningProfile)
+    try:
+        response = app_client.post("/api/configuration/import", json={})
+        assert response.status_code == 409
+    finally:
+        main.browser_mgr.running.pop(created["id"], None)
+
+
 # ── Clipboard Sync Setting ──────────────────────────────────────────────────
 
 

@@ -260,7 +260,7 @@ Ctrl + C
 - macOS 只允许启动 macOS 画像，Windows 只允许启动 Windows 画像。
 - 检查自定义 UA、平台、GPU、逻辑分辨率是否明显冲突。
 - 提醒系统 Chrome 不会应用 CloakBrowser 的 GPU、CPU、内存、Canvas 等底层画像参数。
-- 提醒无 CDP 日常模式会保留现有 Cookie，但不会自动导入粘贴的 Cookie JSON。
+- 提醒无 CDP 日常模式通过当前画像专用的本地扩展导入 Cookie JSON，并继续复用同一用户数据目录。
 
 启动后的本地信息页会检查主页面、iframe 和 Worker 的语言、时区、UA、平台、CPU 和内存，还会检查 WebGL、Canvas/Audio 稳定性、字体基线、Cookie 和常见网页存储。报告只显示有证据的通过、警告或失败，不承诺任何网站都无法识别自动化。
 
@@ -269,7 +269,15 @@ Ctrl + C
 - `proxy_host_resolver`：浏览器已启用通过代理解析域名的启动策略。
 - `disable_non_proxied_udp`：浏览器已禁止非代理 UDP 的 WebRTC 路径。
 - `browser_native`：TLS 由实际浏览器内核发起，不是 Python 请求代测。
-- `tls_externally_verified: false`：没有受控外部探针时，不会假装 TLS 已验证通过。
+- 外部网络探针会显示浏览器真实出口 IP、HTTP 协议、TLS 版本和加密套件；探针失败时会明确显示“未完成外部检查”。
+- DNS 只能确认浏览器启用了代理解析策略，当前 HTTP 探针不能证明操作系统实际使用了哪台 DNS 解析器，因此报告会保持“未经外部 DNS 解析器验证”。
+
+## 配置备份和扩展
+
+- 左侧 `数据备份` 可以导出或导入浏览器配置、分组、代理和 Cookie JSON。备份文件包含敏感信息，不要公开上传。
+- 面板配置备份不包含 Chrome 用户数据，因此不包含已经登录的网站会话。完整迁移登录状态仍然要在关闭所有浏览器后复制整个系统数据目录。
+- 编辑浏览器时可以在 `高级设置 -> 扩展目录` 中每行填写一个已解压扩展目录，Manager 会自动生成 Chrome 启动参数。
+- 浏览器意外退出时，环境列表会保留异常退出代码，便于区分正常关闭和内核崩溃。
 
 ## 浏览器数据保存在哪里
 
@@ -440,6 +448,8 @@ cd frontend
 npm install
 npm run dev
 ```
+
+GitHub Actions 会在 Ubuntu、macOS 和 Windows 上运行后端测试，并在 Windows 托管运行器上真实下载和执行 `xray.exe`、`geoip.dat`、`geosite.dat` 以及 CloakBrowser 内核的 `--version`。托管 CI 不能替代真实 Windows 显卡和桌面窗口测试，因此 GPU/GUI 兼容性仍需在实体 Windows 电脑上验收。
 
 ## 许可证
 

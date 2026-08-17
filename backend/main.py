@@ -32,7 +32,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from . import database as db
 from .browser_manager import BrowserManager, _normalize_proxy, _validate_proxy
-from .fingerprint_report import DIAGNOSTIC_SCRIPT
+from .fingerprint_report import DEFAULT_NETWORK_PROBE_URL, DIAGNOSTIC_SCRIPT
 from .proxy_bridge import HttpProxyBridge
 from .proxy_geo import fetch_proxy_geo
 from .updater import UpdateError, update_from_git
@@ -720,7 +720,7 @@ async def restore_profile(profile_id: str):
 @app.delete("/api/profiles/{profile_id}/purge")
 async def purge_profile(profile_id: str):
     profile = db.get_profile(profile_id)
-    if not profile or profile.get("deleted_at"):
+    if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
     if profile_id in browser_mgr.running:
         await browser_mgr.stop(profile_id)
@@ -804,6 +804,21 @@ async def delete_proxy_preset(preset_id: str):
     if not db.delete_proxy_preset(preset_id):
         raise HTTPException(status_code=404, detail="Proxy preset not found")
     return {"ok": True}
+
+
+@app.get("/api/configuration/export")
+async def export_configuration():
+    return db.export_configuration()
+
+
+@app.post("/api/configuration/import")
+async def import_configuration(payload: dict = Body(...)):
+    if browser_mgr.running:
+        raise HTTPException(status_code=409, detail="导入配置前请先关闭所有浏览器")
+    try:
+        return {"ok": True, **db.import_configuration(payload)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 # ── Launch / Stop ─────────────────────────────────────────────────────────────
@@ -952,6 +967,10 @@ async def profile_start_page(profile_id: str):
     source = html.escape(str(geo.get("source") or "Manager"))
     diagnostic_script = DIAGNOSTIC_SCRIPT.strip()
     report_url = json.dumps(f"/profile/{profile_id}/fingerprint-report")
+    network_probe_url = json.dumps(
+        os.environ.get("CLOAKBROWSER_NETWORK_PROBE_URL")
+        or DEFAULT_NETWORK_PROBE_URL
+    )
 
     return HTMLResponse(
         f"""<!doctype html>
@@ -1051,6 +1070,7 @@ async def profile_start_page(profile_id: str):
     </div>
   </main>
   <script>
+    window.__CLOAK_NETWORK_PROBE_URL = {network_probe_url};
     const updateBrowserValues = () => {{
       document.querySelector("#browser-time").textContent = new Date().toString();
       document.querySelector("#browser-timezone").textContent =

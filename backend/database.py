@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime
 import json
 import random
+import shutil
 import sqlite3
 import uuid
 from contextlib import contextmanager
@@ -16,6 +17,13 @@ from .runtime import resolve_runtime
 RUNTIME = resolve_runtime()
 DATA_DIR = RUNTIME.data_dir
 DB_PATH = DATA_DIR / "profiles.db"
+CONFIGURATION_SCHEMA_VERSION = 1
+CONFIGURATION_PROFILE_FIELDS = (
+    "name", "browser_engine", "device_profile", "fingerprint_seed", "proxy", "timezone", "locale", "platform",
+    "user_agent", "screen_width", "screen_height", "gpu_vendor", "gpu_renderer", "hardware_concurrency",
+    "device_memory", "humanize", "human_preset", "headless", "geoip", "clipboard_sync", "auto_launch",
+    "color_scheme", "group_name", "account_platform", "cookies_json", "startup_urls", "launch_args", "notes", "tags",
+)
 
 
 @contextmanager
@@ -145,6 +153,12 @@ def init_db():
         if "device_memory" not in cols:
             conn.execute("ALTER TABLE profiles ADD COLUMN device_memory INTEGER")
             conn.commit()
+        if "last_exit_at" not in cols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN last_exit_at TEXT")
+            conn.commit()
+        if "last_exit_reason" not in cols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN last_exit_reason TEXT")
+            conn.commit()
 
         # Older releases stored Retina panel pixels instead of the logical CSS
         # screen dimensions exposed by Chromium. Upgrade only known legacy
@@ -177,11 +191,14 @@ def init_db():
         cutoff = (
             datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)
         ).isoformat()
-        conn.execute(
-            "DELETE FROM profiles WHERE deleted_at IS NOT NULL AND deleted_at < ?",
+        expired = conn.execute(
+            "SELECT user_data_dir FROM profiles WHERE deleted_at IS NOT NULL AND deleted_at < ?",
             (cutoff,),
-        )
+        ).fetchall()
+        conn.execute("DELETE FROM profiles WHERE deleted_at IS NOT NULL AND deleted_at < ?", (cutoff,))
         conn.commit()
+    for row in expired:
+        shutil.rmtree(Path(row["user_data_dir"]), ignore_errors=True)
 
 
 def _now() -> str:
@@ -234,6 +251,83 @@ def delete_setting(key: str) -> None:
     with get_db() as conn:
         conn.execute("DELETE FROM settings WHERE key = ?", (key,))
         conn.commit()
+
+
+def export_configuration() -> dict[str, Any]:
+    """Export portable Manager metadata without copying Chromium user-data files."""
+    profiles = []
+    for profile in [*list_profiles(), *list_deleted_profiles()]:
+        item = {key: profile.get(key) for key in CONFIGURATION_PROFILE_FIELDS}
+        item["source_id"] = profile.get("id")
+        item["deleted"] = bool(profile.get("deleted_at"))
+        profiles.append(item)
+    return {
+        "format": "cloakbrowser-manager-configuration",
+        "schema_version": CONFIGURATION_SCHEMA_VERSION,
+        "exported_at": _now(),
+        "includes_browser_user_data": False,
+        "profiles": profiles,
+        "groups": list_groups(),
+        "proxy_presets": list_proxy_presets(),
+    }
+
+
+def import_configuration(payload: dict[str, Any]) -> dict[str, int]:
+    """Import a configuration backup as new local records."""
+    if payload.get("format") != "cloakbrowser-manager-configuration":
+        raise ValueError("不是 CloakBrowser Manager 配置备份文件")
+    if payload.get("schema_version") != CONFIGURATION_SCHEMA_VERSION:
+        raise ValueError("配置备份版本不受支持")
+
+    groups = payload.get("groups")
+    presets = payload.get("proxy_presets")
+    profiles = payload.get("profiles")
+    if not isinstance(groups, list) or not isinstance(presets, list) or not isinstance(profiles, list):
+        raise ValueError("配置备份内容不完整")
+
+    existing_group_names = {item["name"] for item in list_groups()}
+    imported_groups = 0
+    for item in groups:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name or name in existing_group_names:
+            continue
+        create_group(name, item.get("color"))
+        existing_group_names.add(name)
+        imported_groups += 1
+
+    imported_presets = 0
+    for item in presets:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        proxy = str(item.get("proxy") or "").strip()
+        mode = str(item.get("mode") or "").strip()
+        if not name or not proxy or not mode:
+            continue
+        create_proxy_preset(name, proxy, mode)
+        imported_presets += 1
+
+    imported_profiles = 0
+    for item in profiles:
+        if not isinstance(item, dict):
+            continue
+        values = {key: item.get(key) for key in CONFIGURATION_PROFILE_FIELDS if key in item}
+        name = str(values.pop("name", "") or "").strip()
+        if not name:
+            continue
+        seed = values.pop("fingerprint_seed", None)
+        created = create_profile(name=name, fingerprint_seed=seed, **values)
+        if item.get("deleted"):
+            delete_profile(created["id"])
+        imported_profiles += 1
+
+    return {
+        "profiles": imported_profiles,
+        "groups": imported_groups,
+        "proxy_presets": imported_presets,
+    }
 
 
 def create_profile(
@@ -416,6 +510,16 @@ def mark_profile_opened(profile_id: str, proxy_geo: dict[str, Any] | None = None
                 now,
                 profile_id,
             ),
+        )
+        conn.commit()
+
+
+def mark_profile_exit(profile_id: str, reason: str) -> None:
+    now = _now()
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE profiles SET last_exit_at = ?, last_exit_reason = ?, updated_at = ? WHERE id = ?",
+            (now, reason, now, profile_id),
         )
         conn.commit()
 

@@ -568,6 +568,19 @@ export function ProfileForm({
     set("launch_args", (form.launch_args ?? []).filter((_, i) => i !== idx));
   };
 
+  const extensionPaths = (form.launch_args ?? [])
+    .filter((arg) => arg.startsWith("--load-extension="))
+    .flatMap((arg) => arg.slice("--load-extension=".length).split(","))
+    .map((path) => path.trim())
+    .filter(Boolean);
+
+  const updateExtensionPaths = (value: string) => {
+    const paths = value.split(/\r?\n/).map((path) => path.trim()).filter(Boolean);
+    const args = (form.launch_args ?? []).filter((arg) => !arg.startsWith("--load-extension="));
+    if (paths.length > 0) args.push(`--load-extension=${paths.join(",")}`);
+    set("launch_args", args);
+  };
+
   const updateStartupUrls = (value: string) => {
     setStartupUrlsText(value);
     set("startup_urls", value
@@ -772,7 +785,7 @@ export function ProfileForm({
                         placeholder='粘贴 Cookie JSON，例如 [{"name":"sid","value":"...","domain":".example.com","path":"/"}]'
                         spellCheck={false}
                       />
-                      <FieldNote>Cookie 会随配置保存；调试启动或伪装画像启动时会尝试导入，日常原生手动启动只保存不强行注入。</FieldNote>
+                      <FieldNote>Cookie 会随配置保存；日常无 CDP 启动通过当前画像专用的本地扩展导入一次，调试启动通过浏览器上下文导入。之后由同一用户数据目录持续保存登录状态。</FieldNote>
                     </div>
 
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">备注</label>
@@ -1231,6 +1244,18 @@ export function ProfileForm({
                         <option value="no-preference">无偏好</option>
                       </select>
                       <FieldNote>对应网页里的 prefers-color-scheme 偏好；不确定就选跟随系统。</FieldNote>
+                    </div>
+
+                    <label className="pt-2 text-right text-sm font-medium text-slate-600">扩展目录</label>
+                    <div>
+                      <textarea
+                        className="input min-h-24 max-w-2xl resize-y font-mono text-xs"
+                        value={extensionPaths.join("\n")}
+                        onChange={(event) => updateExtensionPaths(event.target.value)}
+                        placeholder={hostOS === "windows" ? "每行一个目录，例如 C:\\Extensions\\MyExtension" : "每行一个目录，例如 /Users/name/Extensions/MyExtension"}
+                        spellCheck={false}
+                      />
+                      <FieldNote>每行填写一个已经解压的 Chrome 扩展目录。Manager 会自动生成启动参数；扩展目录移动或删除后需要在这里同步修改。</FieldNote>
                     </div>
 
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">高级启动</label>

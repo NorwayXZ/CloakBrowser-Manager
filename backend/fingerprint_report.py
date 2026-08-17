@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 from typing import Any
 
 
 PROBE_URL = "https://example.com/"
 FALLBACK_PROBE_URL = "data:text/html,<title>fingerprint-probe</title><body></body>"
+DEFAULT_NETWORK_PROBE_URL = "https://cloakbrowser-network-probe-norwayx.424982.workers.dev"
 
 
 DIAGNOSTIC_SCRIPT = """
@@ -92,6 +94,24 @@ async () => {
       pc.close();
       return candidates;
     } catch (_) { return []; }
+  };
+
+  const readExternalProbe = async () => {
+    const baseUrl = window.__CLOAK_NETWORK_PROBE_URL;
+    if (!baseUrl) return null;
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      const response = await fetch(`${baseUrl.replace(/\/$/, '')}/?t=${Date.now()}`, {
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      if (!response.ok) return { error: `HTTP ${response.status}` };
+      return await response.json();
+    } catch (err) {
+      return { error: String(err) };
+    }
   };
 
   const readCanvasHash = () => {
@@ -219,6 +239,7 @@ async () => {
       fonts: readFonts(),
       network: {
         webrtcCandidates: await readWebRtcCandidates(),
+        externalProbe: await readExternalProbe(),
         connection: navigator.connection ? {
           effectiveType: navigator.connection.effectiveType ?? null,
           rtt: navigator.connection.rtt ?? null,
@@ -409,6 +430,7 @@ def analyze_fingerprint(
     expected_gpu_renderer: str | None = None,
     expected_user_agent: str | None = None,
     proxy_configured: bool = False,
+    expected_proxy_ip: str | None = None,
 ) -> dict[str, Any]:
     issues: list[dict[str, Any]] = []
 
@@ -813,6 +835,63 @@ def analyze_fingerprint(
         )
 
     network = main.get("network") if isinstance(main.get("network"), dict) else {}
+    external_probe = network.get("externalProbe") if isinstance(network.get("externalProbe"), dict) else None
+    if external_probe is None:
+        _add_issue(
+            issues,
+            severity="warning",
+            signal="network.external_probe",
+            scope="main",
+            expected="configured external probe",
+            actual=None,
+            message="没有收到外部网络探针结果；TLS、出口 IP 和浏览器请求头无法在本地完全验证。",
+        )
+    elif external_probe.get("error"):
+        _add_issue(
+            issues,
+            severity="warning",
+            signal="network.external_probe",
+            scope="main",
+            expected="successful probe",
+            actual=external_probe.get("error"),
+            message="外部网络探针请求失败；本次只显示本地代理策略。",
+        )
+    elif expected_proxy_ip:
+        observed_ip = external_probe.get("egress", {}).get("ip") if isinstance(external_probe.get("egress"), dict) else None
+        if observed_ip and observed_ip != expected_proxy_ip:
+            _add_issue(
+                issues,
+                severity="warning",
+                signal="network.egress_ip",
+                scope="main",
+                expected=expected_proxy_ip,
+                actual=observed_ip,
+                message="浏览器外部探针看到的出口 IP 与启动时代理测试 IP 不同，可能是代理轮换或链路配置不一致。",
+            )
+    if external_probe and not external_probe.get("error"):
+        probe_headers = external_probe.get("headers") if isinstance(external_probe.get("headers"), dict) else {}
+        observed_ua = probe_headers.get("user_agent")
+        observed_language = probe_headers.get("accept_language")
+        if expected_user_agent and observed_ua and observed_ua != expected_user_agent:
+            _add_issue(
+                issues,
+                severity="warning",
+                signal="network.user_agent_header",
+                scope="main",
+                expected=expected_user_agent,
+                actual=observed_ua,
+                message="外部探针收到的 User-Agent 请求头与画像配置不同。",
+            )
+        if expected_locale and observed_language and not _locale_matches(str(observed_language).split(",", 1)[0], expected_locale):
+            _add_issue(
+                issues,
+                severity="warning",
+                signal="network.accept_language",
+                scope="main",
+                expected=expected_locale,
+                actual=observed_language,
+                message="外部探针收到的 Accept-Language 请求头与画像语言不同。",
+            )
     candidates = network.get("webrtcCandidates")
     if proxy_configured and isinstance(candidates, list) and any("typ host" in str(candidate).lower() for candidate in candidates):
         _add_issue(
@@ -883,6 +962,10 @@ async def run_fingerprint_probe(context: Any) -> dict[str, Any]:
         except Exception as exc:
             probe_error = str(exc)
             await page.goto(FALLBACK_PROBE_URL)
+        await page.evaluate(
+            "url => { window.__CLOAK_NETWORK_PROBE_URL = url; }",
+            os.environ.get("CLOAKBROWSER_NETWORK_PROBE_URL") or DEFAULT_NETWORK_PROBE_URL,
+        )
         raw = await asyncio.wait_for(page.evaluate(DIAGNOSTIC_SCRIPT), timeout=20)
         if probe_error:
             raw["probe_error"] = probe_error

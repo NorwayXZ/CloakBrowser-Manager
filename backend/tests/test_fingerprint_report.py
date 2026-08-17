@@ -107,3 +107,63 @@ def test_scope_locale_and_timezone_mismatch_is_reported_without_expected_values(
     signals = {issue["signal"] for issue in result["issues"]}
     assert "scope_consistency.navigator.language" in signals
     assert "scope_consistency.timezone" in signals
+
+
+def test_external_probe_matching_ip_does_not_report_egress_mismatch():
+    raw = {
+        "main": {
+            "navigator": {"userAgent": "UA", "language": "en-US", "languages": ["en-US"]},
+            "network": {
+                "externalProbe": {
+                    "egress": {"ip": "203.0.113.10"},
+                    "transport": {"tls_version": "TLSv1.3"},
+                    "headers": {"user_agent": "UA", "accept_language": "en-US,en;q=0.9"},
+                },
+            },
+        },
+    }
+    result = analyze_fingerprint(
+        raw,
+        expected_locale="en-US",
+        expected_timezone=None,
+        expected_platform=None,
+        expected_screen_width=None,
+        expected_screen_height=None,
+        expected_hardware_concurrency=None,
+        expected_user_agent="UA",
+        expected_proxy_ip="203.0.113.10",
+    )
+
+    assert "network.egress_ip" not in {issue["signal"] for issue in result["issues"]}
+
+
+def test_external_probe_mismatch_is_reported():
+    raw = {"main": {"navigator": {}, "network": {"externalProbe": {"egress": {"ip": "198.51.100.20"}}}}}
+    result = analyze_fingerprint(
+        raw,
+        expected_locale=None,
+        expected_timezone=None,
+        expected_platform=None,
+        expected_screen_width=None,
+        expected_screen_height=None,
+        expected_hardware_concurrency=None,
+        expected_proxy_ip="203.0.113.10",
+    )
+
+    assert "network.egress_ip" in {issue["signal"] for issue in result["issues"]}
+
+
+def test_external_probe_failure_is_a_warning():
+    raw = {"main": {"navigator": {}, "network": {"externalProbe": {"error": "AbortError"}}}}
+    result = analyze_fingerprint(
+        raw,
+        expected_locale=None,
+        expected_timezone=None,
+        expected_platform=None,
+        expected_screen_width=None,
+        expected_screen_height=None,
+        expected_hardware_concurrency=None,
+    )
+
+    issue = next(issue for issue in result["issues"] if issue["signal"] == "network.external_probe")
+    assert issue["severity"] == "warning"

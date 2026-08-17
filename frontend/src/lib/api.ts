@@ -42,6 +42,8 @@ export interface Profile {
   created_at: string;
   updated_at: string;
   last_opened_at: string | null;
+  last_exit_at: string | null;
+  last_exit_reason: string | null;
   deleted_at: string | null;
   tags: { tag: string; color: string | null }[];
   status: "running" | "stopped";
@@ -213,6 +215,8 @@ export interface FingerprintReport {
     webrtc_policy: string;
     tls_transport: string;
     tls_externally_verified: boolean;
+    dns_externally_verified: boolean;
+    external_probe_configured: boolean;
   };
   analysis: {
     status: "pass" | "warning" | "fail";
@@ -222,6 +226,43 @@ export interface FingerprintReport {
     issues: FingerprintIssue[];
   };
   raw: Record<string, unknown>;
+}
+
+export interface ExternalNetworkProbe {
+  observed_at?: string;
+  egress?: {
+    ip?: string | null;
+    country?: string | null;
+    region?: string | null;
+    city?: string | null;
+    timezone?: string | null;
+    colo?: string | null;
+  };
+  transport?: {
+    http_protocol?: string | null;
+    tls_version?: string | null;
+    tls_cipher?: string | null;
+    tls_client_hello_length?: string | null;
+  };
+  headers?: {
+    user_agent?: string | null;
+    accept_language?: string | null;
+    sec_ch_ua?: string | null;
+    sec_ch_ua_platform?: string | null;
+    sec_ch_ua_mobile?: string | null;
+  };
+  limitations?: {
+    dns_resolver_externally_verified?: boolean;
+    note?: string;
+  };
+  error?: string;
+}
+
+export interface ConfigurationImportResult {
+  ok: boolean;
+  profiles: number;
+  groups: number;
+  proxy_presets: number;
 }
 
 class ApiError extends Error {
@@ -358,6 +399,14 @@ export const api = {
 
   getPreflight: (id: string, launchMode: LaunchMode = "manual") =>
     request<PreflightResult>(`/api/profiles/${id}/preflight?launch_mode=${launchMode}`),
+
+  exportConfiguration: () => request<Record<string, unknown>>("/api/configuration/export"),
+
+  importConfiguration: (backup: Record<string, unknown>) =>
+    request<ConfigurationImportResult>("/api/configuration/import", {
+      method: "POST",
+      body: JSON.stringify(backup),
+    }),
 
   getFingerprintReport: (id: string) =>
     request<FingerprintReport>(`/api/profiles/${id}/fingerprint-report`),

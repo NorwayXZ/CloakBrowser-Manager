@@ -17,6 +17,7 @@ frontend/dist/
 
 # Deploy
 deploy.sh
+.wrangler/
 
 # Claude Code
 .claude/

@@ -13,17 +13,22 @@ import pytest
 from backend.browser_manager import (
     _accept_language_value,
     _build_locale_timezone_env,
+    _chrome_proxy_args,
     _build_fingerprint_init_script,
     _build_worker_fingerprint_patch,
     _clean_startup_urls,
+    _append_unpacked_extension_arg,
     _init_profile_defaults,
     _launch_system_chrome_manual_process,
     _launch_system_chrome_persistent_context_async,
     _normalize_proxy,
+    _parse_profile_cookies,
     _playwright_proxy,
+    _set_macos_application_locale,
     _startup_urls_for_profile,
     _sync_profile_locale,
     _sync_session_restore,
+    _sync_cookie_import_extension,
     _validate_proxy,
     BrowserManager,
     RunningProfile,
@@ -131,6 +136,17 @@ def test_playwright_proxy_bypasses_manager_loopback():
     }
 
 
+def test_chrome_proxy_dns_policy_keeps_manager_loopback_reachable():
+    args = _chrome_proxy_args("socks5://192.0.2.10:10911")
+
+    bypass = next(arg for arg in args if arg.startswith("--proxy-bypass-list="))
+    resolver = next(arg for arg in args if arg.startswith("--host-resolver-rules="))
+    assert "127.0.0.1" in bypass
+    assert "EXCLUDE 127.0.0.1" in resolver
+    assert "EXCLUDE localhost" in resolver
+    assert "EXCLUDE ::1" in resolver
+
+
 # ── startup URLs ─────────────────────────────────────────────────────────────
 
 
@@ -225,6 +241,20 @@ def test_preflight_blocks_cross_platform_profile(tmp_path: Path):
 
     assert result["can_launch"] is False
     assert any(issue["code"] == "host_platform_mismatch" for issue in result["issues"])
+
+
+def test_preflight_blocks_headless_native_profile(tmp_path: Path):
+    manager = BrowserManager(RuntimeConfig("macos", "native", "native-window", tmp_path))
+    result = manager.preflight({
+        "platform": "macos",
+        "browser_engine": "cloakbrowser",
+        "screen_width": 1470,
+        "screen_height": 956,
+        "headless": True,
+    })
+
+    assert result["can_launch"] is False
+    assert any(issue["code"] == "native_headless_unsupported" for issue in result["issues"])
 
 
 def test_preflight_describes_system_chrome_limits(tmp_path: Path):
@@ -334,6 +364,27 @@ async def test_native_launch_skips_vnc_and_display(monkeypatch, tmp_path: Path):
     assert "--use-angle=swiftshader" not in options["args"]
     assert "--restore-last-session" in options["args"]
     assert not any(arg.startswith("--remote-debugging") for arg in options["args"])
+
+
+@pytest.mark.asyncio
+async def test_manual_launch_adds_profile_local_cookie_importer(monkeypatch, tmp_path: Path):
+    from backend import browser_manager as module
+
+    manager = BrowserManager(NATIVE_RUNTIME)
+    manual_launch = MagicMock(return_value=MagicMock())
+    monkeypatch.setattr(module, "_launch_cloakbrowser_manual_process", manual_launch)
+    monkeypatch.setattr(manager, "_watch_process", AsyncMock())
+    profile = {
+        **_launch_profile(tmp_path),
+        "cookies_json": '[{"name":"sid","value":"abc","domain":"example.com","path":"/"}]',
+    }
+
+    await manager.launch(profile)
+
+    args = manual_launch.call_args.kwargs["args"]
+    importer_args = [arg for arg in args if arg.startswith("--load-extension=")]
+    assert len(importer_args) == 1
+    assert (tmp_path / "profile-1" / "manager-cookie-importer" / "cookies.json").exists()
 
 
 @pytest.mark.asyncio
@@ -556,6 +607,34 @@ async def test_native_system_chrome_replaces_blank_start_page(monkeypatch, tmp_p
 
 
 @pytest.mark.asyncio
+async def test_macos_cloak_debug_uses_direct_process_launcher(monkeypatch, tmp_path: Path):
+    from backend import browser_manager as module
+
+    context = MagicMock(pages=[])
+    context.add_init_script = AsyncMock()
+    manager = BrowserManager(RuntimeConfig("macos", "native", "native-window", tmp_path))
+    manager._wait_for_cdp = AsyncMock()
+    launch = AsyncMock(return_value=context)
+    package_launch = AsyncMock()
+    monkeypatch.setattr(module, "_launch_cloakbrowser_persistent_context_async", launch)
+    monkeypatch.setattr(module, "launch_persistent_context_async", package_launch)
+
+    await manager.launch({
+        **_launch_profile(tmp_path),
+        "locale": "en-US",
+    }, launch_mode="debug")
+
+    launch.assert_awaited_once()
+    package_launch.assert_not_awaited()
+    assert launch.await_args.kwargs["args"][-6:-2] == [
+        "-AppleLanguages",
+        "(en-US)",
+        "-AppleLocale",
+        "en_US",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_native_close_event_releases_session(monkeypatch, tmp_path: Path):
     from backend import browser_manager as module
 
@@ -722,6 +801,87 @@ def test_init_creates_preferences(tmp_path: Path):
 def test_accept_language_value_adds_base_language():
     assert _accept_language_value("en-US") == "en-US,en"
     assert _accept_language_value("zh-HK") == "zh-HK,zh"
+
+
+def test_set_macos_application_locale_replaces_stale_values():
+    args = [
+        "--lang=zh-CN",
+        "-AppleLanguages",
+        "(zh-CN)",
+        "-AppleLocale=zh_CN",
+        "--restore-last-session",
+    ]
+
+    _set_macos_application_locale(args, "en-US")
+
+    assert args == [
+        "--lang=zh-CN",
+        "--restore-last-session",
+        "-AppleLanguages",
+        "(en-US)",
+        "-AppleLocale",
+        "en_US",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_macos_cloak_launch_adds_cocoa_application_locale(monkeypatch, tmp_path: Path):
+    from backend import browser_manager as module
+
+    manager = BrowserManager(RuntimeConfig("macos", "native", "native-window", tmp_path))
+    manual_launch = MagicMock(return_value=MagicMock())
+    monkeypatch.setattr(module, "_launch_cloakbrowser_manual_process", manual_launch)
+    monkeypatch.setattr(manager, "_watch_process", AsyncMock())
+
+    await manager.launch({
+        **_launch_profile(tmp_path),
+        "locale": "en-US",
+    })
+
+    args = manual_launch.call_args.kwargs["args"]
+    assert args[-4:] == [
+        "-AppleLanguages",
+        "(en-US)",
+        "-AppleLocale",
+        "en_US",
+    ]
+
+
+def test_cookie_import_extension_is_profile_local_and_hash_stable(tmp_path: Path):
+    raw = json.dumps([{
+        "name": "sid",
+        "value": "secret",
+        "domain": ".example.com",
+        "path": "/",
+        "hostOnly": True,
+        "secure": True,
+        "httpOnly": True,
+    }])
+    extension = _sync_cookie_import_extension(tmp_path, raw)
+
+    assert extension == tmp_path / "manager-cookie-importer"
+    assert json.loads((extension / "manifest.json").read_text())["permissions"] == ["cookies", "storage"]
+    payload = json.loads((extension / "cookies.json").read_text())
+    assert payload["cookies"][0]["name"] == "sid"
+    assert payload["cookies"][0]["hostOnly"] is True
+    worker = (extension / "service_worker.js").read_text()
+    assert "chrome.cookies.set" in worker
+    assert payload["hash"] in worker
+    assert '"hostOnly":true' in worker
+
+    args = ["--load-extension=/tmp/existing"]
+    _append_unpacked_extension_arg(args, extension)
+    assert args[0].endswith(f",{extension}")
+    unchanged = (extension / "cookies.json").read_text()
+    _sync_cookie_import_extension(tmp_path, raw)
+    assert (extension / "cookies.json").read_text() == unchanged
+
+
+def test_cookie_parser_strips_host_only_only_for_playwright():
+    raw = '[{"name":"sid","value":"x","domain":"127.0.0.1","hostOnly":true}]'
+
+    assert "hostOnly" not in _parse_profile_cookies(raw)[0]
+    assert _parse_profile_cookies(raw, preserve_host_only=True)[0]["hostOnly"] is True
 
 
 def test_sync_profile_locale_updates_chrome_preferences(tmp_path: Path):

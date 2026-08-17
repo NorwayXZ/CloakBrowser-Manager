@@ -16,6 +16,7 @@ import { ProfileViewer } from "./components/ProfileViewer";
 import { NativeWindowStatus } from "./components/NativeWindowStatus";
 import { LoginPage } from "./components/LoginPage";
 import { AccountSettings } from "./components/AccountSettings";
+import { PreflightDialog, type PreflightEntry } from "./components/PreflightDialog";
 
 type AuthState = "checking" | "required" | "ok" | "error";
 type View = "list" | "create" | "edit" | "view";
@@ -144,6 +145,7 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
   const [trashProfiles, setTrashProfiles] = useState<Profile[]>([]);
   const [managerError, setManagerError] = useState<string | null>(null);
   const [hostOS, setHostOS] = useState<HostOS>(() => detectClientHostOS());
+  const [pendingLaunch, setPendingLaunch] = useState<{ entries: PreflightEntry[]; mode: LaunchMode } | null>(null);
 
   const selected = profiles.find((p) => p.id === selectedId) ?? null;
 
@@ -276,35 +278,44 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
   }, [create, profileToCreateData, refreshAll]);
 
   const handleLaunchProfile = useCallback(async (id: string, launchMode: LaunchMode) => {
-    const preflight = await api.getPreflight(id, launchMode);
-    if (!preflight.can_launch) {
-      window.alert(`启动前检查未通过：\n${preflight.issues.filter((issue) => issue.severity === "error").map((issue) => issue.message).join("\n")}`);
-      return;
+    const profile = profiles.find((item) => item.id === id);
+    if (!profile) return;
+    try {
+      const preflight = await api.getPreflight(id, launchMode);
+      setPendingLaunch({ entries: [{ id: profile.id, name: profile.name, result: preflight }], mode: launchMode });
+    } catch (err) {
+      setManagerError(errorMessage(err));
     }
-    const warnings = preflight.issues.filter((issue) => issue.severity === "warning");
-    if (warnings.length > 0 && !window.confirm(`启动前检查发现提示：\n${warnings.map((issue) => issue.message).join("\n")}\n\n仍然启动吗？`)) {
-      return;
+  }, [profiles]);
+
+  const confirmPendingLaunch = useCallback(async () => {
+    if (!pendingLaunch || pendingLaunch.entries.some((entry) => !entry.result.can_launch)) return;
+    const { entries, mode } = pendingLaunch;
+    setPendingLaunch(null);
+    for (const entry of entries) {
+      const result = await launch(entry.id, mode);
+      if (entries.length === 1 && result && (result.viewer_mode === "vnc" || result.viewer_mode === "native-window")) {
+        setSelectedId(entry.id);
+        setView("view");
+      }
     }
-    const result = await launch(id, launchMode);
-    if (result?.viewer_mode === "vnc" || result?.viewer_mode === "native-window") {
-      setSelectedId(id);
-      setView("view");
-    } else {
-      setView("list");
-    }
-  }, [launch]);
+  }, [launch, pendingLaunch]);
 
   const handleBatchLaunchProfiles = useCallback(async (ids: string[], launchMode: LaunchMode) => {
-    for (const id of ids) {
-      const preflight = await api.getPreflight(id, launchMode);
-      if (!preflight.can_launch) {
-        window.alert(`${profiles.find((profile) => profile.id === id)?.name ?? id} 启动前检查未通过：\n${preflight.issues.filter((issue) => issue.severity === "error").map((issue) => issue.message).join("\n")}`);
-        continue;
+    const entries = await Promise.all(ids.map(async (id) => {
+      const profile = profiles.find((item) => item.id === id);
+      if (!profile) return null;
+      try {
+        return { id: profile.id, name: profile.name, result: await api.getPreflight(id, launchMode) };
+      } catch (err) {
+        setManagerError(errorMessage(err));
+        return null;
       }
-      await launch(id, launchMode);
-    }
-    setView("list");
-  }, [launch, profiles]);
+    }));
+    const validEntries = entries.filter((entry): entry is PreflightEntry => entry !== null);
+    if (validEntries.length > 0) setPendingLaunch({ entries: validEntries, mode: launchMode });
+  }, [profiles]);
+
 
   const handleStopProfile = useCallback(async (id: string) => {
     await stop(id);
@@ -456,6 +467,14 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
           username={authUsername}
           onClose={() => setAccountOpen(false)}
           onUpdated={onAccountUpdated}
+        />
+      )}
+
+      {pendingLaunch && (
+        <PreflightDialog
+          entries={pendingLaunch.entries}
+          onCancel={() => setPendingLaunch(null)}
+          onConfirm={() => void confirmPendingLaunch()}
         />
       )}
     </div>

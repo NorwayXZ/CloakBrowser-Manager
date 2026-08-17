@@ -126,6 +126,8 @@ class ProfileResponse(BaseModel):
     created_at: str
     updated_at: str
     last_opened_at: str | None = None
+    last_exit_at: str | None = None
+    last_exit_reason: str | None = None
     deleted_at: str | None = None
     tags: list[TagResponse] = []
     status: str = "stopped"  # "running" | "stopped"

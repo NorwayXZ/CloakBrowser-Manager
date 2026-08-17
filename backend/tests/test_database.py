@@ -33,6 +33,16 @@ def test_init_db_idempotent(tmp_db: Path):
     assert len(tables) >= 2
 
 
+def test_mark_profile_exit_is_persisted(tmp_db: Path):
+    profile = db.create_profile("Exit state")
+    db.mark_profile_exit(profile["id"], "异常退出（代码 1）")
+
+    updated = db.get_profile(profile["id"])
+    assert updated is not None
+    assert updated["last_exit_reason"] == "异常退出（代码 1）"
+    assert updated["last_exit_at"] is not None
+
+
 def test_init_db_preserves_existing_profile_directory(tmp_db: Path):
     profile = db.create_profile("Existing")
     original_path = profile["user_data_dir"]

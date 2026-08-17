@@ -125,6 +125,22 @@ describe("api.getPreflight", () => {
   });
 });
 
+describe("configuration backup", () => {
+  it("exports the Manager configuration", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ format: "cloakbrowser-manager-configuration" }));
+    await api.exportConfiguration();
+    expect(mockFetch.mock.calls[0][0]).toBe("/api/configuration/export");
+  });
+
+  it("imports a parsed backup", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true, profiles: 1, groups: 0, proxy_presets: 0 }));
+    await api.importConfiguration({ format: "cloakbrowser-manager-configuration" });
+    const [url, options] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/configuration/import");
+    expect(options.method).toBe("POST");
+  });
+});
+
 // ── setClipboard ────────────────────────────────────────────────────────────
 
 describe("api.setClipboard", () => {

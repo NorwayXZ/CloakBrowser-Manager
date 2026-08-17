@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -21,7 +22,7 @@ from urllib.parse import unquote, urlparse
 
 from cloakbrowser import launch_persistent_context_async
 
-from .fingerprint_report import analyze_fingerprint, run_fingerprint_probe
+from .fingerprint_report import DEFAULT_NETWORK_PROBE_URL, analyze_fingerprint, run_fingerprint_probe
 from .proxy_geo import fetch_proxy_geo
 from .proxy_bridge import HttpProxyBridge
 from .runtime import RuntimeConfig, resolve_runtime
@@ -44,6 +45,7 @@ BLANK_PAGE_URLS = {
     "chrome://newtab/",
     "chrome://new-tab-page/",
 }
+COOKIE_IMPORTER_DIRNAME = "manager-cookie-importer"
 
 
 def _read_json_file(path: Path) -> dict[str, Any]:
@@ -158,7 +160,11 @@ def _sync_session_restore(user_data_dir: Path) -> None:
     _write_json_file(prefs_path, prefs)
 
 
-def _parse_profile_cookies(raw: str | None) -> list[dict[str, Any]]:
+def _parse_profile_cookies(
+    raw: str | None,
+    *,
+    preserve_host_only: bool = False,
+) -> list[dict[str, Any]]:
     if not raw:
         return []
     try:
@@ -182,9 +188,115 @@ def _parse_profile_cookies(raw: str | None) -> list[dict[str, Any]]:
         cookie = dict(item)
         if "expirationDate" in cookie and "expires" not in cookie:
             cookie["expires"] = cookie.pop("expirationDate")
-        cookie.pop("hostOnly", None)
+        if not preserve_host_only:
+            cookie.pop("hostOnly", None)
         cookies.append(cookie)
     return cookies
+
+
+def _sync_cookie_import_extension(user_data_dir: Path, raw: str | None) -> Path | None:
+    """Create a profile-local MV3 extension for no-CDP cookie imports."""
+    extension_dir = user_data_dir / COOKIE_IMPORTER_DIRNAME
+    cookies = _parse_profile_cookies(raw, preserve_host_only=True)
+    if not cookies:
+        shutil.rmtree(extension_dir, ignore_errors=True)
+        return None
+
+    extension_dir.mkdir(parents=True, exist_ok=True)
+    serialized = json.dumps(cookies, ensure_ascii=False, separators=(",", ":"))
+    payload_hash = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+    payload = {"hash": payload_hash, "cookies": cookies}
+    manifest = {
+        "manifest_version": 3,
+        "name": "CloakBrowser Cookie Importer",
+        "version": "1.0.0",
+        "description": "Imports the Cookie JSON saved for this local browser profile.",
+        "permissions": ["cookies", "storage"],
+        "host_permissions": ["<all_urls>"],
+        "background": {"service_worker": "service_worker.js"},
+    }
+    worker_template = r"""
+const COOKIE_PAYLOAD = __COOKIE_PAYLOAD__;
+
+const normalizeSameSite = (value) => {
+  const normalized = String(value || "").toLowerCase().replaceAll("-", "_");
+  if (normalized === "strict") return "strict";
+  if (normalized === "lax") return "lax";
+  if (["none", "no_restriction", "unspecified"].includes(normalized)) {
+    return normalized === "none" ? "no_restriction" : normalized;
+  }
+  return undefined;
+};
+
+const cookieDetails = (cookie) => {
+  const domain = String(cookie.domain || "").trim();
+  const host = domain.replace(/^\./, "");
+  if (!host || !cookie.name) return null;
+  const path = String(cookie.path || "/");
+  const details = {
+    url: `${cookie.secure ? "https" : "http"}://${host}${path.startsWith("/") ? path : "/"}`,
+    name: String(cookie.name),
+    value: String(cookie.value || ""),
+    path: path.startsWith("/") ? path : "/",
+    secure: Boolean(cookie.secure),
+    httpOnly: Boolean(cookie.httpOnly),
+  };
+  if (!cookie.hostOnly) details.domain = domain;
+  const sameSite = normalizeSameSite(cookie.sameSite);
+  if (sameSite) details.sameSite = sameSite;
+  const expires = Number(cookie.expires ?? cookie.expirationDate);
+  if (Number.isFinite(expires) && expires > 0) details.expirationDate = expires;
+  return details;
+};
+
+const importCookies = async () => {
+  const payload = COOKIE_PAYLOAD;
+  const state = await chrome.storage.local.get("payloadHash");
+  if (state.payloadHash === payload.hash) return;
+  let imported = 0;
+  let failed = 0;
+  for (const cookie of payload.cookies || []) {
+    const details = cookieDetails(cookie);
+    if (!details) { failed += 1; continue; }
+    try {
+      await chrome.cookies.set(details);
+      imported += 1;
+    } catch (_) {
+      failed += 1;
+    }
+  }
+  await chrome.storage.local.set({
+    payloadHash: payload.hash,
+    imported,
+    failed,
+    completedAt: new Date().toISOString(),
+  });
+};
+
+chrome.runtime.onInstalled.addListener(() => { void importCookies(); });
+chrome.runtime.onStartup.addListener(() => { void importCookies(); });
+void importCookies();
+""".strip()
+    worker = worker_template.replace(
+        "__COOKIE_PAYLOAD__",
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+    )
+    _write_json_file(extension_dir / "manifest.json", manifest)
+    _write_json_file(extension_dir / "cookies.json", payload)
+    (extension_dir / "service_worker.js").write_text(worker, encoding="utf-8")
+    return extension_dir
+
+
+def _append_unpacked_extension_arg(args: list[str], extension_dir: Path) -> None:
+    extension = os.fspath(extension_dir)
+    for index, arg in enumerate(args):
+        if arg.startswith("--load-extension="):
+            paths = [value for value in arg.split("=", 1)[1].split(",") if value]
+            if extension not in paths:
+                paths.append(extension)
+            args[index] = f"--load-extension={','.join(paths)}"
+            return
+    args.append(f"--load-extension={extension}")
 
 
 def _clean_startup_urls(raw_urls: Any) -> list[str]:
@@ -265,6 +377,30 @@ def _append_chrome_arg_once(args: list[str], flag: str, value: str | None = None
     args.append(flag if value is None else f"{flag}={value}")
 
 
+def _set_macos_application_locale(args: list[str], locale: str) -> None:
+    """Set Chromium's Cocoa application locale using NSArgumentDomain values."""
+    cleaned: list[str] = []
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg in {"-AppleLanguages", "-AppleLocale"}:
+            index += 2
+            continue
+        if arg.startswith(("-AppleLanguages=", "-AppleLocale=")):
+            index += 1
+            continue
+        cleaned.append(arg)
+        index += 1
+
+    args[:] = cleaned
+    args.extend([
+        "-AppleLanguages",
+        f"({locale})",
+        "-AppleLocale",
+        locale.replace("-", "_"),
+    ])
+
+
 def _format_proxy_endpoint(parsed: Any) -> str:
     host = parsed.hostname or ""
     if ":" in host and not host.startswith("["):
@@ -279,7 +415,10 @@ def _chrome_proxy_args(proxy: str | None) -> list[str]:
     if not parsed.scheme or not parsed.hostname or not parsed.port:
         return []
     proxy_host = parsed.hostname
-    rules = f"MAP * ~NOTFOUND , EXCLUDE {proxy_host}"
+    rules = (
+        f"MAP * ~NOTFOUND, EXCLUDE {proxy_host}, EXCLUDE localhost, "
+        "EXCLUDE 127.0.0.1, EXCLUDE ::1"
+    )
     return [
         f"--proxy-server={_format_proxy_endpoint(parsed)}",
         "--proxy-bypass-list=127.0.0.1;localhost;[::1]",
@@ -377,6 +516,10 @@ def _build_system_chrome_command_args(
     if locale:
         _append_chrome_arg_once(chrome_args, "--lang", locale)
         _append_chrome_arg_once(chrome_args, "--accept-lang", _accept_language_value(locale))
+        if sys.platform == "darwin":
+            # On macOS Chromium derives renderer Intl defaults from Cocoa's
+            # application locale. --lang alone only changes web languages.
+            _set_macos_application_locale(chrome_args, locale)
 
     return chrome_args
 
@@ -654,6 +797,96 @@ async def _launch_system_chrome_persistent_context_async(
             patch_context_async(context, resolve_config(human_preset))
         except Exception as exc:
             logger.debug("Humanize patch skipped for system Chrome: %s", exc)
+
+    return context
+
+
+async def _launch_cloakbrowser_persistent_context_async(
+    *,
+    user_data_dir: str | os.PathLike[str],
+    headless: bool = False,
+    proxy: str | None = None,
+    args: list[str] | None = None,
+    user_agent: str | None = None,
+    viewport: Any = None,
+    locale: str | None = None,
+    timezone: str | None = None,
+    env: dict[str, str] | None = None,
+    humanize: bool = False,
+    human_preset: str = "default",
+    **_: Any,
+) -> Any:
+    """Launch CloakBrowser directly, then attach CDP for explicit debug mode."""
+    from playwright.async_api import async_playwright
+
+    raw_args = args or []
+    cdp_port = _extract_remote_debugging_port(raw_args)
+    if cdp_port is None:
+        raise ValueError("CloakBrowser debug launch requires --remote-debugging-port")
+
+    process: subprocess.Popen[Any] | None = None
+    pw = await async_playwright().start()
+    browser: Any | None = None
+    try:
+        process = _launch_cloakbrowser_manual_process(
+            user_data_dir=user_data_dir,
+            headless=headless,
+            proxy=proxy,
+            args=raw_args,
+            user_agent=user_agent,
+            viewport=viewport,
+            locale=locale,
+            timezone=timezone,
+            env=env,
+        )
+        browser = await _connect_over_cdp_when_ready(pw, cdp_port, process)
+        if not browser.contexts:
+            raise RuntimeError("CloakBrowser did not expose a default browser context")
+        context = browser.contexts[0]
+    except Exception:
+        if browser is not None:
+            with suppress(Exception):
+                await browser.close()
+        await _terminate_process_async(process)
+        await pw.stop()
+        raise
+
+    original_close = context.close
+    closed = False
+
+    async def close_with_cleanup(*, reason: str | None = None) -> None:
+        nonlocal closed
+        if closed:
+            return
+        closed = True
+        try:
+            try:
+                if reason is None:
+                    await original_close()
+                else:
+                    await original_close(reason=reason)
+            except Exception as exc:
+                logger.debug("Native CloakBrowser context close failed: %s", exc)
+            if browser is not None:
+                with suppress(Exception):
+                    await browser.close()
+        finally:
+            await _terminate_process_async(process)
+            await pw.stop()
+
+    context.close = close_with_cleanup
+    context._cloak_browser_process = process
+    context._cloak_browser = browser
+    context._cloak_playwright = pw
+
+    if humanize:
+        try:
+            from cloakbrowser.human import patch_context_async
+            from cloakbrowser.human.config import resolve_config
+
+            patch_context_async(context, resolve_config(human_preset))
+        except Exception as exc:
+            logger.debug("Humanize patch skipped for CloakBrowser: %s", exc)
 
     return context
 
@@ -1656,6 +1889,12 @@ class BrowserManager:
                 "code": "host_platform_mismatch",
                 "message": f"当前电脑是 {host}，不能启动 {platform or '未设置'} 设备画像。请在编辑页选择本机平台画像。",
             })
+        if self.runtime.runtime_mode == "native" and profile.get("headless"):
+            issues.append({
+                "severity": "error",
+                "code": "native_headless_unsupported",
+                "message": "macOS/Windows 本地版只支持可见浏览器窗口；请关闭旧配置中的无界面模式后再启动。",
+            })
 
         if engine == "system_chrome":
             spoofed = any(profile.get(key) for key in (
@@ -1725,8 +1964,8 @@ class BrowserManager:
             })
         if profile.get("cookies_json") and mode == "manual":
             issues.append({
-                "severity": "info", "code": "manual_cookie_import",
-                "message": "日常无 CDP 手动启动会保留已有 Cookie，但不会自动注入粘贴的 Cookie JSON；调试启动才会尝试导入。",
+                "severity": "info", "code": "manual_cookie_importer",
+                "message": "日常无 CDP 启动会通过当前画像专用的本地扩展导入 Cookie JSON，并继续使用同一用户数据目录保存登录状态。",
             })
         if profile.get("humanize") and mode == "manual":
             issues.append({
@@ -1751,6 +1990,7 @@ class BrowserManager:
                 "tls_transport": "browser_native",
                 "tls_externally_verified": False,
                 "storage_persistence": True,
+                "cookie_import": "profile_extension" if profile.get("cookies_json") and mode == "manual" else "browser_storage",
             },
         }
 
@@ -1798,7 +2038,14 @@ class BrowserManager:
                     height=profile.get("screen_height", 1080),
                 )
 
-            user_launch_args = profile.get("launch_args") or []
+            user_launch_args = list(profile.get("launch_args") or [])
+            if requested_launch_mode == "manual":
+                cookie_importer = _sync_cookie_import_extension(
+                    user_data_dir,
+                    profile.get("cookies_json"),
+                )
+                if cookie_importer is not None:
+                    _append_unpacked_extension_arg(user_launch_args, cookie_importer)
             conflicting_debug_args = [
                 arg for arg in user_launch_args
                 if arg.startswith(("--remote-debugging-port", "--remote-debugging-address"))
@@ -1900,6 +2147,8 @@ class BrowserManager:
                 if SESSION_RESTORE_ARG not in extra_args:
                     extra_args.append(SESSION_RESTORE_ARG)
             extra_args += user_launch_args
+            if self.runtime.host_os == "macos" and resolved_locale:
+                _set_macos_application_locale(extra_args, resolved_locale)
 
             launch_env = _build_locale_timezone_env(
                 locale=resolved_locale,
@@ -1978,11 +2227,15 @@ class BrowserManager:
                         f"--remote-debugging-port={cdp_port}",
                     ]
                     try:
-                        launcher = (
-                            _launch_system_chrome_persistent_context_async
-                            if browser_engine == "system_chrome"
-                            else launch_persistent_context_async
-                        )
+                        if browser_engine == "system_chrome":
+                            launcher = _launch_system_chrome_persistent_context_async
+                        elif self.runtime.host_os == "macos" and not bool(profile.get("headless", False)):
+                            # Playwright rejects Cocoa's two-part locale values
+                            # before launching. Direct process startup preserves
+                            # them, then debug mode attaches to the requested CDP.
+                            launcher = _launch_cloakbrowser_persistent_context_async
+                        else:
+                            launcher = launch_persistent_context_async
                         context = await launcher(**launch_options)
                         await self._wait_for_cdp(cdp_port)
                         break
@@ -2142,7 +2395,9 @@ class BrowserManager:
         except Exception as exc:
             logger.debug("Process watcher failed for %s: %s", profile_id, exc)
             return
-        await self._on_browser_closed(profile_id)
+        returncode = process.returncode
+        reason = "正常关闭" if returncode in (0, None) else f"异常退出（代码 {returncode}）"
+        await self._on_browser_closed(profile_id, exit_reason=reason)
 
     async def _dispose_running(
         self,
@@ -2169,7 +2424,7 @@ class BrowserManager:
         if running.cdp_port is not None:
             self._release_cdp_port(running.cdp_port)
 
-    async def _on_browser_closed(self, profile_id: str):
+    async def _on_browser_closed(self, profile_id: str, *, exit_reason: str = "浏览器关闭"):
         """Release resources after a browser crash or user-initiated close."""
         async with self._lock:
             running = self.running.pop(profile_id, None)
@@ -2177,6 +2432,11 @@ class BrowserManager:
         if running:
             logger.info("Browser closed for profile %s, cleaning up", profile_id)
             await self._dispose_running(running, close_context=False)
+            try:
+                from . import database as db
+                db.mark_profile_exit(profile_id, exit_reason)
+            except Exception as exc:
+                logger.debug("Could not persist exit status for %s: %s", profile_id, exc)
 
     async def stop(self, profile_id: str):
         """Stop a running browser instance and release all owned resources."""
@@ -2189,6 +2449,11 @@ class BrowserManager:
 
         logger.info("Stopping profile %s", profile_id)
         await self._dispose_running(running, close_context=True)
+        try:
+            from . import database as db
+            db.mark_profile_exit(profile_id, "用户关闭")
+        except Exception as exc:
+            logger.debug("Could not persist stop status for %s: %s", profile_id, exc)
 
     def get_status(self, profile_id: str, profile: dict[str, Any] | None = None) -> dict[str, Any]:
         """Get running status and viewer capabilities for a profile."""
@@ -2278,6 +2543,16 @@ class BrowserManager:
             expected_gpu_renderer=None if running.browser_engine == "system_chrome" else profile.get("gpu_renderer"),
             expected_user_agent=profile.get("user_agent"),
             proxy_configured=bool(profile.get("proxy")),
+            expected_proxy_ip=(running.proxy_geo or {}).get("ip") if isinstance(running.proxy_geo, dict) else None,
+        )
+        main_values = raw.get("main") if isinstance(raw.get("main"), dict) else {}
+        network_values = main_values.get("network") if isinstance(main_values.get("network"), dict) else {}
+        external_probe = network_values.get("externalProbe") if isinstance(network_values.get("externalProbe"), dict) else None
+        probe_transport = external_probe.get("transport") if external_probe and isinstance(external_probe.get("transport"), dict) else {}
+        tls_externally_verified = bool(
+            external_probe
+            and not external_probe.get("error")
+            and probe_transport.get("tls_version")
         )
         report = {
             "profile_id": profile_id,
@@ -2301,7 +2576,12 @@ class BrowserManager:
                 "dns_policy": "proxy_host_resolver" if profile.get("proxy") else "direct",
                 "webrtc_policy": "disable_non_proxied_udp",
                 "tls_transport": "browser_native",
-                "tls_externally_verified": False,
+                "tls_externally_verified": tls_externally_verified,
+                "dns_externally_verified": False,
+                "external_probe_configured": bool(
+                    os.environ.get("CLOAKBROWSER_NETWORK_PROBE_URL")
+                    or DEFAULT_NETWORK_PROBE_URL
+                ),
             },
             "collection": collection,
             "analysis": analysis,
