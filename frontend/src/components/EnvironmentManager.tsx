@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   Archive,
   Bell,
   Bug,
@@ -469,8 +470,16 @@ export function EnvironmentManager({
         </header>
 
         {error && (
-          <div className="border-b border-red-200 bg-red-50 px-5 py-2 text-sm text-red-600">
-            {error}
+          <div className="border-b border-amber-200 bg-amber-50 px-5 py-3">
+            <div className="flex items-start gap-3 rounded-md border border-amber-200 bg-white/70 px-3 py-2 text-sm text-amber-900">
+              <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-amber-100 text-amber-700">
+                <AlertTriangle className="h-4 w-4" />
+              </div>
+              <div className="min-w-0">
+                <div className="font-semibold">管理服务需要刷新</div>
+                <div className="mt-0.5 break-words text-xs leading-5 text-amber-800">{error}</div>
+              </div>
+            </div>
           </div>
         )}
 

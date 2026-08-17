@@ -19,6 +19,21 @@ import { AccountSettings } from "./components/AccountSettings";
 type AuthState = "checking" | "required" | "ok" | "error";
 type View = "list" | "create" | "edit" | "view";
 
+function errorStatus(err: unknown) {
+  return typeof err === "object" && err !== null && "status" in err
+    ? Number((err as { status?: unknown }).status)
+    : null;
+}
+
+function errorMessage(err: unknown) {
+  return err instanceof Error ? err.message : "管理数据加载失败";
+}
+
+function isMissingManagerApi(err: unknown) {
+  const message = errorMessage(err).toLowerCase();
+  return errorStatus(err) === 404 || message === "not found" || message.includes("not found");
+}
+
 export default function App() {
   const [authState, setAuthState] = useState<AuthState>("checking");
   const [authRequired, setAuthRequired] = useState(false);
@@ -127,19 +142,29 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
   );
 
   const loadManagerData = useCallback(async () => {
-    try {
-      const [nextGroups, nextProxyPresets, nextTrashProfiles] = await Promise.all([
-        api.listGroups(),
-        api.listProxyPresets(),
-        api.listDeletedProfiles(),
-      ]);
-      setGroups(nextGroups);
-      setProxyPresets(nextProxyPresets);
-      setTrashProfiles(nextTrashProfiles);
+    const [groupsResult, proxyPresetsResult, trashProfilesResult] = await Promise.allSettled([
+      api.listGroups(),
+      api.listProxyPresets(),
+      api.listDeletedProfiles(),
+    ]);
+
+    setGroups(groupsResult.status === "fulfilled" ? groupsResult.value : []);
+    setProxyPresets(proxyPresetsResult.status === "fulfilled" ? proxyPresetsResult.value : []);
+    setTrashProfiles(trashProfilesResult.status === "fulfilled" ? trashProfilesResult.value : []);
+
+    const failures = [groupsResult, proxyPresetsResult, trashProfilesResult]
+      .filter((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failures.length === 0) {
       setManagerError(null);
-    } catch (err) {
-      setManagerError(err instanceof Error ? err.message : "管理数据加载失败");
+      return;
     }
+
+    if (failures.some((result) => isMissingManagerApi(result.reason))) {
+      setManagerError("当前 8080 后端还是旧版本，缺少分组/代理/回收站接口。请重启 Manager：./bin/cloak restart");
+      return;
+    }
+
+    setManagerError(errorMessage(failures[0]?.reason));
   }, []);
 
   useEffect(() => {
