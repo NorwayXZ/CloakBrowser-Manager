@@ -732,11 +732,28 @@ export function EnvironmentManager({
               </div>
               <div className="min-w-0 flex-1">
                 <div className="font-semibold">
-                  {updateNotice.tone === "error" ? "升级失败" : updateNotice.result?.restart_required ? "升级完成，需要重启" : "升级检查完成"}
+                  {updateNotice.tone === "error"
+                    ? "升级失败"
+                    : updateNotice.result?.restart_required || updateNotice.browser?.restart_required
+                    ? "升级完成，需要重启"
+                    : "升级检查完成"}
                 </div>
                 <div className="mt-0.5 whitespace-pre-wrap break-words text-xs leading-5">{updateNotice.text}</div>
+                {updateNotice.browser && (
+                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 rounded-md bg-white/70 px-2.5 py-2 text-xs">
+                    <span>Wrapper：{updateNotice.browser.wrapper_version || "未知"}</span>
+                    <span>平台：{updateNotice.browser.platform || "未知"}</span>
+                    <span>已安装：{updateNotice.browser.installed_version || updateNotice.browser.available_version || "未知"}</span>
+                    <span className={updateNotice.browser.binary_verified ? "font-medium text-emerald-700" : "font-medium text-red-700"}>
+                      内核：{updateNotice.browser.binary_verified ? "已验证" : "未验证"}
+                    </span>
+                  </div>
+                )}
                 {updateNotice.result?.restart_required && (
                   <div className="mt-1 text-xs font-medium">请关闭当前终端里的 Manager，然后重新运行启动命令。</div>
+                )}
+                {!updateNotice.result?.restart_required && updateNotice.browser?.restart_required && (
+                  <div className="mt-1 text-xs font-medium">请关闭运行中的浏览器画像，再重新打开画像使用新内核。</div>
                 )}
               </div>
               <button

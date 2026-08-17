@@ -125,7 +125,9 @@ export interface BrowserUpdateResult {
   wrapper_version: string | null;
   current_version: string | null;
   available_version: string | null;
+  installed_version: string | null;
   platform: string | null;
+  binary_verified: boolean;
   restart_required: boolean;
   message: string;
 }

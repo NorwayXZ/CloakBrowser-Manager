@@ -23,6 +23,7 @@ from urllib.parse import unquote, urlparse
 from cloakbrowser import launch_persistent_context_async
 
 from .fingerprint_report import DEFAULT_NETWORK_PROBE_URL, analyze_fingerprint, run_fingerprint_probe
+from .cloak_runtime import get_effective_chromium_version
 from .proxy_geo import fetch_proxy_geo
 from .proxy_bridge import HttpProxyBridge
 from .runtime import RuntimeConfig, resolve_runtime
@@ -1922,9 +1923,7 @@ class BrowserManager:
             if engine == "cloakbrowser":
                 ua_major = re.search(r"(?:Chrome|Chromium)/(\d+)", ua)
                 try:
-                    from cloakbrowser.config import get_chromium_version
-
-                    binary_major = str(get_chromium_version()).split(".", 1)[0]
+                    binary_major = get_effective_chromium_version().split(".", 1)[0]
                 except (ImportError, AttributeError):
                     binary_major = ""
                 if ua_major and binary_major and ua_major.group(1) != binary_major:

@@ -32,6 +32,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from . import database as db
 from .browser_manager import BrowserManager, _normalize_proxy, _validate_proxy
+from .cloak_runtime import get_effective_chromium_version, inspect_cloak_runtime
 from .fingerprint_report import DEFAULT_NETWORK_PROBE_URL, DIAGNOSTIC_SCRIPT
 from .proxy_bridge import HttpProxyBridge
 from .proxy_geo import fetch_proxy_geo
@@ -1123,19 +1124,10 @@ async def profile_start_page(profile_id: str):
 
 @app.get("/api/status", response_model=StatusResponse)
 async def get_system_status():
-    try:
-        from cloakbrowser.config import get_chromium_version
-
-        binary_version = get_chromium_version()
-    except ImportError:
-        from cloakbrowser.config import CHROMIUM_VERSION
-
-        binary_version = CHROMIUM_VERSION
-
     profiles = db.list_profiles()
     return StatusResponse(
         running_count=len(browser_mgr.running),
-        binary_version=binary_version,
+        binary_version=get_effective_chromium_version(),
         profiles_total=len(profiles),
         host_os=browser_mgr.runtime.host_os,
         runtime_mode=browser_mgr.runtime.runtime_mode,
@@ -1160,30 +1152,30 @@ async def update_browser_binary():
     """Check/download the official CloakBrowser binary for this platform."""
     try:
         import cloakbrowser
-        from cloakbrowser.config import get_chromium_version
 
-        before = get_chromium_version()
+        before = get_effective_chromium_version()
         latest = await asyncio.to_thread(cloakbrowser.check_for_update)
-        after = get_chromium_version()
-        platform = None
-        try:
-            from cloakbrowser.config import get_platform_tag
-            platform = get_platform_tag()
-        except (ImportError, AttributeError):
-            pass
-        wrapper = getattr(cloakbrowser, "__version__", None)
-        if latest or after != before:
-            message = f"CloakBrowser 内核已更新到 {after}，关闭运行中的浏览器后重新启动画像。"
+        runtime = await asyncio.to_thread(inspect_cloak_runtime, ensure_binary=True)
+        after = runtime.effective_version
+        if not runtime.binary_verified:
+            actual = runtime.binary_version or os.fspath(runtime.binary_path or "未知路径")
+            raise RuntimeError(f"下载后的内核文件未通过版本核对：期望 {after}，实际 {actual}")
+        updated = bool(latest or after != before)
+        installed = runtime.binary_version or after
+        if updated:
+            message = f"CloakBrowser 内核已更新并验证为 {installed}；关闭运行中的浏览器后重新启动画像。"
         else:
-            message = f"当前平台已经是可用的最新内核 {after}；免费渠道没有发现更高版本。"
+            message = f"当前平台内核 {installed} 已完成文件和版本核对；官方渠道没有发现更高版本。"
         return BrowserUpdateResponse(
             ok=True,
-            updated=bool(latest or after != before),
-            wrapper_version=str(wrapper) if wrapper else None,
+            updated=updated,
+            wrapper_version=runtime.wrapper_version,
             current_version=before,
             available_version=after,
-            platform=platform,
-            restart_required=bool(latest or after != before),
+            installed_version=installed,
+            platform=runtime.platform,
+            binary_verified=runtime.binary_verified,
+            restart_required=updated,
             message=message,
         )
     except Exception as exc:

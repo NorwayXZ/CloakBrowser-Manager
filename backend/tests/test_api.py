@@ -11,6 +11,7 @@ from starlette.testclient import TestClient
 
 from backend import main
 from backend.browser_manager import RunningProfile
+from backend.cloak_runtime import CloakRuntimeInfo
 from backend.runtime import RuntimeConfig
 
 
@@ -348,17 +349,88 @@ def test_browser_update_reports_current_platform_version(
     monkeypatch: pytest.MonkeyPatch,
 ):
     import cloakbrowser
-    import cloakbrowser.config as cloak_config
-
     monkeypatch.setattr(cloakbrowser, "check_for_update", lambda: None, raising=False)
-    monkeypatch.setattr(cloakbrowser, "__version__", "0.5.7", raising=False)
-    monkeypatch.setattr(cloak_config, "get_chromium_version", lambda: "145.0.0.0", raising=False)
+    monkeypatch.setattr(main, "get_effective_chromium_version", lambda: "145.0.0.0")
+    monkeypatch.setattr(
+        main,
+        "inspect_cloak_runtime",
+        lambda *, ensure_binary: CloakRuntimeInfo(
+            wrapper_version="0.5.7",
+            configured_version="145.0.0.0",
+            effective_version="145.0.0.0",
+            platform="darwin-arm64",
+            binary_path=Path("/cache/chromium-145.0.0.0/Chromium"),
+            binary_version="145.0.0.0",
+            binary_verified=True,
+        ),
+    )
 
     resp = app_client.post("/api/browser/update")
 
     assert resp.status_code == 200
     assert resp.json()["updated"] is False
     assert resp.json()["current_version"] == "145.0.0.0"
+    assert resp.json()["installed_version"] == "145.0.0.0"
+    assert resp.json()["binary_verified"] is True
+
+
+def test_browser_update_reports_new_effective_and_installed_version(
+    app_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    import cloakbrowser
+
+    monkeypatch.setattr(cloakbrowser, "check_for_update", lambda: "150.0.0.0.1", raising=False)
+    monkeypatch.setattr(main, "get_effective_chromium_version", lambda: "145.0.0.0.1")
+    monkeypatch.setattr(
+        main,
+        "inspect_cloak_runtime",
+        lambda *, ensure_binary: CloakRuntimeInfo(
+            wrapper_version="0.5.7",
+            configured_version="145.0.0.0.1",
+            effective_version="150.0.0.0.1",
+            platform="windows-x64",
+            binary_path=Path("C:/cache/chromium-150.0.0.0.1/chrome.exe"),
+            binary_version="150.0.0.0.1",
+            binary_verified=True,
+        ),
+    )
+
+    resp = app_client.post("/api/browser/update")
+
+    assert resp.status_code == 200
+    assert resp.json()["updated"] is True
+    assert resp.json()["available_version"] == "150.0.0.0.1"
+    assert resp.json()["installed_version"] == "150.0.0.0.1"
+    assert resp.json()["restart_required"] is True
+
+
+def test_browser_update_fails_when_downloaded_binary_version_is_stale(
+    app_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    import cloakbrowser
+
+    monkeypatch.setattr(cloakbrowser, "check_for_update", lambda: "150.0.0.0.1", raising=False)
+    monkeypatch.setattr(main, "get_effective_chromium_version", lambda: "145.0.0.0.1")
+    monkeypatch.setattr(
+        main,
+        "inspect_cloak_runtime",
+        lambda *, ensure_binary: CloakRuntimeInfo(
+            wrapper_version="0.5.7",
+            configured_version="145.0.0.0.1",
+            effective_version="150.0.0.0.1",
+            platform="windows-x64",
+            binary_path=Path("C:/cache/chromium-145.0.0.0.1/chrome.exe"),
+            binary_version="145.0.0.0.1",
+            binary_verified=False,
+        ),
+    )
+
+    resp = app_client.post("/api/browser/update")
+
+    assert resp.status_code == 502
+    assert "未通过版本核对" in resp.json()["detail"]
 
 
 # ── Launch Args ─────────────────────────────────────────────────────────────

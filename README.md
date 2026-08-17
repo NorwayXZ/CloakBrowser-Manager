@@ -323,7 +323,7 @@ Windows：
 
 ## 升级教程
 
-Git 安装版可以先在面板右上角点击 `升级`。按钮会依次检查 Manager 的 Git 代码和当前平台官方可用的 CloakBrowser 内核。不同系统、免费/付费渠道可用版本可能不同；页面只显示官方检查实际返回的版本，不会硬写一个并不存在的版本号。如果提示升级完成，关闭当前运行 Manager 的终端窗口，再重新启动 Manager。
+Git 安装版可以先在面板右上角点击 `升级`。按钮会依次检查 Manager 的 Git 代码和当前平台官方可用的 CloakBrowser 内核。内核检查使用实际生效版本标记，并在下载后核对缓存目录版本和文件大小；页面还会显示“已验证”状态。不同系统、免费/付费渠道可用版本可能不同；页面只显示官方检查实际返回的版本，不会硬写一个并不存在的版本号。如果提示升级完成，关闭当前运行 Manager 的终端窗口，再重新启动 Manager。
 
 如果你是 Git 下载的：
 
@@ -432,6 +432,8 @@ http://127.0.0.1:8080
 
 普通用户不需要看这一节。
 
+完整的逐项实现、证据和限制见 [1-9 项工程验收矩阵](docs/verification-matrix.zh-CN.md)。
+
 后端：
 
 ```bash
@@ -449,7 +451,7 @@ npm install
 npm run dev
 ```
 
-GitHub Actions 会在 Ubuntu、macOS 和 Windows 上运行后端测试，并在 Windows 托管运行器上真实下载和执行 `xray.exe`、`geoip.dat`、`geosite.dat` 以及 CloakBrowser 内核的 `--version`。托管 CI 不能替代真实 Windows 显卡和桌面窗口测试，因此 GPU/GUI 兼容性仍需在实体 Windows 电脑上验收。
+GitHub Actions 会在 Ubuntu、macOS 和 Windows 上运行后端测试，并在 macOS/Windows 托管运行器上真实下载并验证 Xray 可执行文件、`geoip.dat`、`geosite.dat`，再启动 CloakBrowser 无界面运行端点，核对运行端点返回的 Chromium 版本与有效版本一致。托管 CI 不能替代真实 Windows 显卡和桌面窗口测试，因此 GPU/GUI 兼容性仍需在实体 Windows 电脑上验收。
 
 ## 许可证
 

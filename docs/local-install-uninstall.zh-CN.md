@@ -139,6 +139,7 @@ http://127.0.0.1:8080
 - 默认起始页会自动采集主页面、iframe、Worker 的语言、时区、UA、平台、CPU 和设备内存，并检查 WebGL、Canvas/Audio 稳定性、字体、Cookie、LocalStorage、SessionStorage、IndexedDB、Cache 和 WebRTC 本地候选。面板显示“外部 CDP：未开启”才代表本次是日常无外部 CDP 启动。
 - macOS 的 CloakBrowser 画像会同时设置 Chromium 语言参数和 Cocoa 应用语言，因此 `navigator` 与 `Intl` 在主页面、iframe、Worker 中使用同一代理地区语言；不是只靠页面 JavaScript 覆盖。
 - 网络自检会报告代理 DNS 和 WebRTC 策略，并通过外部探针显示真实出口 IP、HTTP 协议、TLS 版本和加密套件。HTTP 探针无法证明操作系统使用了哪台 DNS 解析器，因此 DNS 会准确显示为“策略已启用、未经外部 DNS 解析器验证”。
+- 面板右上角的 `升级` 会读取当前平台实际生效的 CloakBrowser 内核版本；下载后还会核对缓存目录版本和文件是否完整，并显示是否验证通过。升级后需要关闭运行中的浏览器并重启 Manager。
 - 每个画像始终复用同一个 `user_data_dir`，并启用恢复上次会话；Cookie、历史记录、缓存、LocalStorage 和标签页都由该目录持久化。手动关闭标签页或网站主动让登录过期不属于数据丢失。
 - 粘贴到编辑页的 Cookie JSON 在日常无 CDP 启动时由画像专用本地扩展导入一次，调试启动时由浏览器上下文导入。后续登录状态由同一 `user_data_dir` 持续保存。
 

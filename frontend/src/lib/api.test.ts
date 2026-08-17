@@ -117,6 +117,32 @@ describe("api.updateManager", () => {
   });
 });
 
+describe("api.updateBrowser", () => {
+  it("returns the verified installed runtime version", async () => {
+    const result = {
+      ok: true,
+      updated: false,
+      wrapper_version: "0.5.7",
+      current_version: "145.0.0.0.1",
+      available_version: "145.0.0.0.1",
+      installed_version: "145.0.0.0.1",
+      platform: "darwin-arm64",
+      binary_verified: true,
+      restart_required: false,
+      message: "内核已验证",
+    };
+    mockFetch.mockResolvedValueOnce(jsonResponse(result));
+
+    const data = await api.updateBrowser();
+
+    expect(data.installed_version).toBe("145.0.0.0.1");
+    expect(data.binary_verified).toBe(true);
+    const [url, options] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/browser/update");
+    expect(options.method).toBe("POST");
+  });
+});
+
 describe("api.getPreflight", () => {
   it("requests the selected launch mode", async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({ status: "pass", can_launch: true, issues: [] }));

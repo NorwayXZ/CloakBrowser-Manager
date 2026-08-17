@@ -181,7 +181,9 @@ class BrowserUpdateResponse(BaseModel):
     wrapper_version: str | None = None
     current_version: str | None = None
     available_version: str | None = None
+    installed_version: str | None = None
     platform: str | None = None
+    binary_verified: bool = False
     restart_required: bool = False
     message: str
 
