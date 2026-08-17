@@ -32,6 +32,7 @@ logger = logging.getLogger("cloakbrowser.manager.xray")
 XRAY_SCHEMES = frozenset({"ss", "vmess", "vless", "trojan"})
 XRAY_GITHUB_API = "https://api.github.com/repos/XTLS/Xray-core/releases/latest"
 XRAY_BINARY_ENV = "CLOAKBROWSER_XRAY_PATH"
+XRAY_DATA_FILES = ("geoip.dat", "geosite.dat")
 
 
 class XrayProxyError(ValueError):
@@ -421,6 +422,26 @@ def find_xray_binary(data_dir: Path) -> Path | None:
     return None
 
 
+def _candidate_data_dirs(binary: Path, data_dir: Path) -> list[Path]:
+    root = Path(__file__).resolve().parent.parent
+    return [
+        binary.parent,
+        root / "bin" / "xray",
+        data_dir / "xray",
+    ]
+
+
+def _has_xray_data_files(path: Path) -> bool:
+    return all((path / filename).is_file() for filename in XRAY_DATA_FILES)
+
+
+def find_xray_data_dir(binary: Path, data_dir: Path) -> Path | None:
+    for candidate in _candidate_data_dirs(binary, data_dir):
+        if _has_xray_data_files(candidate):
+            return candidate
+    return None
+
+
 def _release_asset_name() -> str:
     system = platform.system().lower()
     machine = platform.machine().lower()
@@ -498,6 +519,21 @@ def _download_xray_binary_sync(data_dir: Path) -> Path:
             if not member:
                 raise XrayProxyError("Xray 压缩包中没有找到可执行文件")
             extracted = archive.read(member)
+            missing_data_files: list[str] = []
+            for filename in XRAY_DATA_FILES:
+                data_member = next(
+                    (name for name in archive.namelist() if Path(name).name == filename),
+                    None,
+                )
+                if not data_member:
+                    missing_data_files.append(filename)
+                    continue
+                (target_dir / filename).write_bytes(archive.read(data_member))
+            if missing_data_files:
+                raise XrayProxyError(
+                    "Xray 压缩包中缺少数据文件："
+                    + ", ".join(missing_data_files)
+                )
         temporary = target.with_suffix(".tmp")
         temporary.write_bytes(extracted)
         temporary.replace(target)
@@ -518,6 +554,28 @@ async def ensure_xray_binary(data_dir: Path) -> Path:
     if existing:
         return existing
     return await asyncio.to_thread(_download_xray_binary_sync, data_dir)
+
+
+async def ensure_xray_runtime(data_dir: Path) -> tuple[Path, Path]:
+    binary = await ensure_xray_binary(data_dir)
+    data_files_dir = find_xray_data_dir(binary, data_dir)
+    if data_files_dir is not None:
+        return binary, data_files_dir
+
+    logger.info("Xray data files are missing; downloading geoip.dat and geosite.dat")
+    await asyncio.to_thread(_download_xray_binary_sync, data_dir)
+    data_files_dir = find_xray_data_dir(binary, data_dir)
+    if data_files_dir is None:
+        installed_binary = data_dir / "xray" / _binary_name()
+        data_files_dir = find_xray_data_dir(installed_binary, data_dir)
+        if data_files_dir is not None and installed_binary.is_file():
+            binary = installed_binary
+    if data_files_dir is None:
+        raise XrayProxyError(
+            "Xray 数据文件缺失：geoip.dat / geosite.dat。"
+            "请重新运行安装程序，或把这两个文件放到数据目录的 xray 文件夹。"
+        )
+    return binary, data_files_dir
 
 
 @dataclass
@@ -570,7 +628,7 @@ async def start_xray_proxy(
     data_dir: Path,
 ) -> XrayProcess:
     """Start one local SOCKS5 endpoint backed by an Xray outbound."""
-    binary = await ensure_xray_binary(data_dir)
+    binary, xray_asset_dir = await ensure_xray_runtime(data_dir)
     local_port = _free_port()
     xray_dir = user_data_dir / "xray"
     xray_dir.mkdir(parents=True, exist_ok=True)
@@ -591,6 +649,8 @@ async def start_xray_proxy(
             str(config_path),
             stdout=log_handle,
             stderr=asyncio.subprocess.STDOUT,
+            cwd=str(xray_asset_dir),
+            env={**os.environ, "XRAY_LOCATION_ASSET": str(xray_asset_dir)},
         )
         await _wait_for_xray(process, local_port)
     except BaseException:

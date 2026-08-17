@@ -7,10 +7,14 @@ import json
 
 import pytest
 
+from backend import xray_runtime
 from backend.xray_runtime import (
     XrayProxyError,
     build_xray_config,
+    ensure_xray_runtime,
     is_xray_link,
+    find_xray_data_dir,
+    _binary_name,
     parse_xray_link,
 )
 
@@ -107,6 +111,88 @@ def test_build_config_has_local_socks_inbound():
     assert inbound["port"] == 34567
     assert inbound["protocol"] == "socks"
     assert config["outbounds"][0]["tag"] == "proxy"
+
+
+def test_find_xray_data_dir_requires_both_dat_files(tmp_path):
+    binary_dir = tmp_path / "bundle"
+    binary_dir.mkdir()
+    binary = binary_dir / _binary_name()
+    binary.write_text("xray")
+
+    assert find_xray_data_dir(binary, tmp_path) is None
+
+    (binary_dir / "geoip.dat").write_bytes(b"geoip")
+    assert find_xray_data_dir(binary, tmp_path) is None
+
+    (binary_dir / "geosite.dat").write_bytes(b"geosite")
+    assert find_xray_data_dir(binary, tmp_path) == binary_dir
+
+
+@pytest.mark.asyncio
+async def test_ensure_xray_runtime_reuses_existing_bundle_with_data(tmp_path):
+    xray_dir = tmp_path / "xray"
+    xray_dir.mkdir()
+    binary = xray_dir / _binary_name()
+    binary.write_text("xray")
+    (xray_dir / "geoip.dat").write_bytes(b"geoip")
+    (xray_dir / "geosite.dat").write_bytes(b"geosite")
+
+    result_binary, result_assets = await ensure_xray_runtime(tmp_path)
+
+    assert result_binary == binary
+    assert result_assets == xray_dir
+
+
+@pytest.mark.asyncio
+async def test_start_xray_proxy_sets_working_directory_and_asset_env(tmp_path, monkeypatch):
+    xray_dir = tmp_path / "xray"
+    xray_dir.mkdir()
+    binary = xray_dir / _binary_name()
+    binary.write_text("xray")
+    (xray_dir / "geoip.dat").write_bytes(b"geoip")
+    (xray_dir / "geosite.dat").write_bytes(b"geosite")
+
+    async def fake_ensure_xray_runtime(data_dir):
+        return binary, xray_dir
+
+    class DummyProcess:
+        def __init__(self):
+            self.returncode = None
+
+        def terminate(self):
+            self.returncode = 0
+
+        def kill(self):
+            self.returncode = 0
+
+        async def wait(self):
+            self.returncode = 0
+            return 0
+
+    recorded: dict[str, object] = {}
+
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        recorded["args"] = args
+        recorded["kwargs"] = kwargs
+        return DummyProcess()
+
+    async def fake_wait_for_xray(process, port):
+        return None
+
+    monkeypatch.setattr(xray_runtime, "ensure_xray_runtime", fake_ensure_xray_runtime)
+    monkeypatch.setattr(xray_runtime.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr(xray_runtime, "_wait_for_xray", fake_wait_for_xray)
+    monkeypatch.setattr(xray_runtime, "_free_port", lambda: 34567)
+
+    process = await xray_runtime.start_xray_proxy(
+        "vless://11111111-1111-1111-1111-111111111111@example.com:443",
+        user_data_dir=tmp_path / "profile",
+        data_dir=tmp_path,
+    )
+
+    assert recorded["kwargs"]["cwd"] == str(xray_dir)
+    assert recorded["kwargs"]["env"]["XRAY_LOCATION_ASSET"] == str(xray_dir)
+    await process.close()
 
 
 @pytest.mark.parametrize("link", [
