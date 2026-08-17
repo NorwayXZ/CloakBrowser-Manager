@@ -179,6 +179,16 @@ def test_update_profile_launch_args_none_becomes_empty(tmp_db: Path):
     assert updated["launch_args"] == []
 
 
+def test_create_proxy_preset_same_name_updates_existing(tmp_db: Path):
+    first = db.create_proxy_preset("美国", "socks5://host-a:1080", "socks5")
+    second = db.create_proxy_preset("美国", "socks5://user:pass@host-b:1080", "socks5")
+    presets = db.list_proxy_presets()
+
+    assert first["id"] == second["id"]
+    assert second["proxy"] == "socks5://user:pass@host-b:1080"
+    assert len([preset for preset in presets if preset["name"] == "美国"]) == 1
+
+
 def test_list_profiles_includes_launch_args(tmp_db: Path):
     db.create_profile("A", launch_args=["--arg1"])
     db.create_profile("B")

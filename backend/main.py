@@ -46,6 +46,7 @@ from .models import (
     ProfileCreate,
     ProfileResponse,
     ProfileStatusResponse,
+    ProxyPresetBulkCreate,
     ProxyPresetCreate,
     ProxyPresetResponse,
     ProxyTestRequest,
@@ -752,15 +753,44 @@ async def list_proxy_presets():
     return [ProxyPresetResponse(**preset) for preset in db.list_proxy_presets()]
 
 
+def _normalize_proxy_preset(raw_proxy: str, mode: str) -> str:
+    raw = raw_proxy.strip()
+    selected_mode = mode.strip().lower()
+    if "://" in raw:
+        return _normalize_proxy(raw)
+    if selected_mode in {"http", "https", "socks5"}:
+        parts = raw.split(":")
+        if len(parts) == 4:
+            host, port, user, passwd = parts
+            return f"{selected_mode}://{user}:{passwd}@{host}:{port}"
+        if len(parts) == 2:
+            return f"{selected_mode}://{raw}"
+    return _normalize_proxy(raw)
+
+
 @app.post("/api/proxy-presets", response_model=ProxyPresetResponse, status_code=201)
 async def create_proxy_preset(req: ProxyPresetCreate):
-    proxy = _normalize_proxy(req.proxy)
+    proxy = _normalize_proxy_preset(req.proxy, req.mode)
     _validate_proxy(proxy)
     try:
         preset = db.create_proxy_preset(req.name.strip(), proxy, req.mode.strip())
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return ProxyPresetResponse(**preset)
+
+
+@app.post("/api/proxy-presets/bulk", response_model=list[ProxyPresetResponse], status_code=201)
+async def create_proxy_presets_bulk(req: ProxyPresetBulkCreate):
+    created: list[ProxyPresetResponse] = []
+    for item in req.items:
+        proxy = _normalize_proxy_preset(item.proxy, item.mode)
+        _validate_proxy(proxy)
+        try:
+            preset = db.create_proxy_preset(item.name.strip(), proxy, item.mode.strip())
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        created.append(ProxyPresetResponse(**preset))
+    return created
 
 
 @app.delete("/api/proxy-presets/{preset_id}")

@@ -111,6 +111,34 @@ def test_delete_profile_not_found(app_client: TestClient):
     assert resp.status_code == 404
 
 
+def test_create_proxy_preset_with_socks5_auth(app_client: TestClient):
+    resp = app_client.post("/api/proxy-presets", json={
+        "name": "美国",
+        "mode": "socks5",
+        "proxy": "socks5://user:pass@192.168.0.1:8000",
+    })
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["name"] == "美国"
+    assert data["proxy"] == "socks5://user:pass@192.168.0.1:8000"
+
+
+def test_create_proxy_presets_bulk(app_client: TestClient):
+    resp = app_client.post("/api/proxy-presets/bulk", json={
+        "items": [
+            {"name": "美国 1", "mode": "socks5", "proxy": "192.168.0.1:8000:user:pass"},
+            {"name": "美国 2", "mode": "http", "proxy": "http://proxy.example:8080"},
+        ],
+    })
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert len(data) == 2
+    assert data[0]["proxy"] == "socks5://user:pass@192.168.0.1:8000"
+    assert data[1]["proxy"] == "http://proxy.example:8080"
+
+
 def test_delete_profile_stops_running(app_client: TestClient):
     """Deleting a running profile should stop it first."""
     create = app_client.post("/api/profiles", json={"name": "Running"})

@@ -196,6 +196,10 @@ class ProxyPresetCreate(BaseModel):
     mode: str
 
 
+class ProxyPresetBulkCreate(BaseModel):
+    items: list[ProxyPresetCreate] = Field(min_length=1, max_length=500)
+
+
 class ProxyPresetResponse(BaseModel):
     id: str
     name: str

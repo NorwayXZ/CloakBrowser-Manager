@@ -466,18 +466,19 @@ def create_proxy_preset(name: str, proxy: str, mode: str) -> dict[str, Any]:
             """
             INSERT INTO proxy_presets (id, name, proxy, mode, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(name) DO UPDATE SET
+                proxy = excluded.proxy,
+                mode = excluded.mode,
+                updated_at = excluded.updated_at
             """,
             (preset_id, name, proxy, mode, now, now),
         )
         conn.commit()
-    return {
-        "id": preset_id,
-        "name": name,
-        "proxy": proxy,
-        "mode": mode,
-        "created_at": now,
-        "updated_at": now,
-    }
+        row = conn.execute(
+            "SELECT * FROM proxy_presets WHERE name = ?",
+            (name,),
+        ).fetchone()
+        return dict(row)
 
 
 def delete_proxy_preset(preset_id: str) -> bool:

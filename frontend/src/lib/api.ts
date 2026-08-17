@@ -278,6 +278,12 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  createProxyPresets: (items: { name: string; proxy: string; mode: string }[]) =>
+    request<ProxyPreset[]>("/api/proxy-presets/bulk", {
+      method: "POST",
+      body: JSON.stringify({ items }),
+    }),
+
   deleteProxyPreset: (id: string) =>
     request<{ ok: boolean }>(`/api/proxy-presets/${id}`, { method: "DELETE" }),
 

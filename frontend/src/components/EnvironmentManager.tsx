@@ -2,6 +2,7 @@ import {
   Archive,
   Bell,
   Bug,
+  CheckCircle2,
   Clock3,
   Copy,
   Edit3,
@@ -23,6 +24,7 @@ import {
   StickyNote,
   Trash2,
   Wifi,
+  XCircle,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { LaunchMode, Profile, ProfileGroup, ProxyPreset } from "../lib/api";
@@ -46,6 +48,7 @@ interface EnvironmentManagerProps {
   onCreateGroup: (name: string, color?: string | null) => Promise<void>;
   onDeleteGroup: (id: string) => Promise<void>;
   onCreateProxyPreset: (data: { name: string; proxy: string; mode: string }) => Promise<void>;
+  onCreateProxyPresets: (items: { name: string; proxy: string; mode: string }[]) => Promise<void>;
   onDeleteProxyPreset: (id: string) => Promise<void>;
   onRestoreProfile: (id: string) => Promise<void>;
   onPurgeProfile: (id: string) => Promise<void>;
@@ -54,6 +57,8 @@ interface EnvironmentManagerProps {
 }
 
 type ManagerSection = "profiles" | "groups" | "proxies" | "trash";
+type ProxyInputMode = "single" | "batch";
+type ProxyMode = "http" | "https" | "socks5" | "vless" | "vmess" | "trojan" | "ss";
 
 const navItems: { id: ManagerSection; label: string; icon: typeof LayoutGrid }[] = [
   { id: "profiles", label: "环境管理", icon: LayoutGrid },
@@ -61,6 +66,79 @@ const navItems: { id: ManagerSection; label: string; icon: typeof LayoutGrid }[]
   { id: "proxies", label: "代理管理", icon: Globe2 },
   { id: "trash", label: "回收站", icon: Archive },
 ];
+
+const DIRECT_PROXY_MODES: ProxyMode[] = ["http", "https", "socks5"];
+const LINK_PROXY_MODES: ProxyMode[] = ["vless", "vmess", "trojan", "ss"];
+
+function isDirectProxyMode(mode: string): mode is ProxyMode {
+  return DIRECT_PROXY_MODES.includes(mode as ProxyMode);
+}
+
+function normalizeProxyHost(host: string) {
+  const value = host.trim();
+  if (value.includes(":") && !value.startsWith("[") && !value.endsWith("]")) {
+    return `[${value}]`;
+  }
+  return value;
+}
+
+function buildDirectProxyUrl(
+  mode: ProxyMode,
+  host: string,
+  port: string,
+  username = "",
+  password = "",
+) {
+  const cleanHost = normalizeProxyHost(host);
+  const cleanPort = port.trim();
+  if (!cleanHost || !cleanPort) return "";
+  const user = username.trim();
+  const pass = password.trim();
+  const auth = user || pass
+    ? `${encodeURIComponent(user)}:${encodeURIComponent(pass)}@`
+    : "";
+  return `${mode}://${auth}${cleanHost}:${cleanPort}`;
+}
+
+function proxyNameFromUrl(proxy: string, fallbackMode: string, index: number) {
+  try {
+    const url = new URL(proxy);
+    const fragment = decodeURIComponent(url.hash.replace(/^#/, "")).trim();
+    if (fragment) return fragment.slice(0, 64);
+    if (url.hostname) return `${fallbackMode.toUpperCase()} ${url.hostname}${url.port ? `:${url.port}` : ""}`.slice(0, 64);
+  } catch {
+    // Fall through to generic name.
+  }
+  return `${fallbackMode.toUpperCase()} 代理 ${index}`;
+}
+
+function parseProxyBatchLine(line: string, defaultMode: ProxyMode, index: number) {
+  const value = line.trim();
+  if (!value || value.startsWith("#")) return null;
+
+  const scheme = value.split(":", 1)[0]?.toLowerCase() as ProxyMode;
+  if ([...DIRECT_PROXY_MODES, ...LINK_PROXY_MODES].includes(scheme)) {
+    return {
+      name: proxyNameFromUrl(value, scheme, index),
+      proxy: value,
+      mode: scheme,
+    };
+  }
+
+  const parts = value.split(":");
+  if (parts.length === 2 || parts.length >= 4) {
+    const [host, port, username = "", password = ""] = parts;
+    const proxy = buildDirectProxyUrl(defaultMode, host ?? "", port ?? "", username, password);
+    if (!proxy) return null;
+    return {
+      name: `${defaultMode.toUpperCase()} ${host}:${port}`.slice(0, 64),
+      proxy,
+      mode: defaultMode,
+    };
+  }
+
+  return null;
+}
 
 function formatDate(value: string | null | undefined) {
   if (!value) return "-";
@@ -142,6 +220,7 @@ export function EnvironmentManager({
   onCreateGroup,
   onDeleteGroup,
   onCreateProxyPreset,
+  onCreateProxyPresets,
   onDeleteProxyPreset,
   onRestoreProfile,
   onPurgeProfile,
@@ -156,8 +235,16 @@ export function EnvironmentManager({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [groupName, setGroupName] = useState("");
   const [proxyName, setProxyName] = useState("");
-  const [proxyMode, setProxyMode] = useState("socks5");
+  const [proxyInputMode, setProxyInputMode] = useState<ProxyInputMode>("single");
+  const [proxyMode, setProxyMode] = useState<ProxyMode>("socks5");
+  const [proxyHostInput, setProxyHostInput] = useState("");
+  const [proxyPortInput, setProxyPortInput] = useState("");
+  const [proxyUsernameInput, setProxyUsernameInput] = useState("");
+  const [proxyPasswordInput, setProxyPasswordInput] = useState("");
   const [proxyValue, setProxyValue] = useState("");
+  const [proxyBatchText, setProxyBatchText] = useState("");
+  const [proxyError, setProxyError] = useState<string | null>(null);
+  const [proxySaving, setProxySaving] = useState(false);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -239,12 +326,59 @@ export function EnvironmentManager({
   };
 
   const handleCreateProxyPreset = async () => {
+    setProxyError(null);
     const name = proxyName.trim();
-    const proxy = proxyValue.trim();
-    if (!name || !proxy) return;
-    await onCreateProxyPreset({ name, proxy, mode: proxyMode });
-    setProxyName("");
-    setProxyValue("");
+    if (!name) {
+      setProxyError("请先填写代理名称");
+      return;
+    }
+
+    const proxy = isDirectProxyMode(proxyMode)
+      ? buildDirectProxyUrl(proxyMode, proxyHostInput, proxyPortInput, proxyUsernameInput, proxyPasswordInput)
+      : proxyValue.trim();
+    if (!proxy) {
+      setProxyError(isDirectProxyMode(proxyMode) ? "请填写主机和端口" : "请粘贴代理链接");
+      return;
+    }
+
+    setProxySaving(true);
+    try {
+      await onCreateProxyPreset({ name, proxy, mode: proxyMode });
+      setProxyName("");
+      setProxyHostInput("");
+      setProxyPortInput("");
+      setProxyUsernameInput("");
+      setProxyPasswordInput("");
+      setProxyValue("");
+    } catch (err) {
+      setProxyError(err instanceof Error ? err.message : "保存代理失败");
+    } finally {
+      setProxySaving(false);
+    }
+  };
+
+  const handleCreateProxyBatch = async () => {
+    setProxyError(null);
+    const items = proxyBatchText
+      .split(/\r?\n/)
+      .reduce<{ name: string; proxy: string; mode: string }[]>((acc, line, index) => {
+        const item = parseProxyBatchLine(line, proxyMode, index + 1);
+        if (item) acc.push(item);
+        return acc;
+      }, []);
+    if (items.length === 0) {
+      setProxyError("没有识别到可保存的代理，请检查格式");
+      return;
+    }
+    setProxySaving(true);
+    try {
+      await onCreateProxyPresets(items);
+      setProxyBatchText("");
+    } catch (err) {
+      setProxyError(err instanceof Error ? err.message : "批量保存代理失败");
+    } finally {
+      setProxySaving(false);
+    }
   };
 
   return (
@@ -703,40 +837,195 @@ export function EnvironmentManager({
 
         {section === "proxies" && (
           <section className="flex min-h-0 flex-1 flex-col p-4">
-            <div className="mb-4 rounded-md border border-border bg-white p-4">
-              <div className="grid grid-cols-[180px_140px_minmax(280px,1fr)_auto] gap-3">
-                <input
-                  className="input h-11"
-                  value={proxyName}
-                  onChange={(event) => setProxyName(event.target.value)}
-                  placeholder="名称，例如 美国"
-                />
-                <select
-                  className="input h-11"
-                  value={proxyMode}
-                  onChange={(event) => setProxyMode(event.target.value)}
-                >
-                  <option value="http">HTTP</option>
-                  <option value="https">HTTPS</option>
-                  <option value="socks5">SOCKS5</option>
-                  <option value="vless">VLESS</option>
-                  <option value="vmess">VMESS</option>
-                  <option value="trojan">TROJAN</option>
-                  <option value="ss">Shadowsocks</option>
-                </select>
-                <input
-                  className="input h-11 font-mono text-xs"
-                  value={proxyValue}
-                  onChange={(event) => setProxyValue(event.target.value)}
-                  placeholder="粘贴代理链接，或填写 socks5://host:port"
-                />
-                <button
-                  className="btn-primary px-5"
-                  onClick={() => void handleCreateProxyPreset()}
-                  disabled={!proxyName.trim() || !proxyValue.trim()}
-                >
-                  保存代理
-                </button>
+            <div className="mb-4 overflow-hidden rounded-md border border-border bg-white">
+              <div className="flex border-b border-border px-5">
+                {[
+                  ["single", "单个添加"],
+                  ["batch", "批量导入"],
+                ].map(([id, label]) => (
+                  <button
+                    key={id}
+                    className={`mr-8 h-12 border-b-2 text-sm font-semibold ${
+                      proxyInputMode === id
+                        ? "border-accent text-accent"
+                        : "border-transparent text-slate-500 hover:text-slate-900"
+                    }`}
+                    onClick={() => {
+                      setProxyInputMode(id as ProxyInputMode);
+                      setProxyError(null);
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="grid gap-5 p-5 xl:grid-cols-[390px_minmax(0,1fr)]">
+                <div className="rounded-md border border-blue-100 bg-blue-50 p-4 text-sm leading-6 text-slate-700">
+                  <div className="mb-2 font-semibold text-slate-900">支持的代理格式</div>
+                  <div>HTTP / HTTPS / SOCKS5 可分开填写主机、端口、账号、密码。</div>
+                  <div className="mt-3 font-mono text-xs leading-6 text-blue-700">
+                    <div>192.168.0.1:8000</div>
+                    <div>192.168.0.1:8000:user:pass</div>
+                    <div>socks5://user:pass@192.168.0.1:8000</div>
+                    <div>http://[2001:db8::1]:8000</div>
+                    <div>vless://... / vmess://... / trojan://... / ss://...</div>
+                  </div>
+                  <div className="mt-3 text-xs text-slate-500">
+                    同名代理会更新原记录；保存后可在创建/编辑浏览器时直接选择。
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-4 grid gap-3 lg:grid-cols-[minmax(180px,260px)_180px_minmax(180px,1fr)]">
+                    <div>
+                      <label className="label">代理名称</label>
+                      <input
+                        className="input h-11"
+                        value={proxyName}
+                        onChange={(event) => setProxyName(event.target.value)}
+                        placeholder="例如 美国 SOCKS5"
+                        disabled={proxyInputMode === "batch"}
+                      />
+                    </div>
+                    <div>
+                      <label className="label">代理类型</label>
+                      <select
+                        className="input h-11"
+                        value={proxyMode}
+                        onChange={(event) => {
+                          setProxyMode(event.target.value as ProxyMode);
+                          setProxyError(null);
+                        }}
+                      >
+                        <option value="socks5">SOCKS5</option>
+                        <option value="http">HTTP</option>
+                        <option value="https">HTTPS</option>
+                        <option value="vless">VLESS</option>
+                        <option value="vmess">VMESS</option>
+                        <option value="trojan">TROJAN</option>
+                        <option value="ss">Shadowsocks</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="label">检测方式</label>
+                      <div className="flex h-11 items-center rounded-md border border-slate-300 bg-slate-50 px-3 text-sm text-slate-500">
+                        浏览器启动时自动检测出口 IP / 地区
+                      </div>
+                    </div>
+                  </div>
+
+                  {proxyInputMode === "single" && isDirectProxyMode(proxyMode) && (
+                    <div className="space-y-4">
+                      <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_140px]">
+                        <div>
+                          <label className="label">主机</label>
+                          <input
+                            className="input h-11"
+                            value={proxyHostInput}
+                            onChange={(event) => setProxyHostInput(event.target.value)}
+                            placeholder="192.168.100.1 或 proxy.example.com"
+                          />
+                        </div>
+                        <div>
+                          <label className="label">端口</label>
+                          <input
+                            className="input h-11 no-spin"
+                            value={proxyPortInput}
+                            onChange={(event) => setProxyPortInput(event.target.value)}
+                            placeholder="1090"
+                          />
+                        </div>
+                      </div>
+                      <div className="grid gap-3 lg:grid-cols-2">
+                        <div>
+                          <label className="label">代理账号</label>
+                          <input
+                            className="input h-11"
+                            value={proxyUsernameInput}
+                            onChange={(event) => setProxyUsernameInput(event.target.value)}
+                            placeholder="没有账号就留空"
+                          />
+                        </div>
+                        <div>
+                          <label className="label">代理密码</label>
+                          <input
+                            className="input h-11"
+                            type="password"
+                            value={proxyPasswordInput}
+                            onChange={(event) => setProxyPasswordInput(event.target.value)}
+                            placeholder="没有密码就留空"
+                          />
+                        </div>
+                      </div>
+                      <div className="rounded-md bg-slate-50 px-3 py-2 font-mono text-xs text-slate-500">
+                        {buildDirectProxyUrl(proxyMode, proxyHostInput, proxyPortInput, proxyUsernameInput, proxyPasswordInput) || "代理地址会自动拼接显示在这里"}
+                      </div>
+                    </div>
+                  )}
+
+                  {proxyInputMode === "single" && LINK_PROXY_MODES.includes(proxyMode) && (
+                    <div>
+                      <label className="label">代理链接</label>
+                      <textarea
+                        className="input min-h-32 resize-y font-mono text-xs"
+                        value={proxyValue}
+                        onChange={(event) => setProxyValue(event.target.value)}
+                        placeholder="粘贴 vless://、vmess://、trojan:// 或 ss:// 链接"
+                        spellCheck={false}
+                      />
+                    </div>
+                  )}
+
+                  {proxyInputMode === "batch" && (
+                    <div>
+                      <label className="label">批量代理</label>
+                      <textarea
+                        className="input min-h-48 resize-y font-mono text-xs"
+                        value={proxyBatchText}
+                        onChange={(event) => setProxyBatchText(event.target.value)}
+                        placeholder={"一行一个代理，例如：\n192.168.0.1:8000\n192.168.0.1:8000:user:pass\nsocks5://user:pass@192.168.0.1:8000\nvless://..."}
+                        spellCheck={false}
+                      />
+                      <div className="mt-2 text-xs text-slate-500">
+                        裸 host:port 格式会按上方选择的代理类型保存；完整链接会按链接自己的协议保存。
+                      </div>
+                    </div>
+                  )}
+
+                  {proxyError && (
+                    <div className="mt-4 flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+                      <XCircle className="h-4 w-4" />
+                      <span>{proxyError}</span>
+                    </div>
+                  )}
+
+                  <div className="mt-4 flex items-center gap-3">
+                    {proxyInputMode === "single" ? (
+                      <button
+                        className="btn-primary flex h-10 items-center gap-1.5 px-5"
+                        onClick={() => void handleCreateProxyPreset()}
+                        disabled={proxySaving}
+                      >
+                        <Plus className="h-4 w-4" />
+                        <span>{proxySaving ? "保存中..." : "保存代理"}</span>
+                      </button>
+                    ) : (
+                      <button
+                        className="btn-primary flex h-10 items-center gap-1.5 px-5"
+                        onClick={() => void handleCreateProxyBatch()}
+                        disabled={proxySaving}
+                      >
+                        <Plus className="h-4 w-4" />
+                        <span>{proxySaving ? "保存中..." : "批量保存"}</span>
+                      </button>
+                    )}
+                    <div className="flex items-center gap-1.5 text-xs text-emerald-700">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      <span>支持带账号密码的 SOCKS5</span>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 

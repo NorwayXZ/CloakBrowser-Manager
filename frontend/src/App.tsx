@@ -261,6 +261,11 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
     await loadManagerData();
   }, [loadManagerData]);
 
+  const handleCreateProxyPresets = useCallback(async (items: { name: string; proxy: string; mode: string }[]) => {
+    await api.createProxyPresets(items);
+    await loadManagerData();
+  }, [loadManagerData]);
+
   const handleDeleteProxyPreset = useCallback(async (id: string) => {
     await api.deleteProxyPreset(id);
     await loadManagerData();
@@ -309,6 +314,7 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
           onCreateGroup={handleCreateGroup}
           onDeleteGroup={handleDeleteGroup}
           onCreateProxyPreset={handleCreateProxyPreset}
+          onCreateProxyPresets={handleCreateProxyPresets}
           onDeleteProxyPreset={handleDeleteProxyPreset}
           onRestoreProfile={handleRestoreProfile}
           onPurgeProfile={handlePurgeProfile}
