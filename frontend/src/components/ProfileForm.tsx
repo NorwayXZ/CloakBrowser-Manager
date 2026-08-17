@@ -632,24 +632,10 @@ export function ProfileForm({
 
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">操作系统</label>
                     <div>
-                      <div className="flex flex-wrap gap-2">
-                        {["windows", "macos", "linux"].map((platform) => (
-                          <button
-                            key={platform}
-                            type="button"
-                            onClick={() => platform === "macos" && set("platform", "macos")}
-                            disabled={platform !== "macos"}
-                            className={`rounded-md border px-4 py-2 text-sm font-medium ${
-                              form.platform === platform
-                                ? "border-accent bg-accent/10 text-accent"
-                                : "border-slate-300 bg-white text-slate-400"
-                            } disabled:opacity-50`}
-                          >
-                            {platform === "macos" ? "macOS" : platform === "windows" ? "Windows" : "Linux"}
-                          </button>
-                        ))}
+                      <div className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
+                        macOS
                       </div>
-                      <FieldNote>当前本地版本主线只做 macOS Apple Silicon 画像；Windows/Linux 按钮保留为后续扩展入口。</FieldNote>
+                      <FieldNote>当前本地版本主线只做 macOS Apple Silicon 画像；如果以后支持 Windows / Linux，会在这里直接变成可选项。</FieldNote>
                     </div>
 
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">Apple 画像</label>

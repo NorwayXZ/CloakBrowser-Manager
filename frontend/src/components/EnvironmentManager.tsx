@@ -1,7 +1,6 @@
 import {
   AlertTriangle,
   Archive,
-  Bell,
   Bug,
   CheckCircle2,
   Clock3,
@@ -557,9 +556,6 @@ export function EnvironmentManager({
                 </button>
               </>
             )}
-            <button className="btn-secondary px-2.5" title="通知">
-              <Bell className="h-4 w-4" />
-            </button>
           </div>
         </header>
 

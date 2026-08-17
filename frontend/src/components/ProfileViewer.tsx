@@ -87,13 +87,9 @@ export function ProfileViewer({ profileId, cdpUrl, clipboardSync: initialClipboa
     if (!container || !clipboardSync || !connected) return;
 
     const handleKeyDown = async (e: KeyboardEvent) => {
-      console.log("[clipboard] keydown:", e.key, "ctrl:", e.ctrlKey, "meta:", e.metaKey, "clipboardSync:", true);
-
       const isPaste =
         e.key === "v" && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey;
       if (!isPaste) return;
-
-      console.log("[clipboard] intercepted Ctrl+V");
 
       // Block noVNC from sending the keystroke before clipboard is updated
       e.stopPropagation();
@@ -101,17 +97,13 @@ export function ProfileViewer({ profileId, cdpUrl, clipboardSync: initialClipboa
 
       const rfb = rfbRef.current;
       if (!rfb) {
-        console.log("[clipboard] no rfb ref, aborting");
         return;
       }
 
       try {
         const text = await navigator.clipboard.readText();
-        console.log("[clipboard] host clipboard text:", text?.substring(0, 50), "len:", text?.length);
         if (text) {
-          console.log("[clipboard] calling setClipboard API...");
           await api.setClipboard(profileId, text);
-          console.log("[clipboard] setClipboard API success");
         }
       } catch (err) {
         console.warn("[clipboard] error:", err);
@@ -121,7 +113,6 @@ export function ProfileViewer({ profileId, cdpUrl, clipboardSync: initialClipboa
 
       // Send full Ctrl+V sequence to VNC. We can't rely on Ctrl still being
       // held because the user may have released it during the async API call.
-      console.log("[clipboard] sending Ctrl+V to VNC");
       rfb.sendKey(0xffe3, "ControlLeft", true);   // Ctrl press
       rfb.sendKey(XK_v, "KeyV", true);             // V press
       rfb.sendKey(XK_v, "KeyV", false);            // V release
@@ -137,25 +128,19 @@ export function ProfileViewer({ profileId, cdpUrl, clipboardSync: initialClipboa
   // KasmVNC BinaryClipboard type 180 → standard ServerCutText type 3)
   useEffect(() => {
     const rfb = rfbRef.current;
-    console.log("[clipboard] VNC→Host effect: rfb=", !!rfb, "sync=", clipboardSync, "connected=", connected);
     if (!rfb || !clipboardSync || !connected) return;
 
     const handleClipboard = (e: any) => {
       const text = e.detail?.text;
-      console.log("[clipboard] VNC→Host event fired, text:", text?.substring(0, 50), "len:", text?.length);
       if (text) {
-        navigator.clipboard.writeText(text).then(() => {
-          console.log("[clipboard] writeText success");
-        }).catch((err) => {
+        navigator.clipboard.writeText(text).catch((err) => {
           console.warn("[clipboard] writeText failed:", err);
         });
       }
     };
 
-    console.log("[clipboard] registering clipboard event listener on rfb");
     rfb.addEventListener("clipboard", handleClipboard);
     return () => {
-      console.log("[clipboard] removing clipboard event listener");
       rfb.removeEventListener("clipboard", handleClipboard);
     };
   }, [clipboardSync, connected]);
@@ -174,7 +159,6 @@ export function ProfileViewer({ profileId, cdpUrl, clipboardSync: initialClipboa
         const { text } = await api.getClipboard(profileId);
         if (text && text !== lastText) {
           lastText = text;
-          console.log("[clipboard] poll: new VNC clipboard:", text.substring(0, 50), "len:", text.length);
           await navigator.clipboard.writeText(text).catch((err) =>
             console.warn("[clipboard] poll writeText failed:", err)
           );
@@ -252,7 +236,7 @@ export function ProfileViewer({ profileId, cdpUrl, clipboardSync: initialClipboa
         <div className="flex items-center gap-1">
           <CdpEndpointButton cdpUrl={cdpUrl} />
           <button
-            onClick={() => { console.log("[clipboard] toggle:", !clipboardSync); setClipboardSync(!clipboardSync); }}
+            onClick={() => setClipboardSync(!clipboardSync)}
             className={`p-1 ${clipboardSync ? "text-accent" : "text-gray-500 hover:text-gray-300"}`}
             title={clipboardSync ? "关闭剪贴板同步" : "开启剪贴板同步"}
             disabled={!connected}
