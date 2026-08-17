@@ -229,7 +229,11 @@ def test_update_profile_updates_timestamp(sample_profile: dict):
 
 def test_delete_profile_exists(sample_profile: dict):
     assert db.delete_profile(sample_profile["id"]) is True
-    assert db.get_profile(sample_profile["id"]) is None
+    deleted = db.get_profile(sample_profile["id"])
+    assert deleted is not None
+    assert deleted["deleted_at"] is not None
+    assert sample_profile["id"] not in [profile["id"] for profile in db.list_profiles()]
+    assert sample_profile["id"] in [profile["id"] for profile in db.list_deleted_profiles()]
 
 
 def test_delete_profile_not_found(tmp_db: Path):
@@ -239,6 +243,7 @@ def test_delete_profile_not_found(tmp_db: Path):
 def test_delete_profile_cascades_tags(tmp_db: Path):
     p = db.create_profile("Tagged", tags=[{"tag": "a"}, {"tag": "b"}])
     db.delete_profile(p["id"])
+    db.purge_profile(p["id"])
     # Verify tags are gone
     with db.get_db() as conn:
         rows = conn.execute(

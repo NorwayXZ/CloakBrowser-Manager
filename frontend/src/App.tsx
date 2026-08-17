@@ -1,6 +1,13 @@
 import { useState, useCallback, useEffect } from "react";
 import { useProfiles } from "./hooks/useProfiles";
-import { api, setOnUnauthorized, type LaunchMode, type ProfileCreateData } from "./lib/api";
+import {
+  api,
+  setOnUnauthorized,
+  type LaunchMode,
+  type ProfileCreateData,
+  type ProfileGroup,
+  type ProxyPreset,
+} from "./lib/api";
 import type { Profile } from "./lib/api";
 import { EnvironmentManager } from "./components/EnvironmentManager";
 import { ProfileForm } from "./components/ProfileForm";
@@ -108,12 +115,40 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [view, setView] = useState<View>("list");
   const [accountOpen, setAccountOpen] = useState(false);
+  const [groups, setGroups] = useState<ProfileGroup[]>([]);
+  const [proxyPresets, setProxyPresets] = useState<ProxyPreset[]>([]);
+  const [trashProfiles, setTrashProfiles] = useState<Profile[]>([]);
+  const [managerError, setManagerError] = useState<string | null>(null);
 
   const selected = profiles.find((p) => p.id === selectedId) ?? null;
 
   const normalizeBrowserEngine = (value: Profile["browser_engine"]) => (
     value === "cloakbrowser" || value === "system_chrome" || value === "auto" ? value : "auto"
   );
+
+  const loadManagerData = useCallback(async () => {
+    try {
+      const [nextGroups, nextProxyPresets, nextTrashProfiles] = await Promise.all([
+        api.listGroups(),
+        api.listProxyPresets(),
+        api.listDeletedProfiles(),
+      ]);
+      setGroups(nextGroups);
+      setProxyPresets(nextProxyPresets);
+      setTrashProfiles(nextTrashProfiles);
+      setManagerError(null);
+    } catch (err) {
+      setManagerError(err instanceof Error ? err.message : "管理数据加载失败");
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadManagerData();
+  }, [loadManagerData]);
+
+  const refreshAll = useCallback(async () => {
+    await Promise.all([refresh(), loadManagerData()]);
+  }, [loadManagerData, refresh]);
 
   const handleEdit = useCallback((id: string) => {
     setSelectedId(id);
@@ -130,24 +165,27 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
     if (profile) {
       setSelectedId(null);
       setView("list");
+      await refreshAll();
     }
-  }, [create]);
+  }, [create, refreshAll]);
 
   const handleUpdate = useCallback(async (data: ProfileCreateData) => {
     if (!selectedId) return;
     const saved = await update(selectedId, data);
     if (saved) {
       setView("list");
+      await refreshAll();
     }
-  }, [selectedId, update]);
+  }, [refreshAll, selectedId, update]);
 
   const handleDeleteById = useCallback(async (id: string) => {
     await remove(id);
+    await loadManagerData();
     if (selectedId === id) {
       setSelectedId(null);
       setView("list");
     }
-  }, [remove, selectedId]);
+  }, [loadManagerData, remove, selectedId]);
 
   const handleFormDelete = useCallback(async () => {
     if (!selectedId) return;
@@ -175,6 +213,8 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
     geoip: profile.geoip,
     clipboard_sync: profile.clipboard_sync,
     auto_launch: false,
+    group_name: profile.group_name,
+    cookies_json: profile.cookies_json,
     color_scheme: profile.color_scheme,
     launch_args: profile.launch_args,
     notes: profile.notes,
@@ -183,7 +223,8 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
 
   const handleDuplicate = useCallback(async (profile: Profile) => {
     await create(profileToCreateData(profile));
-  }, [create, profileToCreateData]);
+    await refreshAll();
+  }, [create, profileToCreateData, refreshAll]);
 
   const handleLaunchProfile = useCallback(async (id: string, launchMode: LaunchMode) => {
     const result = await launch(id, launchMode);
@@ -203,6 +244,36 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
     }
   }, [selectedId, stop, view]);
 
+  const handleCreateGroup = useCallback(async (name: string, color?: string | null) => {
+    await api.createGroup({ name, color });
+    await loadManagerData();
+  }, [loadManagerData]);
+
+  const handleDeleteGroup = useCallback(async (id: string) => {
+    await api.deleteGroup(id);
+    await refreshAll();
+  }, [refreshAll]);
+
+  const handleCreateProxyPreset = useCallback(async (data: { name: string; proxy: string; mode: string }) => {
+    await api.createProxyPreset(data);
+    await loadManagerData();
+  }, [loadManagerData]);
+
+  const handleDeleteProxyPreset = useCallback(async (id: string) => {
+    await api.deleteProxyPreset(id);
+    await loadManagerData();
+  }, [loadManagerData]);
+
+  const handleRestoreProfile = useCallback(async (id: string) => {
+    await api.restoreProfile(id);
+    await refreshAll();
+  }, [refreshAll]);
+
+  const handlePurgeProfile = useCallback(async (id: string) => {
+    await api.purgeProfile(id);
+    await refreshAll();
+  }, [refreshAll]);
+
   const handleVncDisconnect = useCallback(() => {
     setView("list");
   }, []);
@@ -220,7 +291,10 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
       {view === "list" && (
         <EnvironmentManager
           profiles={profiles}
-          error={error}
+          groups={groups}
+          proxyPresets={proxyPresets}
+          trashProfiles={trashProfiles}
+          error={error || managerError}
           authRequired={authRequired}
           authUsername={authUsername}
           onNew={handleNew}
@@ -229,7 +303,13 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
           onDelete={handleDeleteById}
           onLaunch={handleLaunchProfile}
           onStop={handleStopProfile}
-          onRefresh={refresh}
+          onRefresh={refreshAll}
+          onCreateGroup={handleCreateGroup}
+          onDeleteGroup={handleDeleteGroup}
+          onCreateProxyPreset={handleCreateProxyPreset}
+          onDeleteProxyPreset={handleDeleteProxyPreset}
+          onRestoreProfile={handleRestoreProfile}
+          onPurgeProfile={handlePurgeProfile}
           onAccount={() => setAccountOpen(true)}
           onLogout={onLogout}
         />
@@ -238,6 +318,8 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
       {view === "create" && (
         <ProfileForm
           profile={null}
+          groups={groups}
+          proxyPresets={proxyPresets}
           onSave={handleCreate}
           onCancel={() => setView("list")}
         />
@@ -246,6 +328,8 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
       {view === "edit" && selected && (
         <ProfileForm
           profile={selected}
+          groups={groups}
+          proxyPresets={proxyPresets}
           onSave={handleUpdate}
           onDelete={handleFormDelete}
           onCancel={() => {

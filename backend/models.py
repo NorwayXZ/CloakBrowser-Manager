@@ -34,6 +34,8 @@ class ProfileCreate(BaseModel):
     clipboard_sync: bool = True
     auto_launch: bool = False
     color_scheme: Literal["light", "dark", "no-preference"] | None = None
+    group_name: str | None = "未分组"
+    cookies_json: str | None = None
     launch_args: list[str] = Field(default_factory=list)
     notes: str | None = None
     tags: list[TagCreate] | None = None
@@ -61,6 +63,8 @@ class ProfileUpdate(BaseModel):
     clipboard_sync: bool | None = None
     auto_launch: bool | None = None
     color_scheme: Literal["light", "dark", "no-preference"] | None = Field(default=None)
+    group_name: str | None = Field(default=None)
+    cookies_json: str | None = Field(default=None)
     launch_args: list[str] | None = None
     notes: str | None = Field(default=None)
     tags: list[TagCreate] | None = None
@@ -98,6 +102,8 @@ class ProfileResponse(BaseModel):
     geoip: bool = False
     clipboard_sync: bool = True
     auto_launch: bool = False
+    group_name: str | None = "未分组"
+    cookies_json: str | None = None
 
     @field_validator("clipboard_sync", mode="before")
     @classmethod
@@ -110,6 +116,7 @@ class ProfileResponse(BaseModel):
     user_data_dir: str
     created_at: str
     updated_at: str
+    deleted_at: str | None = None
     tags: list[TagResponse] = []
     status: str = "stopped"  # "running" | "stopped"
     runtime_mode: RuntimeMode = "docker"
@@ -161,6 +168,34 @@ class ProxyTestResponse(BaseModel):
     org: str | None = None
     asn: str | None = None
     source: str = "ipapi.co"
+
+
+class GroupCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    color: str | None = None
+
+
+class GroupResponse(BaseModel):
+    id: str
+    name: str
+    color: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class ProxyPresetCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    proxy: str
+    mode: str
+
+
+class ProxyPresetResponse(BaseModel):
+    id: str
+    name: str
+    proxy: str
+    mode: str
+    created_at: str
+    updated_at: str
 
 
 class ProfileStatusResponse(BaseModel):

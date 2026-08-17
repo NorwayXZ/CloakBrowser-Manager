@@ -157,6 +157,35 @@ def _sync_session_restore(user_data_dir: Path) -> None:
     _write_json_file(prefs_path, prefs)
 
 
+def _parse_profile_cookies(raw: str | None) -> list[dict[str, Any]]:
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        logger.warning("Invalid cookies_json ignored: %s", exc)
+        return []
+    if isinstance(data, dict):
+        data = data.get("cookies", [])
+    if not isinstance(data, list):
+        return []
+    cookies: list[dict[str, Any]] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name")
+        value = item.get("value")
+        domain = item.get("domain")
+        if not isinstance(name, str) or not isinstance(value, str) or not isinstance(domain, str):
+            continue
+        cookie = dict(item)
+        if "expirationDate" in cookie and "expires" not in cookie:
+            cookie["expires"] = cookie.pop("expirationDate")
+        cookie.pop("hostOnly", None)
+        cookies.append(cookie)
+    return cookies
+
+
 def _playwright_proxy(proxy: str | None) -> dict[str, str] | None:
     if not proxy:
         return None
@@ -1719,6 +1748,12 @@ class BrowserManager:
                             await page.evaluate(script)
                         except Exception as exc:
                             logger.debug("Init script failed on existing page: %s", exc)
+                profile_cookies = _parse_profile_cookies(profile.get("cookies_json"))
+                if profile_cookies:
+                    try:
+                        await context.add_cookies(profile_cookies)
+                    except Exception as exc:
+                        logger.warning("Profile cookies import failed for %s: %s", profile_id, exc)
                 browser_process = getattr(context, "_cloak_browser_process", None)
 
             running = RunningProfile(

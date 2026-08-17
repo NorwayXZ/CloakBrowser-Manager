@@ -57,8 +57,28 @@ def init_db():
                 clipboard_sync BOOLEAN DEFAULT 1,
                 auto_launch BOOLEAN DEFAULT 0,
                 color_scheme TEXT,
+                group_name TEXT DEFAULT '未分组',
+                cookies_json TEXT,
+                deleted_at TEXT,
                 notes TEXT,
                 user_data_dir TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS profile_groups (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                color TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS proxy_presets (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                proxy TEXT NOT NULL,
+                mode TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -95,6 +115,23 @@ def init_db():
         if "device_profile" not in cols:
             conn.execute("ALTER TABLE profiles ADD COLUMN device_profile TEXT")
             conn.commit()
+        if "group_name" not in cols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN group_name TEXT DEFAULT '未分组'")
+            conn.commit()
+        if "cookies_json" not in cols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN cookies_json TEXT")
+            conn.commit()
+        if "deleted_at" not in cols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN deleted_at TEXT")
+            conn.commit()
+        cutoff = (
+            datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)
+        ).isoformat()
+        conn.execute(
+            "DELETE FROM profiles WHERE deleted_at IS NOT NULL AND deleted_at < ?",
+            (cutoff,),
+        )
+        conn.commit()
 
 
 def _now() -> str:
@@ -146,9 +183,9 @@ def create_profile(
                 id, name, browser_engine, device_profile, fingerprint_seed, proxy, timezone, locale, platform,
                 user_agent, screen_width, screen_height, gpu_vendor, gpu_renderer,
                 hardware_concurrency, humanize, human_preset, headless, geoip,
-                clipboard_sync, auto_launch, color_scheme, launch_args, notes,
+                clipboard_sync, auto_launch, color_scheme, group_name, cookies_json, launch_args, notes,
                 user_data_dir, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 profile_id, name,
                 fields.get("browser_engine", "auto"),
@@ -171,6 +208,8 @@ def create_profile(
                 fields.get("clipboard_sync", True),
                 fields.get("auto_launch", False),
                 fields.get("color_scheme"),
+                fields.get("group_name") or "未分组",
+                fields.get("cookies_json"),
                 json.dumps(fields.get("launch_args") or []),
                 fields.get("notes"),
                 user_data_dir, now, now,
@@ -201,20 +240,32 @@ def get_profile(profile_id: str) -> dict[str, Any] | None:
         return profile
 
 
+def _hydrate_profile(row: sqlite3.Row) -> dict[str, Any]:
+    profile = dict(row)
+    profile["launch_args"] = json.loads(profile.get("launch_args") or "[]")
+    with get_db() as conn:
+        tags = conn.execute(
+            "SELECT tag, color FROM profile_tags WHERE profile_id = ?",
+            (profile["id"],),
+        ).fetchall()
+    profile["tags"] = [dict(t) for t in tags]
+    return profile
+
+
 def list_profiles() -> list[dict[str, Any]]:
     with get_db() as conn:
-        rows = conn.execute("SELECT * FROM profiles ORDER BY created_at DESC").fetchall()
-        profiles = []
-        for row in rows:
-            profile = dict(row)
-            profile["launch_args"] = json.loads(profile.get("launch_args") or "[]")
-            tags = conn.execute(
-                "SELECT tag, color FROM profile_tags WHERE profile_id = ?",
-                (profile["id"],),
-            ).fetchall()
-            profile["tags"] = [dict(t) for t in tags]
-            profiles.append(profile)
-        return profiles
+        rows = conn.execute(
+            "SELECT * FROM profiles WHERE deleted_at IS NULL ORDER BY created_at DESC"
+        ).fetchall()
+    return [_hydrate_profile(row) for row in rows]
+
+
+def list_deleted_profiles() -> list[dict[str, Any]]:
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM profiles WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC"
+        ).fetchall()
+    return [_hydrate_profile(row) for row in rows]
 
 
 def update_profile(profile_id: str, **fields: Any) -> dict[str, Any] | None:
@@ -237,7 +288,7 @@ def update_profile(profile_id: str, **fields: Any) -> dict[str, Any] | None:
         "name", "browser_engine", "device_profile", "fingerprint_seed", "proxy", "timezone", "locale", "platform",
         "user_agent", "screen_width", "screen_height", "gpu_vendor", "gpu_renderer",
         "hardware_concurrency", "humanize", "human_preset", "headless", "geoip",
-        "clipboard_sync", "auto_launch", "color_scheme", "launch_args", "notes",
+        "clipboard_sync", "auto_launch", "color_scheme", "group_name", "cookies_json", "launch_args", "notes",
     ):
         if col in fields:
             update_cols.append(f"{col} = ?")
@@ -268,7 +319,101 @@ def update_profile(profile_id: str, **fields: Any) -> dict[str, Any] | None:
 
 
 def delete_profile(profile_id: str) -> bool:
+    now = _now()
+    with get_db() as conn:
+        cursor = conn.execute(
+            "UPDATE profiles SET deleted_at = ?, updated_at = ? WHERE id = ?",
+            (now, now, profile_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def restore_profile(profile_id: str) -> dict[str, Any] | None:
+    now = _now()
+    with get_db() as conn:
+        cursor = conn.execute(
+            "UPDATE profiles SET deleted_at = NULL, updated_at = ? WHERE id = ?",
+            (now, profile_id),
+        )
+        conn.commit()
+        if cursor.rowcount == 0:
+            return None
+    return get_profile(profile_id)
+
+
+def purge_profile(profile_id: str) -> bool:
     with get_db() as conn:
         cursor = conn.execute("DELETE FROM profiles WHERE id = ?", (profile_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def list_groups() -> list[dict[str, Any]]:
+    with get_db() as conn:
+        rows = conn.execute("SELECT * FROM profile_groups ORDER BY created_at ASC").fetchall()
+        return [dict(row) for row in rows]
+
+
+def create_group(name: str, color: str | None = None) -> dict[str, Any]:
+    group_id = str(uuid.uuid4())
+    now = _now()
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO profile_groups (id, name, color, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (group_id, name, color, now, now),
+        )
+        conn.commit()
+    return {"id": group_id, "name": name, "color": color, "created_at": now, "updated_at": now}
+
+
+def delete_group(group_id: str) -> bool:
+    with get_db() as conn:
+        row = conn.execute("SELECT name FROM profile_groups WHERE id = ?", (group_id,)).fetchone()
+        if not row:
+            return False
+        conn.execute(
+            "UPDATE profiles SET group_name = '未分组' WHERE group_name = ?",
+            (row["name"],),
+        )
+        cursor = conn.execute("DELETE FROM profile_groups WHERE id = ?", (group_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def list_proxy_presets() -> list[dict[str, Any]]:
+    with get_db() as conn:
+        rows = conn.execute("SELECT * FROM proxy_presets ORDER BY created_at DESC").fetchall()
+        return [dict(row) for row in rows]
+
+
+def create_proxy_preset(name: str, proxy: str, mode: str) -> dict[str, Any]:
+    preset_id = str(uuid.uuid4())
+    now = _now()
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO proxy_presets (id, name, proxy, mode, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (preset_id, name, proxy, mode, now, now),
+        )
+        conn.commit()
+    return {
+        "id": preset_id,
+        "name": name,
+        "proxy": proxy,
+        "mode": mode,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def delete_proxy_preset(preset_id: str) -> bool:
+    with get_db() as conn:
+        cursor = conn.execute("DELETE FROM proxy_presets WHERE id = ?", (preset_id,))
         conn.commit()
         return cursor.rowcount > 0

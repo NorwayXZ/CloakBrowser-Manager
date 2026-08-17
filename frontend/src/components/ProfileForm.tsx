@@ -1,6 +1,13 @@
 import { ArrowLeft, Globe, Loader2, RefreshCw, Save, Trash2, Wifi, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { api, type Profile, type ProfileCreateData, type ProxyTestResult } from "../lib/api";
+import {
+  api,
+  type Profile,
+  type ProfileCreateData,
+  type ProfileGroup,
+  type ProxyPreset,
+  type ProxyTestResult,
+} from "../lib/api";
 import {
   applyDeviceProfile,
   DEFAULT_DEVICE_PROFILE_ID,
@@ -12,6 +19,8 @@ import {
 
 interface ProfileFormProps {
   profile: Profile | null; // null = create mode
+  groups?: ProfileGroup[];
+  proxyPresets?: ProxyPreset[];
   onSave: (data: ProfileCreateData) => Promise<void>;
   onDelete?: () => Promise<void>;
   onCancel: () => void;
@@ -120,7 +129,6 @@ const GPU_PRESETS: Record<string, { vendor: string; renderer: string }> = {
 type ProxyKind = "direct" | "xray";
 type ProxyScheme = "http" | "https" | "socks5";
 type EditableBrowserEngine = "system_chrome" | "cloakbrowser";
-type ProfileFormTab = "basic" | "proxy" | "fingerprint" | "advanced";
 
 interface ProxyParts {
   kind: ProxyKind;
@@ -153,6 +161,8 @@ function createDefaultForm(): ProfileCreateData {
     geoip: false,
     clipboard_sync: true,
     auto_launch: false,
+    group_name: "未分组",
+    cookies_json: null,
     launch_args: [],
     tags: [],
   }, getDeviceProfile(DEFAULT_DEVICE_PROFILE_ID));
@@ -242,7 +252,15 @@ function normalizeFormEngine(value?: string | null): EditableBrowserEngine {
   return value === "cloakbrowser" ? "cloakbrowser" : "system_chrome";
 }
 
-export function ProfileForm({ profile, onSave, onDelete, onCancel, onDraftChange }: ProfileFormProps) {
+export function ProfileForm({
+  profile,
+  groups = [],
+  proxyPresets = [],
+  onSave,
+  onDelete,
+  onCancel,
+  onDraftChange,
+}: ProfileFormProps) {
   const isEdit = profile !== null;
 
   const [form, setForm] = useState<ProfileCreateData>(() => createDefaultForm());
@@ -256,7 +274,6 @@ export function ProfileForm({ profile, onSave, onDelete, onCancel, onDraftChange
   const [tagInput, setTagInput] = useState("");
   const [tagColor, setTagColor] = useState<string | null>("#6366f1");
   const [launchArgInput, setLaunchArgInput] = useState("");
-  const [activeTab, setActiveTab] = useState<ProfileFormTab>("basic");
   const [draftProfileId, setDraftProfileId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -284,6 +301,8 @@ export function ProfileForm({ profile, onSave, onDelete, onCancel, onDraftChange
         geoip: profile.geoip,
         clipboard_sync: profile.clipboard_sync,
         auto_launch: profile.auto_launch,
+        group_name: profile.group_name || "未分组",
+        cookies_json: profile.cookies_json,
         color_scheme: profile.color_scheme,
         launch_args: profile.launch_args ?? [],
         notes: profile.notes,
@@ -298,7 +317,6 @@ export function ProfileForm({ profile, onSave, onDelete, onCancel, onDraftChange
     }
     setProxyTest(null);
     setProxyTestError(null);
-    setActiveTab("basic");
   }, [profile?.id]);
 
   useEffect(() => {
@@ -444,13 +462,6 @@ export function ProfileForm({ profile, onSave, onDelete, onCancel, onDraftChange
     set("launch_args", (form.launch_args ?? []).filter((_, i) => i !== idx));
   };
 
-  const tabs: { id: ProfileFormTab; label: string }[] = [
-    { id: "basic", label: "基础设置" },
-    { id: "proxy", label: "代理信息" },
-    { id: "fingerprint", label: "指纹配置" },
-    { id: "advanced", label: "高级设置" },
-  ];
-
   const proxyLabel = proxyParts.kind === "xray"
     ? (proxyParts.raw ? proxyParts.raw.split("://", 1)[0]?.toUpperCase() ?? "Xray" : "Xray 链接")
     : proxyParts.scheme.toUpperCase();
@@ -501,30 +512,10 @@ export function ProfileForm({ profile, onSave, onDelete, onCancel, onDraftChange
         </div>
       </div>
 
-      <div className="shrink-0 border-b border-border bg-white px-5">
-        <div className="flex gap-8">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id)}
-              className={`relative h-12 text-sm font-semibold ${
-                activeTab === tab.id ? "text-accent" : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              {tab.label}
-              {activeTab === tab.id && (
-                <span className="absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-accent" />
-              )}
-            </button>
-          ))}
-        </div>
-      </div>
-
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="grid min-h-full grid-cols-[minmax(0,1fr)_360px] gap-6 px-6 py-6">
           <div className="space-y-6">
-            {activeTab === "basic" && (
+            {(
               <>
                 <section className="rounded-md border border-border bg-white p-5">
                   <div className="mb-5 text-sm font-semibold text-slate-900">基础设置</div>
@@ -537,6 +528,18 @@ export function ProfileForm({ profile, onSave, onDelete, onCancel, onDraftChange
                       placeholder="例如 Amazon Seller #1"
                       required
                     />
+
+                    <label className="pt-2 text-right text-sm font-medium text-slate-600">分组</label>
+                    <select
+                      className="input max-w-xs"
+                      value={form.group_name || "未分组"}
+                      onChange={(e) => set("group_name", e.target.value)}
+                    >
+                      <option value="未分组">未分组</option>
+                      {groups.map((group) => (
+                        <option key={group.id} value={group.name}>{group.name}</option>
+                      ))}
+                    </select>
 
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">浏览器</label>
                     <div>
@@ -601,10 +604,12 @@ export function ProfileForm({ profile, onSave, onDelete, onCancel, onDraftChange
                     <div>
                       <textarea
                         className="input min-h-28 max-w-3xl resize-y text-xs"
-                        value="Cookie 随每个浏览器资料夹自动保存；网站登录后，下次打开同一浏览器会继续使用原资料夹。"
-                        readOnly
+                        value={form.cookies_json ?? ""}
+                        onChange={(e) => set("cookies_json", e.target.value || null)}
+                        placeholder='粘贴 Cookie JSON，例如 [{"name":"sid","value":"...","domain":".example.com","path":"/"}]'
+                        spellCheck={false}
                       />
-                      <div className="mt-1 text-xs text-slate-500">当前版本不做跨浏览器 Cookie 导入，避免把登录状态和画像混用。</div>
+                      <div className="mt-1 text-xs text-slate-500">Cookie 会随配置保存；调试启动或伪装画像启动时会尝试导入，日常原生手动启动只保存不注入。</div>
                     </div>
 
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">备注</label>
@@ -619,7 +624,7 @@ export function ProfileForm({ profile, onSave, onDelete, onCancel, onDraftChange
               </>
             )}
 
-            {activeTab === "proxy" && (
+            {(
               <section className="rounded-md border border-border bg-white p-5">
                 <div className="mb-5 text-sm font-semibold text-slate-900">代理信息</div>
                 <div className="grid max-w-3xl grid-cols-[120px_minmax(0,1fr)] items-start gap-x-5 gap-y-4">
@@ -641,6 +646,25 @@ export function ProfileForm({ profile, onSave, onDelete, onCancel, onDraftChange
                       </button>
                     ))}
                   </div>
+
+                  <label className="pt-2 text-right text-sm font-medium text-slate-600">已保存代理</label>
+                  <select
+                    className="input max-w-xl"
+                    value=""
+                    onChange={(e) => {
+                      const preset = proxyPresets.find((item) => item.id === e.target.value);
+                      if (!preset) return;
+                      set("proxy", preset.proxy);
+                      setProxyParts(parseProxy(preset.proxy));
+                      setProxyTest(null);
+                      setProxyTestError(null);
+                    }}
+                  >
+                    <option value="">选择保存的代理...</option>
+                    {proxyPresets.map((preset) => (
+                      <option key={preset.id} value={preset.id}>{preset.name} · {preset.mode.toUpperCase()}</option>
+                    ))}
+                  </select>
 
                   {proxyParts.kind === "xray" ? (
                     <>
@@ -772,7 +796,7 @@ export function ProfileForm({ profile, onSave, onDelete, onCancel, onDraftChange
               </section>
             )}
 
-            {activeTab === "fingerprint" && (
+            {(
               <section className="rounded-md border border-border bg-white p-5">
                 <div className="mb-5 text-sm font-semibold text-slate-900">指纹配置</div>
                 <div className="grid max-w-3xl grid-cols-[120px_minmax(0,1fr)] items-start gap-x-5 gap-y-4">
@@ -870,7 +894,7 @@ export function ProfileForm({ profile, onSave, onDelete, onCancel, onDraftChange
               </section>
             )}
 
-            {activeTab === "advanced" && (
+            {(
               <section className="rounded-md border border-border bg-white p-5">
                 <div className="mb-5 text-sm font-semibold text-slate-900">高级设置</div>
                 <div className="space-y-6">

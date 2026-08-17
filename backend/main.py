@@ -38,12 +38,16 @@ from .xray_runtime import is_xray_link, start_xray_proxy
 from .models import (
     AuthAccountUpdate,
     ClipboardRequest,
+    GroupCreate,
+    GroupResponse,
     LaunchRequest,
     LaunchResponse,
     LoginRequest,
     ProfileCreate,
     ProfileResponse,
     ProfileStatusResponse,
+    ProxyPresetCreate,
+    ProxyPresetResponse,
     ProxyTestRequest,
     ProxyTestResponse,
     ProfileUpdate,
@@ -642,6 +646,11 @@ async def list_profiles():
     return [_profile_response(profile) for profile in db.list_profiles()]
 
 
+@app.get("/api/profiles/trash", response_model=list[ProfileResponse])
+async def list_deleted_profiles():
+    return [_profile_response(profile) for profile in db.list_deleted_profiles()]
+
+
 @app.post("/api/profiles", response_model=ProfileResponse, status_code=201)
 async def create_profile(req: ProfileCreate):
     data = req.model_dump()
@@ -656,7 +665,7 @@ async def create_profile(req: ProfileCreate):
 @app.get("/api/profiles/{profile_id}", response_model=ProfileResponse)
 async def get_profile(profile_id: str):
     profile = db.get_profile(profile_id)
-    if not profile:
+    if not profile or profile.get("deleted_at"):
         raise HTTPException(status_code=404, detail="Profile not found")
     return _profile_response(profile)
 
@@ -669,7 +678,7 @@ async def update_profile(profile_id: str, req: ProfileUpdate):
     if tags is not None:
         data["tags"] = [t.model_dump() if hasattr(t, "model_dump") else t for t in tags]
     profile = db.update_profile(profile_id, **data)
-    if not profile:
+    if not profile or profile.get("deleted_at"):
         raise HTTPException(status_code=404, detail="Profile not found")
     return _profile_response(profile)
 
@@ -681,18 +690,80 @@ async def delete_profile(profile_id: str):
         await browser_mgr.stop(profile_id)
 
     profile = db.get_profile(profile_id)
-    if not profile:
+    if not profile or profile.get("deleted_at"):
         raise HTTPException(status_code=404, detail="Profile not found")
 
+    if not db.delete_profile(profile_id):
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    return {"ok": True}
+
+
+@app.post("/api/profiles/{profile_id}/restore", response_model=ProfileResponse)
+async def restore_profile(profile_id: str):
+    profile = db.restore_profile(profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return _profile_response(profile)
+
+
+@app.delete("/api/profiles/{profile_id}/purge")
+async def purge_profile(profile_id: str):
+    profile = db.get_profile(profile_id)
+    if not profile or profile.get("deleted_at"):
+        raise HTTPException(status_code=404, detail="Profile not found")
+    if profile_id in browser_mgr.running:
+        await browser_mgr.stop(profile_id)
+
     user_data_dir = Path(profile["user_data_dir"])
-
-    # DB first — if this fails, filesystem is untouched
-    db.delete_profile(profile_id)
-
-    # Then clean up disk
+    if not db.purge_profile(profile_id):
+        raise HTTPException(status_code=404, detail="Profile not found")
     if user_data_dir.exists():
         shutil.rmtree(user_data_dir, ignore_errors=True)
+    return {"ok": True}
 
+
+@app.get("/api/groups", response_model=list[GroupResponse])
+async def list_groups():
+    return [GroupResponse(**group) for group in db.list_groups()]
+
+
+@app.post("/api/groups", response_model=GroupResponse, status_code=201)
+async def create_group(req: GroupCreate):
+    try:
+        group = db.create_group(req.name.strip(), req.color)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return GroupResponse(**group)
+
+
+@app.delete("/api/groups/{group_id}")
+async def delete_group(group_id: str):
+    if not db.delete_group(group_id):
+        raise HTTPException(status_code=404, detail="Group not found")
+    return {"ok": True}
+
+
+@app.get("/api/proxy-presets", response_model=list[ProxyPresetResponse])
+async def list_proxy_presets():
+    return [ProxyPresetResponse(**preset) for preset in db.list_proxy_presets()]
+
+
+@app.post("/api/proxy-presets", response_model=ProxyPresetResponse, status_code=201)
+async def create_proxy_preset(req: ProxyPresetCreate):
+    proxy = _normalize_proxy(req.proxy)
+    _validate_proxy(proxy)
+    try:
+        preset = db.create_proxy_preset(req.name.strip(), proxy, req.mode.strip())
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ProxyPresetResponse(**preset)
+
+
+@app.delete("/api/proxy-presets/{preset_id}")
+async def delete_proxy_preset(preset_id: str):
+    if not db.delete_proxy_preset(preset_id):
+        raise HTTPException(status_code=404, detail="Proxy preset not found")
     return {"ok": True}
 
 

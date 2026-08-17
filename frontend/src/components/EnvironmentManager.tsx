@@ -15,18 +15,20 @@ import {
   Plus,
   RefreshCw,
   Search,
-  Shield,
   Square,
   Tags,
   Trash2,
   Wifi,
 } from "lucide-react";
 import { useMemo, useState } from "react";
-import type { LaunchMode, Profile } from "../lib/api";
+import type { LaunchMode, Profile, ProfileGroup, ProxyPreset } from "../lib/api";
 import { StatusIndicator } from "./StatusIndicator";
 
 interface EnvironmentManagerProps {
   profiles: Profile[];
+  groups: ProfileGroup[];
+  proxyPresets: ProxyPreset[];
+  trashProfiles: Profile[];
   error: string | null;
   authRequired: boolean;
   authUsername: string | null;
@@ -37,16 +39,23 @@ interface EnvironmentManagerProps {
   onLaunch: (id: string, mode: LaunchMode) => Promise<void>;
   onStop: (id: string) => Promise<void>;
   onRefresh: () => Promise<void>;
+  onCreateGroup: (name: string, color?: string | null) => Promise<void>;
+  onDeleteGroup: (id: string) => Promise<void>;
+  onCreateProxyPreset: (data: { name: string; proxy: string; mode: string }) => Promise<void>;
+  onDeleteProxyPreset: (id: string) => Promise<void>;
+  onRestoreProfile: (id: string) => Promise<void>;
+  onPurgeProfile: (id: string) => Promise<void>;
   onAccount: () => void;
   onLogout: () => void;
 }
 
-const navItems = [
-  { label: "环境管理", icon: LayoutGrid, active: true },
-  { label: "分组管理", icon: Folder },
-  { label: "代理管理", icon: Globe2 },
-  { label: "应用中心", icon: Shield },
-  { label: "回收站", icon: Archive },
+type ManagerSection = "profiles" | "groups" | "proxies" | "trash";
+
+const navItems: { id: ManagerSection; label: string; icon: typeof LayoutGrid }[] = [
+  { id: "profiles", label: "环境管理", icon: LayoutGrid },
+  { id: "groups", label: "分组管理", icon: Folder },
+  { id: "proxies", label: "代理管理", icon: Globe2 },
+  { id: "trash", label: "回收站", icon: Archive },
 ];
 
 function formatDate(value: string | null | undefined) {
@@ -104,6 +113,9 @@ function platformIcon(profile: Profile) {
 
 export function EnvironmentManager({
   profiles,
+  groups,
+  proxyPresets,
+  trashProfiles,
   error,
   authRequired,
   authUsername,
@@ -114,18 +126,33 @@ export function EnvironmentManager({
   onLaunch,
   onStop,
   onRefresh,
+  onCreateGroup,
+  onDeleteGroup,
+  onCreateProxyPreset,
+  onDeleteProxyPreset,
+  onRestoreProfile,
+  onPurgeProfile,
   onAccount,
   onLogout,
 }: EnvironmentManagerProps) {
+  const [section, setSection] = useState<ManagerSection>("profiles");
   const [search, setSearch] = useState("");
+  const [groupFilter, setGroupFilter] = useState("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [groupName, setGroupName] = useState("");
+  const [proxyName, setProxyName] = useState("");
+  const [proxyMode, setProxyMode] = useState("socks5");
+  const [proxyValue, setProxyValue] = useState("");
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return profiles;
     return profiles.filter((profile) => {
+      if (groupFilter !== "all" && (profile.group_name || "未分组") !== groupFilter) {
+        return false;
+      }
+      if (!q) return true;
       const haystack = [
         profile.name,
         profile.proxy ?? "",
@@ -136,10 +163,22 @@ export function EnvironmentManager({
       ].join(" ").toLowerCase();
       return haystack.includes(q);
     });
-  }, [profiles, search]);
+  }, [groupFilter, profiles, search]);
 
   const runningCount = profiles.filter((profile) => profile.status === "running").length;
   const allFilteredSelected = filtered.length > 0 && filtered.every((profile) => selectedIds.has(profile.id));
+  const sectionTitle = {
+    profiles: "环境管理",
+    groups: "分组管理",
+    proxies: "代理管理",
+    trash: "回收站",
+  }[section];
+  const sectionSubtitle = {
+    profiles: `总数 ${profiles.length} · 已打开 ${runningCount}`,
+    groups: `共 ${groups.length} 个分组`,
+    proxies: `共 ${proxyPresets.length} 个保存代理`,
+    trash: `共 ${trashProfiles.length} 个待清理浏览器 · 7 天后自动清理`,
+  }[section];
 
   const toggleSelected = (id: string) => {
     setSelectedIds((prev) => {
@@ -177,6 +216,22 @@ export function EnvironmentManager({
     await runRowAction(profile.id, () => onDelete(profile.id));
   };
 
+  const handleCreateGroup = async () => {
+    const name = groupName.trim();
+    if (!name) return;
+    await onCreateGroup(name);
+    setGroupName("");
+  };
+
+  const handleCreateProxyPreset = async () => {
+    const name = proxyName.trim();
+    const proxy = proxyValue.trim();
+    if (!name || !proxy) return;
+    await onCreateProxyPreset({ name, proxy, mode: proxyMode });
+    setProxyName("");
+    setProxyValue("");
+  };
+
   return (
     <div className="flex h-screen bg-surface-0 text-slate-900">
       <aside className="flex w-[248px] shrink-0 flex-col border-r border-border bg-white">
@@ -202,8 +257,9 @@ export function EnvironmentManager({
             return (
               <button
                 key={item.label}
+                onClick={() => setSection(item.id)}
                 className={`flex h-10 w-full items-center gap-3 rounded-md px-3 text-sm font-medium ${
-                  item.active
+                  section === item.id
                     ? "bg-accent/10 text-accent"
                     : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                 }`}
@@ -238,9 +294,9 @@ export function EnvironmentManager({
       <main className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-white px-5">
           <div>
-            <h1 className="text-xl font-semibold tracking-tight">环境管理</h1>
+            <h1 className="text-xl font-semibold tracking-tight">{sectionTitle}</h1>
             <div className="mt-0.5 text-xs text-slate-500">
-              总数 {profiles.length} · 已打开 {runningCount}
+              {sectionSubtitle}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -269,11 +325,19 @@ export function EnvironmentManager({
           </div>
         )}
 
+        {section === "profiles" && (
         <section className="flex min-h-0 flex-1 flex-col p-4">
           <div className="mb-3 grid grid-cols-[180px_minmax(260px,1fr)_auto] gap-3">
-            <select className="input h-11">
-              <option>全部分组</option>
-              <option>未分组</option>
+            <select
+              className="input h-11"
+              value={groupFilter}
+              onChange={(event) => setGroupFilter(event.target.value)}
+            >
+              <option value="all">全部分组</option>
+              <option value="未分组">未分组</option>
+              {groups.map((group) => (
+                <option key={group.id} value={group.name}>{group.name}</option>
+              ))}
             </select>
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
@@ -364,7 +428,7 @@ export function EnvironmentManager({
                       <td className="border-b border-border px-3 py-3 align-middle text-slate-600">
                         {index + 1}
                       </td>
-                      <td className="border-b border-border px-3 py-3 align-middle text-slate-700">未分组</td>
+                      <td className="border-b border-border px-3 py-3 align-middle text-slate-700">{profile.group_name || "未分组"}</td>
                       <td className="border-b border-border px-3 py-3 align-middle">
                         <div className="flex min-w-0 items-center gap-2">
                           <StatusIndicator status={profile.status} />
@@ -508,6 +572,199 @@ export function EnvironmentManager({
             <span>50 条/页</span>
           </div>
         </section>
+        )}
+
+        {section === "groups" && (
+          <section className="flex min-h-0 flex-1 flex-col p-4">
+            <div className="mb-4 rounded-md border border-border bg-white p-4">
+              <div className="grid grid-cols-[minmax(220px,360px)_auto] gap-3">
+                <input
+                  className="input h-11"
+                  value={groupName}
+                  onChange={(event) => setGroupName(event.target.value)}
+                  placeholder="输入分组名称，例如 美国账号"
+                />
+                <button
+                  className="btn-primary px-5"
+                  onClick={() => void handleCreateGroup()}
+                  disabled={!groupName.trim()}
+                >
+                  新建分组
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-md border border-border bg-white">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 text-xs text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-medium">分组名称</th>
+                    <th className="px-4 py-3 text-left font-medium">浏览器数量</th>
+                    <th className="px-4 py-3 text-left font-medium">创建时间</th>
+                    <th className="w-32 px-4 py-3 text-left font-medium">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td className="border-t border-border px-4 py-3 font-medium">未分组</td>
+                    <td className="border-t border-border px-4 py-3 text-slate-600">
+                      {profiles.filter((profile) => !profile.group_name || profile.group_name === "未分组").length}
+                    </td>
+                    <td className="border-t border-border px-4 py-3 text-slate-400">系统默认</td>
+                    <td className="border-t border-border px-4 py-3 text-slate-400">不可删除</td>
+                  </tr>
+                  {groups.map((group) => (
+                    <tr key={group.id} className="hover:bg-slate-50">
+                      <td className="border-t border-border px-4 py-3 font-medium">{group.name}</td>
+                      <td className="border-t border-border px-4 py-3 text-slate-600">
+                        {profiles.filter((profile) => profile.group_name === group.name).length}
+                      </td>
+                      <td className="border-t border-border px-4 py-3 text-slate-600">{formatDate(group.created_at)}</td>
+                      <td className="border-t border-border px-4 py-3">
+                        <button
+                          className="btn-secondary px-2.5 text-red-600"
+                          onClick={() => void onDeleteGroup(group.id)}
+                        >
+                          删除
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
+        {section === "proxies" && (
+          <section className="flex min-h-0 flex-1 flex-col p-4">
+            <div className="mb-4 rounded-md border border-border bg-white p-4">
+              <div className="grid grid-cols-[180px_140px_minmax(280px,1fr)_auto] gap-3">
+                <input
+                  className="input h-11"
+                  value={proxyName}
+                  onChange={(event) => setProxyName(event.target.value)}
+                  placeholder="名称，例如 美国"
+                />
+                <select
+                  className="input h-11"
+                  value={proxyMode}
+                  onChange={(event) => setProxyMode(event.target.value)}
+                >
+                  <option value="http">HTTP</option>
+                  <option value="https">HTTPS</option>
+                  <option value="socks5">SOCKS5</option>
+                  <option value="vless">VLESS</option>
+                  <option value="vmess">VMESS</option>
+                  <option value="trojan">TROJAN</option>
+                  <option value="ss">Shadowsocks</option>
+                </select>
+                <input
+                  className="input h-11 font-mono text-xs"
+                  value={proxyValue}
+                  onChange={(event) => setProxyValue(event.target.value)}
+                  placeholder="粘贴代理链接，或填写 socks5://host:port"
+                />
+                <button
+                  className="btn-primary px-5"
+                  onClick={() => void handleCreateProxyPreset()}
+                  disabled={!proxyName.trim() || !proxyValue.trim()}
+                >
+                  保存代理
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-md border border-border bg-white">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 text-xs text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-medium">名称</th>
+                    <th className="px-4 py-3 text-left font-medium">代理模式</th>
+                    <th className="px-4 py-3 text-left font-medium">代理地址</th>
+                    <th className="px-4 py-3 text-left font-medium">创建时间</th>
+                    <th className="w-32 px-4 py-3 text-left font-medium">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {proxyPresets.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-12 text-center text-slate-400">
+                        暂无保存代理。可以保存“美国 SOCKS5”“香港 VLESS”这类常用代理。
+                      </td>
+                    </tr>
+                  )}
+                  {proxyPresets.map((preset) => (
+                    <tr key={preset.id} className="hover:bg-slate-50">
+                      <td className="border-t border-border px-4 py-3 font-medium">{preset.name}</td>
+                      <td className="border-t border-border px-4 py-3">
+                        <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium uppercase text-slate-700">
+                          {preset.mode}
+                        </span>
+                      </td>
+                      <td className="max-w-xl truncate border-t border-border px-4 py-3 font-mono text-xs text-slate-600" title={preset.proxy}>
+                        {preset.proxy}
+                      </td>
+                      <td className="border-t border-border px-4 py-3 text-slate-600">{formatDate(preset.created_at)}</td>
+                      <td className="border-t border-border px-4 py-3">
+                        <button
+                          className="btn-secondary px-2.5 text-red-600"
+                          onClick={() => void onDeleteProxyPreset(preset.id)}
+                        >
+                          删除
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
+        {section === "trash" && (
+          <section className="flex min-h-0 flex-1 flex-col p-4">
+            <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              删除后的浏览器会进入回收站，保留 7 天；可以恢复，也可以彻底删除。
+            </div>
+            <div className="overflow-hidden rounded-md border border-border bg-white">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 text-xs text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-medium">名称</th>
+                    <th className="px-4 py-3 text-left font-medium">分组</th>
+                    <th className="px-4 py-3 text-left font-medium">删除时间</th>
+                    <th className="w-56 px-4 py-3 text-left font-medium">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {trashProfiles.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="px-4 py-12 text-center text-slate-400">回收站为空</td>
+                    </tr>
+                  )}
+                  {trashProfiles.map((profile) => (
+                    <tr key={profile.id} className="hover:bg-slate-50">
+                      <td className="border-t border-border px-4 py-3 font-medium">{profile.name}</td>
+                      <td className="border-t border-border px-4 py-3 text-slate-600">{profile.group_name || "未分组"}</td>
+                      <td className="border-t border-border px-4 py-3 text-slate-600">{formatDate(profile.deleted_at)}</td>
+                      <td className="border-t border-border px-4 py-3">
+                        <div className="flex gap-2">
+                          <button className="btn-secondary px-2.5" onClick={() => void onRestoreProfile(profile.id)}>
+                            恢复
+                          </button>
+                          <button className="btn-danger px-2.5" onClick={() => void onPurgeProfile(profile.id)}>
+                            彻底删除
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
       </main>
     </div>
   );

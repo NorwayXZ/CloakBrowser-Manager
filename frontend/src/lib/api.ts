@@ -30,12 +30,15 @@ export interface Profile {
   geoip: boolean;
   clipboard_sync: boolean;
   auto_launch: boolean;
+  group_name: string | null;
+  cookies_json: string | null;
   color_scheme: string | null;
   launch_args: string[];
   notes: string | null;
   user_data_dir: string;
   created_at: string;
   updated_at: string;
+  deleted_at: string | null;
   tags: { tag: string; color: string | null }[];
   status: "running" | "stopped";
   runtime_mode: RuntimeMode;
@@ -67,6 +70,8 @@ export interface ProfileCreateData {
   geoip?: boolean;
   clipboard_sync?: boolean;
   auto_launch?: boolean;
+  group_name?: string | null;
+  cookies_json?: string | null;
   color_scheme?: string | null;
   launch_args?: string[];
   notes?: string | null;
@@ -106,6 +111,23 @@ export interface ProxyTestResult {
   org: string | null;
   asn: string | null;
   source: string;
+}
+
+export interface ProfileGroup {
+  id: string;
+  name: string;
+  color: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProxyPreset {
+  id: string;
+  name: string;
+  proxy: string;
+  mode: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface AuthStatus {
@@ -207,6 +229,8 @@ export const api = {
 
   listProfiles: () => request<Profile[]>("/api/profiles"),
 
+  listDeletedProfiles: () => request<Profile[]>("/api/profiles/trash"),
+
   getProfile: (id: string) => request<Profile>(`/api/profiles/${id}`),
 
   createProfile: (data: ProfileCreateData) =>
@@ -223,6 +247,34 @@ export const api = {
 
   deleteProfile: (id: string) =>
     request<{ ok: boolean }>(`/api/profiles/${id}`, { method: "DELETE" }),
+
+  restoreProfile: (id: string) =>
+    request<Profile>(`/api/profiles/${id}/restore`, { method: "POST" }),
+
+  purgeProfile: (id: string) =>
+    request<{ ok: boolean }>(`/api/profiles/${id}/purge`, { method: "DELETE" }),
+
+  listGroups: () => request<ProfileGroup[]>("/api/groups"),
+
+  createGroup: (data: { name: string; color?: string | null }) =>
+    request<ProfileGroup>("/api/groups", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  deleteGroup: (id: string) =>
+    request<{ ok: boolean }>(`/api/groups/${id}`, { method: "DELETE" }),
+
+  listProxyPresets: () => request<ProxyPreset[]>("/api/proxy-presets"),
+
+  createProxyPreset: (data: { name: string; proxy: string; mode: string }) =>
+    request<ProxyPreset>("/api/proxy-presets", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  deleteProxyPreset: (id: string) =>
+    request<{ ok: boolean }>(`/api/proxy-presets/${id}`, { method: "DELETE" }),
 
   launchProfile: (id: string, launchMode: LaunchMode = "manual") =>
     request<LaunchResult>(`/api/profiles/${id}/launch`, {
