@@ -818,7 +818,7 @@ async def test_launch_applies_locale_timezone_to_process_and_page(
     assert context.on.called
     assert session.send.await_args_list == [
         call("Emulation.setTimezoneOverride", {"timezoneId": "America/New_York"}),
-        call("Emulation.setLocaleOverride", {"locale": "en-US"}),
+        call("Emulation.setLocaleOverride", {"locale": "en_US"}),
     ]
 
     init_scripts = [item.args[0] for item in context.add_init_script.await_args_list]

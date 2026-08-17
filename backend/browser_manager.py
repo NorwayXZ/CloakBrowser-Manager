@@ -1495,14 +1495,16 @@ async def _apply_cdp_locale_timezone_overrides(
     if not callable(new_cdp_session):
         return
 
+    cdp_locale = _locale_to_posix(locale).split(".", 1)[0] if locale else None
+
     async def patch_page(page: Any) -> None:
         session = None
         try:
             session = await new_cdp_session(page)
             if timezone:
                 await session.send("Emulation.setTimezoneOverride", {"timezoneId": timezone})
-            if locale:
-                await session.send("Emulation.setLocaleOverride", {"locale": locale})
+            if cdp_locale:
+                await session.send("Emulation.setLocaleOverride", {"locale": cdp_locale})
         except Exception as exc:
             logger.debug("CDP locale/timezone override skipped for %s: %s", profile_id, exc)
         finally:
