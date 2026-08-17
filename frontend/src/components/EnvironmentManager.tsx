@@ -43,6 +43,7 @@ interface EnvironmentManagerProps {
   onEdit: (id: string) => void;
   onDuplicate: (profile: Profile) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  onUpdateNotes: (id: string, notes: string | null) => Promise<void>;
   onLaunch: (id: string, mode: LaunchMode) => Promise<void>;
   onStop: (id: string) => Promise<void>;
   onRefresh: () => Promise<void>;
@@ -191,10 +192,6 @@ function engineLabel(profile: Profile) {
   return profile.browser_engine === "cloakbrowser" ? "伪装画像" : "稳定原生";
 }
 
-function accountPlatformText(profile: Profile) {
-  return profile.account_platform?.trim() || "-";
-}
-
 function noteText(profile: Profile) {
   return profile.notes?.trim() || "-";
 }
@@ -215,6 +212,7 @@ export function EnvironmentManager({
   onEdit,
   onDuplicate,
   onDelete,
+  onUpdateNotes,
   onLaunch,
   onStop,
   onRefresh,
@@ -234,6 +232,9 @@ export function EnvironmentManager({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
+  const [savingNoteId, setSavingNoteId] = useState<string | null>(null);
+  const [noteErrorId, setNoteErrorId] = useState<string | null>(null);
   const [groupName, setGroupName] = useState("");
   const [proxyName, setProxyName] = useState("");
   const [proxyInputMode, setProxyInputMode] = useState<ProxyInputMode>("single");
@@ -257,7 +258,6 @@ export function EnvironmentManager({
       const haystack = [
         profile.name,
         profile.proxy ?? "",
-        profile.account_platform ?? "",
         profile.notes ?? "",
         profile.user_agent ?? "",
         profile.locale ?? "",
@@ -311,6 +311,41 @@ export function EnvironmentManager({
     } finally {
       setBusyId(null);
       setMenuOpenId(null);
+    }
+  };
+
+  const noteValue = (profile: Profile) => noteDrafts[profile.id] ?? profile.notes ?? "";
+
+  const updateNoteDraft = (id: string, value: string) => {
+    setNoteErrorId((current) => (current === id ? null : current));
+    setNoteDrafts((prev) => ({ ...prev, [id]: value }));
+  };
+
+  const clearNoteDraft = (id: string) => {
+    setNoteDrafts((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  };
+
+  const saveNote = async (profile: Profile, value: string) => {
+    const next = value.trim();
+    const current = profile.notes?.trim() ?? "";
+    if (next === current) {
+      setNoteErrorId((currentId) => (currentId === profile.id ? null : currentId));
+      clearNoteDraft(profile.id);
+      return;
+    }
+    setSavingNoteId(profile.id);
+    setNoteErrorId(null);
+    try {
+      await onUpdateNotes(profile.id, next || null);
+      clearNoteDraft(profile.id);
+    } catch {
+      setNoteErrorId(profile.id);
+    } finally {
+      setSavingNoteId(null);
     }
   };
 
@@ -503,7 +538,7 @@ export function EnvironmentManager({
                 className="input h-11 pl-10"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="搜索名称、代理、账号平台、备注、UA"
+                placeholder="搜索名称、代理、备注、UA"
               />
             </div>
             <label className="flex h-11 items-center gap-2 rounded-md border border-border bg-white px-3 text-sm text-slate-600">
@@ -540,7 +575,7 @@ export function EnvironmentManager({
 
           <div className="min-h-0 flex-1 overflow-hidden rounded-md border border-border bg-white">
             <div className="h-full overflow-auto">
-              <table className="w-full min-w-[1320px] table-fixed border-separate border-spacing-0 text-sm">
+              <table className="w-full min-w-[1240px] table-fixed border-separate border-spacing-0 text-sm">
                 <colgroup>
                   <col className="w-12" />
                   <col className="w-16" />
@@ -548,8 +583,7 @@ export function EnvironmentManager({
                   <col className="w-64" />
                   <col className="w-72" />
                   <col className="w-36" />
-                  <col className="w-44" />
-                  <col className="w-64" />
+                  <col className="w-72" />
                   <col className="w-64" />
                 </colgroup>
                 <thead className="sticky top-0 z-10 bg-slate-50 text-xs text-slate-500">
@@ -567,7 +601,6 @@ export function EnvironmentManager({
                     <th className="border-b border-border px-3 py-3 text-left font-medium">名称</th>
                     <th className="border-b border-border px-3 py-3 text-left font-medium">IP / 代理</th>
                     <th className="border-b border-border px-3 py-3 text-left font-medium">最近打开</th>
-                    <th className="border-b border-border px-3 py-3 text-left font-medium">账号平台</th>
                     <th className="border-b border-border px-3 py-3 text-left font-medium">备注</th>
                     <th className="border-b border-border px-3 py-3 text-left font-medium">操作</th>
                   </tr>
@@ -575,7 +608,7 @@ export function EnvironmentManager({
                 <tbody>
                   {filtered.length === 0 && (
                     <tr>
-                      <td colSpan={9} className="px-4 py-16 text-center text-sm text-slate-400">
+                      <td colSpan={8} className="px-4 py-16 text-center text-sm text-slate-400">
                         {profiles.length === 0 ? "还没有浏览器，点击左侧新建浏览器开始。" : "没有匹配的浏览器。"}
                       </td>
                     </tr>
@@ -603,10 +636,12 @@ export function EnvironmentManager({
                         </button>
                       </td>
                       <td className="border-b border-border px-3 py-3 align-middle">
-                        <div className="flex min-w-0 items-start gap-2">
-                          <StatusIndicator status={profile.status} />
-                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-blue-50 text-blue-600">
+                        <div className="flex min-w-0 items-center gap-3">
+                          <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-blue-50 text-blue-600">
                             <Laptop className="h-4 w-4" />
+                            <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full border-2 border-white bg-white">
+                              <StatusIndicator status={profile.status} size="md" />
+                            </span>
                           </div>
                           <div className="min-w-0">
                             <button
@@ -628,21 +663,11 @@ export function EnvironmentManager({
                         </div>
                       </td>
                       <td className="border-b border-border px-3 py-3 align-middle">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <button
-                            className="truncate text-left font-semibold text-slate-900 hover:text-accent"
-                            onClick={() => onEdit(profile.id)}
-                            title="修改代理"
-                          >
-                            {proxyHost(profile)}
-                          </button>
-                          <button
-                            className="shrink-0 rounded border border-border p-1 text-slate-400 hover:border-accent hover:text-accent"
-                            onClick={() => onEdit(profile.id)}
-                            title="修改代理"
-                          >
-                            <Pencil className="h-3 w-3" />
-                          </button>
+                        <div
+                          className="truncate font-semibold text-slate-900"
+                          title={proxyHost(profile)}
+                        >
+                          {proxyHost(profile)}
                         </div>
                         <div className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-slate-500">
                           <span className="rounded bg-slate-100 px-1.5 py-0.5 font-medium">{proxyType(profile)}</span>
@@ -657,27 +682,34 @@ export function EnvironmentManager({
                         </div>
                       </td>
                       <td className="border-b border-border px-3 py-3 align-middle">
-                        <button
-                          className={`max-w-full truncate rounded px-2 py-1 text-left ${
-                            profile.account_platform
-                              ? "bg-blue-50 text-blue-700 hover:bg-blue-100"
-                              : "text-slate-400 hover:bg-slate-100 hover:text-accent"
-                          }`}
-                          onClick={() => onEdit(profile.id)}
-                          title="编辑账号平台"
-                        >
-                          {accountPlatformText(profile)}
-                        </button>
-                      </td>
-                      <td className="border-b border-border px-3 py-3 align-middle">
-                        <button
-                          className="flex max-w-full items-center gap-1.5 rounded px-2 py-1 text-left text-slate-600 hover:bg-slate-100 hover:text-accent"
-                          onClick={() => onEdit(profile.id)}
-                          title={noteText(profile)}
-                        >
-                          <StickyNote className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-                          <span className="truncate">{noteText(profile)}</span>
-                        </button>
+                        <div className="group/note relative">
+                          <StickyNote className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                          <input
+                            className="h-9 w-full rounded-md border border-transparent bg-slate-50 pl-8 pr-14 text-sm text-slate-700 outline-none transition focus:border-accent focus:bg-white focus:ring-2 focus:ring-accent/10"
+                            value={noteValue(profile)}
+                            onChange={(event) => updateNoteDraft(profile.id, event.target.value)}
+                            onBlur={(event) => void saveNote(profile, event.currentTarget.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                event.currentTarget.blur();
+                              }
+                            }}
+                            placeholder="添加备注"
+                            title={noteText(profile)}
+                          />
+                          <span className={`pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] transition ${
+                            noteErrorId === profile.id
+                              ? "text-red-500 opacity-100"
+                              : "text-slate-400"
+                          } ${
+                            savingNoteId === profile.id || noteErrorId === profile.id
+                              ? "opacity-100"
+                              : "opacity-0 group-focus-within/note:opacity-100"
+                          }`}>
+                            {savingNoteId === profile.id ? "保存中" : noteErrorId === profile.id ? "保存失败" : "自动保存"}
+                          </span>
+                        </div>
                       </td>
                       <td className="relative border-b border-border px-3 py-3 align-middle">
                         <div className="flex items-center gap-2">

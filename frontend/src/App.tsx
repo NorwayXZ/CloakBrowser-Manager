@@ -203,6 +203,13 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
     }
   }, [refreshAll, selectedId, update]);
 
+  const handleUpdateNotes = useCallback(async (id: string, notes: string | null) => {
+    const saved = await update(id, { notes });
+    if (!saved) {
+      throw new Error("保存备注失败");
+    }
+  }, [update]);
+
   const handleDeleteById = useCallback(async (id: string) => {
     await remove(id);
     await loadManagerData();
@@ -333,6 +340,7 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
           onEdit={handleEdit}
           onDuplicate={handleDuplicate}
           onDelete={handleDeleteById}
+          onUpdateNotes={handleUpdateNotes}
           onLaunch={handleLaunchProfile}
           onStop={handleStopProfile}
           onRefresh={refreshAll}
