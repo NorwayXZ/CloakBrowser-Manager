@@ -19,6 +19,7 @@ from backend.browser_manager import (
     _clean_startup_urls,
     _append_unpacked_extension_arg,
     _init_profile_defaults,
+    _launch_cloakbrowser_manual_process,
     _launch_system_chrome_manual_process,
     _launch_system_chrome_persistent_context_async,
     _normalize_proxy,
@@ -147,6 +148,20 @@ def test_chrome_proxy_dns_policy_keeps_manager_loopback_reachable():
     assert "EXCLUDE 127.0.0.1" in resolver
     assert "EXCLUDE localhost" in resolver
     assert "EXCLUDE ::1" in resolver
+    assert "cloakbrowser.dev" not in bypass
+    assert "cloakbrowser.dev" not in resolver
+
+
+def test_cloak_proxy_bypasses_license_host():
+    args = _chrome_proxy_args(
+        "socks5://192.0.2.10:10911",
+        bypass_license_host=True,
+    )
+
+    bypass = next(arg for arg in args if arg.startswith("--proxy-bypass-list="))
+    resolver = next(arg for arg in args if arg.startswith("--host-resolver-rules="))
+    assert "cloakbrowser.dev" in bypass
+    assert "EXCLUDE cloakbrowser.dev" in resolver
 
 
 # ── startup URLs ─────────────────────────────────────────────────────────────
@@ -525,6 +540,55 @@ def test_system_chrome_manual_process_has_no_cdp_flags(monkeypatch, tmp_path: Pa
     assert "--proxy-server=socks5://127.0.0.1:1080" in command
     assert "--lang=zh-TW" in command
     assert command[-1] == "http://127.0.0.1:8080/profile/profile-1/start"
+
+
+def test_cloakbrowser_manual_process_injects_license_env(monkeypatch, tmp_path: Path):
+    from backend import browser_manager as module
+    import sys
+    import types
+
+    cloakbrowser_package = sys.modules["cloakbrowser"]
+    download_module = types.ModuleType("cloakbrowser.download")
+    license_module = types.ModuleType("cloakbrowser.license")
+
+    popen_calls = []
+    fake_process = MagicMock()
+
+    def fake_popen(command, **kwargs):
+        popen_calls.append((command, kwargs))
+        return fake_process
+
+    download_module.ensure_binary = lambda: str(tmp_path / "Chromium")
+    license_module.resolve_license_key = lambda: "test-license"
+    license_module.mint_denial_file = lambda: None
+    license_module.build_launch_env = lambda **kwargs: {
+        **kwargs["user_env"],
+        "CLOAKBROWSER_LICENSE_KEY": "test-license",
+    }
+    monkeypatch.setattr(
+        cloakbrowser_package,
+        "build_args",
+        lambda _stealth, extra_args, **_: list(extra_args or []),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        sys.modules["cloakbrowser.config"],
+        "binary_supports_maximized_window",
+        lambda: False,
+        raising=False,
+    )
+    monkeypatch.setitem(sys.modules, "cloakbrowser.download", download_module)
+    monkeypatch.setitem(sys.modules, "cloakbrowser.license", license_module)
+    monkeypatch.setattr(module.subprocess, "Popen", fake_popen)
+    (tmp_path / "Chromium").touch()
+
+    returned = _launch_cloakbrowser_manual_process(
+        user_data_dir=tmp_path / "profile",
+        env={"HOME": str(tmp_path)},
+    )
+
+    assert returned is fake_process
+    assert popen_calls[0][1]["env"]["CLOAKBROWSER_LICENSE_KEY"] == "test-license"
 
 
 def test_macos_window_normalizer_targets_launched_process(monkeypatch):

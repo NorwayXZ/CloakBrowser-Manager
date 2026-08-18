@@ -49,6 +49,7 @@ BLANK_PAGE_URLS = {
 }
 COOKIE_IMPORTER_DIRNAME = "manager-cookie-importer"
 MACOS_CHROMIUM_DEFAULTS_DOMAIN = "org.chromium.Chromium"
+CLOAKBROWSER_LICENSE_HOST = "cloakbrowser.dev"
 _MACOS_LOCALE_LAUNCH_LOCK = threading.Lock()
 
 
@@ -513,20 +514,28 @@ def _format_proxy_endpoint(parsed: Any) -> str:
     return f"{parsed.scheme}://{host}:{parsed.port}"
 
 
-def _chrome_proxy_args(proxy: str | None) -> list[str]:
+def _chrome_proxy_args(
+    proxy: str | None,
+    *,
+    bypass_license_host: bool = False,
+) -> list[str]:
     if not proxy:
         return []
     parsed = urlparse(proxy)
     if not parsed.scheme or not parsed.hostname or not parsed.port:
         return []
     proxy_host = parsed.hostname
-    rules = (
-        f"MAP * ~NOTFOUND, EXCLUDE {proxy_host}, EXCLUDE localhost, "
-        "EXCLUDE 127.0.0.1, EXCLUDE ::1"
+    bypass_hosts = ["127.0.0.1", "localhost", "[::1]"]
+    resolver_exclusions = [proxy_host, "localhost", "127.0.0.1", "::1"]
+    if bypass_license_host:
+        bypass_hosts.append(CLOAKBROWSER_LICENSE_HOST)
+        resolver_exclusions.append(CLOAKBROWSER_LICENSE_HOST)
+    rules = "MAP * ~NOTFOUND, " + ", ".join(
+        f"EXCLUDE {host}" for host in resolver_exclusions
     )
     return [
         f"--proxy-server={_format_proxy_endpoint(parsed)}",
-        "--proxy-bypass-list=127.0.0.1;localhost;[::1]",
+        f"--proxy-bypass-list={';'.join(bypass_hosts)}",
         f"--host-resolver-rules={rules}",
     ]
 
@@ -754,6 +763,7 @@ def _launch_cloakbrowser_manual_process(
 
     from cloakbrowser import build_args
     from cloakbrowser.download import ensure_binary
+    from cloakbrowser.license import build_launch_env, mint_denial_file, resolve_license_key
 
     browser_path = Path(ensure_binary())
     if not browser_path.exists():
@@ -761,7 +771,7 @@ def _launch_cloakbrowser_manual_process(
 
     extra_args = list(args or [])
     if proxy and not _has_chrome_arg(extra_args, "--proxy-server"):
-        extra_args.extend(_chrome_proxy_args(proxy))
+        extra_args.extend(_chrome_proxy_args(proxy, bypass_license_host=True))
     if user_agent:
         _append_chrome_arg_once(extra_args, "--user-agent", user_agent)
     _append_chrome_arg_once(extra_args, "--user-data-dir", os.fspath(user_data_dir))
@@ -789,10 +799,20 @@ def _launch_cloakbrowser_manual_process(
         start_maximized=start_maximized,
     )
     chrome_args.extend(start_urls or [])
+    # The Playwright wrapper injects the Pro license key before launching the
+    # binary. Manual native launches bypass Playwright, so they must do the
+    # same explicitly; otherwise the binary can exit with a license denial.
+    base_env = env or os.environ.copy()
+    denial_path = mint_denial_file() if resolve_license_key() else None
+    launch_env = build_launch_env(
+        user_env=base_env,
+        status_file=denial_path,
+    )
+
     with _macos_application_locale(locale):
         process = subprocess.Popen(
             [os.fspath(browser_path), *chrome_args],
-            **_chrome_popen_kwargs(env),
+            **_chrome_popen_kwargs(launch_env),
         )
         if sys.platform == "darwin" and locale:
             # Cocoa reads per-app language defaults during early startup. Keep
