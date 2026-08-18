@@ -458,6 +458,10 @@ def update_profile(profile_id: str, **fields: Any) -> dict[str, Any] | None:
     if fields.get("fingerprint_seed") is None:
         fields.pop("fingerprint_seed", None)
 
+    if "proxy" in fields and fields["proxy"] != existing.get("proxy"):
+        update_cols.append("proxy_geo_json = ?")
+        update_vals.append(None)
+
     for col in (
         "name", "browser_engine", "device_profile", "fingerprint_seed", "proxy", "timezone", "locale", "platform",
         "user_agent", "screen_width", "screen_height", "gpu_vendor", "gpu_renderer",

@@ -172,7 +172,7 @@ function formatDate(value: string | null | undefined) {
 
 function proxyType(profile: Profile) {
   const value = profile.proxy?.trim();
-  if (!value) return "未配置";
+  if (!value) return "直连";
   const scheme = value.split(":", 1)[0]?.toUpperCase();
   if (scheme === "VLESS" || scheme === "VMESS" || scheme === "TROJAN" || scheme === "SS") {
     return scheme;
@@ -184,9 +184,9 @@ function proxyType(profile: Profile) {
 }
 
 function proxyHost(profile: Profile) {
+  if (!profile.proxy?.trim()) return "本地网络";
   if (profile.proxy_geo?.ip) return profile.proxy_geo.ip;
-  const value = profile.proxy?.trim();
-  if (!value) return "-";
+  const value = profile.proxy.trim();
   try {
     const url = new URL(value);
     return `${url.hostname}${url.port ? `:${url.port}` : ""}`;
@@ -197,7 +197,7 @@ function proxyHost(profile: Profile) {
 
 function locationText(profile: Profile) {
   const geo = profile.proxy_geo;
-  if (!profile.proxy) return "未配置代理";
+  if (!profile.proxy) return "使用当前电脑出口";
   if (!geo) return "打开后检测";
   const country = [geo.country_code, geo.country].filter(Boolean).join(" - ");
   const city = [geo.region, geo.city].filter(Boolean).join(" / ");

@@ -645,7 +645,7 @@ async def auth_logout(request: Request, response: Response):
 
 def _profile_response(profile: dict) -> ProfileResponse:
     status = browser_mgr.get_status(profile["id"], profile)
-    if not status.get("proxy_geo") and profile.get("proxy_geo"):
+    if profile.get("proxy") and not status.get("proxy_geo") and profile.get("proxy_geo"):
         status["proxy_geo"] = profile.get("proxy_geo")
     payload = {**profile, **status}
     payload["tags"] = [TagResponse(**tag) for tag in profile.get("tags", [])]
@@ -966,7 +966,7 @@ async def profile_start_page(profile_id: str):
     browser_engine = html.escape(
         str(running.browser_engine if running else profile.get("browser_engine") or "auto")
     )
-    proxy_state = "已配置" if profile.get("proxy") else "未配置"
+    proxy_state = "已配置" if profile.get("proxy") else "直连（本地网络）"
     status = "运行中" if running else "未启动"
     source = html.escape(str(geo.get("source") or "Manager"))
     diagnostic_script = DIAGNOSTIC_SCRIPT.strip()

@@ -82,6 +82,7 @@ def test_profile_start_page(app_client: TestClient):
     assert resp.headers["content-type"].startswith("text/html")
     assert "Start Page" in resp.text
     assert "代理出口 IP" in resp.text
+    assert "直连（本地网络）" in resp.text
     assert "Whoer" in resp.text
 
 

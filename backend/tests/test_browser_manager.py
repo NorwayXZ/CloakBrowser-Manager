@@ -153,6 +153,10 @@ def test_chrome_proxy_dns_policy_keeps_manager_loopback_reachable():
     assert "cloakbrowser.dev" not in resolver
 
 
+def test_chrome_proxy_args_are_empty_for_direct_connection():
+    assert _chrome_proxy_args(None) == []
+
+
 def test_cloak_proxy_bypasses_license_host():
     args = _chrome_proxy_args(
         "socks5://192.0.2.10:10911",

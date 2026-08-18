@@ -150,6 +150,16 @@ def test_mark_profile_opened_persists_time_and_proxy_geo(tmp_db: Path):
     assert fetched["proxy_geo"] == geo
 
 
+def test_switching_to_direct_clears_stale_proxy_geo(tmp_db: Path):
+    profile = db.create_profile("Direct", proxy="socks5://127.0.0.1:1080")
+    db.mark_profile_opened(profile["id"], {"ip": "203.0.113.10", "country_code": "US"})
+
+    updated = db.update_profile(profile["id"], proxy=None)
+
+    assert updated["proxy"] is None
+    assert updated["proxy_geo"] is None
+
+
 def test_create_profile_with_startup_urls(tmp_db: Path):
     p = db.create_profile("WithUrls", startup_urls=["https://ip.skk.moe/", "example.com"])
     assert p["startup_urls"] == ["https://ip.skk.moe/", "example.com"]

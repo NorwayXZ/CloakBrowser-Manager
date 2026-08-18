@@ -151,7 +151,7 @@ const GPU_PRESETS: Record<string, { vendor: string; renderer: string }> = {
   },
 };
 
-type ProxyKind = "direct" | "xray";
+type ProxyKind = "none" | "custom" | "xray";
 type ProxyScheme = "http" | "https" | "socks5";
 type EditableBrowserEngine = "system_chrome" | "cloakbrowser";
 
@@ -181,7 +181,7 @@ const ACCOUNT_PLATFORM_OPTIONS = [
 ];
 
 const DEFAULT_PROXY_PARTS: ProxyParts = {
-  kind: "direct",
+  kind: "none",
   scheme: "http",
   host: "",
   port: "",
@@ -248,7 +248,7 @@ function parseProxy(raw?: string | null): ProxyParts {
       const directScheme = url.protocol.replace(":", "");
       if (isProxyScheme(directScheme)) {
         return {
-          kind: "direct",
+          kind: "custom",
           scheme: directScheme,
           host: url.hostname,
           port: url.port,
@@ -266,7 +266,7 @@ function parseProxy(raw?: string | null): ProxyParts {
   if (parts.length === 4) {
     const [host, port, username, password] = parts;
     return {
-      kind: "direct",
+      kind: "custom",
       scheme: "http",
       host: host ?? "",
       port: port ?? "",
@@ -278,7 +278,7 @@ function parseProxy(raw?: string | null): ProxyParts {
   if (parts.length === 2) {
     const [host, port] = parts;
     return {
-      kind: "direct",
+      kind: "custom",
       scheme: "http",
       host: host ?? "",
       port: port ?? "",
@@ -313,6 +313,12 @@ function buildProxy(parts: ProxyParts): string | null {
     : "";
 
   return `${parts.scheme}://${auth}${host}:${port}`;
+}
+
+function proxyFromParts(parts: ProxyParts): string | null {
+  if (parts.kind === "none") return null;
+  if (parts.kind === "xray") return parts.raw.trim() || null;
+  return buildProxy(parts);
 }
 
 function normalizeFormEngine(value?: string | null): EditableBrowserEngine {
@@ -421,7 +427,7 @@ export function ProfileForm({
       const safeForm = form.platform === allowedPlatform && form.device_profile === selectedDeviceProfile.id
         ? form
         : applyDeviceProfile(form, selectedDeviceProfile);
-      await onSave(safeForm);
+      await onSave(form.proxy ? safeForm : { ...safeForm, proxy: null, geoip: false });
     } finally {
       setSaving(false);
     }
@@ -468,7 +474,7 @@ export function ProfileForm({
   const updateProxyPart = <K extends keyof ProxyParts>(key: K, value: ProxyParts[K]) => {
     const next = { ...proxyParts, [key]: value };
     setProxyParts(next);
-    set("proxy", next.kind === "xray" ? (next.raw.trim() || null) : buildProxy(next));
+    set("proxy", proxyFromParts(next));
     setProxyTest(null);
     setProxyTestError(null);
   };
@@ -480,7 +486,8 @@ export function ProfileForm({
       raw: kind === "xray" ? proxyParts.raw : "",
     };
     setProxyParts(next);
-    set("proxy", kind === "xray" ? (next.raw.trim() || null) : buildProxy(next));
+    set("proxy", proxyFromParts(next));
+    if (kind === "none") set("geoip", false);
     setProxyTest(null);
     setProxyTestError(null);
   };
@@ -589,7 +596,9 @@ export function ProfileForm({
       .filter(Boolean));
   };
 
-  const proxyLabel = proxyParts.kind === "xray"
+  const proxyLabel = proxyParts.kind === "none"
+    ? "直连"
+    : proxyParts.kind === "xray"
     ? (proxyParts.raw ? proxyParts.raw.split("://", 1)[0]?.toUpperCase() ?? "Xray" : "Xray 链接")
     : proxyParts.scheme.toUpperCase();
 
@@ -599,7 +608,7 @@ export function ProfileForm({
     ["画像", selectedDeviceProfile.name],
     ["账号平台", form.account_platform || "未设置"],
     ["User-Agent", form.user_agent || "跟随真实浏览器"],
-    ["代理", form.proxy ? `${proxyLabel} · 已配置` : "未配置"],
+    ["代理", form.proxy ? `${proxyLabel} · 已配置` : "直连 · 本地网络"],
     ["启动页面", (form.startup_urls ?? []).length > 0 ? `${form.startup_urls?.length} 个网址` : "默认自检页"],
     ["时区", effectiveTimezonePreview],
     ["语言", effectiveLocalePreview],
@@ -807,20 +816,22 @@ export function ProfileForm({
               <section className="rounded-md border border-border bg-white p-5">
                 <div className="mb-2 text-sm font-semibold text-slate-900">代理信息</div>
                 <SectionIntro>
-                  代理决定出口 IP，也会影响时区和语言建议。普通 HTTP/HTTPS/SOCKS5 直接填主机端口；VLESS、VMess、Trojan、Shadowsocks 使用 Xray 链接。
+                  直连会使用当前电脑的本地网络，不启动代理或 Xray。普通 HTTP/HTTPS/SOCKS5 填主机端口；VLESS、VMess、Trojan、Shadowsocks 使用 Xray 链接。
                 </SectionIntro>
                 <div className="grid max-w-3xl grid-cols-[120px_minmax(0,1fr)] items-start gap-x-5 gap-y-4">
                   <label className="pt-2 text-right text-sm font-medium text-slate-600">代理方式</label>
                   <div>
                     <div className="flex max-w-xl rounded-md bg-slate-100 p-1">
                       {[
-                        ["direct", "自定义"],
+                        ["none", "直连"],
+                        ["custom", "自定义代理"],
                         ["xray", "Xray 链接"],
                       ].map(([kind, label]) => (
                         <button
                           key={kind}
                           type="button"
                           onClick={() => updateProxyKind(kind as ProxyKind)}
+                          aria-pressed={proxyParts.kind === kind}
                           className={`h-9 flex-1 rounded text-sm font-medium ${
                             proxyParts.kind === kind ? "bg-white text-accent shadow-sm" : "text-slate-600"
                           }`}
@@ -829,7 +840,7 @@ export function ProfileForm({
                         </button>
                       ))}
                     </div>
-                    <FieldNote>自定义适合已有 HTTP/HTTPS/SOCKS5 代理；Xray 链接会启动本地内核并转成本机 SOCKS5 给浏览器使用。</FieldNote>
+                    <FieldNote>直连不添加任何代理启动参数；自定义代理适合 HTTP/HTTPS/SOCKS5；Xray 链接会启动本地内核并转成本机 SOCKS5。</FieldNote>
                   </div>
 
                   <label className="pt-2 text-right text-sm font-medium text-slate-600">已保存代理</label>
@@ -854,7 +865,18 @@ export function ProfileForm({
                     <FieldNote>从“代理管理”保存的代理会出现在这里，选择后会自动填入当前浏览器。</FieldNote>
                   </div>
 
-                  {proxyParts.kind === "xray" ? (
+                  {proxyParts.kind === "none" ? (
+                    <>
+                      <label className="pt-2 text-right text-sm font-medium text-slate-600">连接状态</label>
+                      <div className="flex max-w-xl items-start gap-3 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                        <Wifi className="mt-0.5 h-4 w-4 shrink-0" />
+                        <div>
+                          <div className="font-medium">直连已启用</div>
+                          <div className="mt-1 text-xs leading-5 text-emerald-700">浏览器直接使用当前电脑的网络出口，不经过已保存代理，也不会启动 Xray。</div>
+                        </div>
+                      </div>
+                    </>
+                  ) : proxyParts.kind === "xray" ? (
                     <>
                       <label className="pt-2 text-right text-sm font-medium text-slate-600">代理链接</label>
                       <div>
@@ -928,44 +950,48 @@ export function ProfileForm({
                     </>
                   )}
 
-                  <label className="pt-2 text-right text-sm font-medium text-slate-600">代理检测</label>
-                  <div className="space-y-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={handleProxyTest}
-                        disabled={testingProxy || !form.proxy}
-                        className="btn-secondary flex items-center gap-1.5 disabled:opacity-60"
-                      >
-                        {testingProxy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wifi className="h-3.5 w-3.5" />}
-                        <span>{testingProxy ? "检查中..." : "检查代理"}</span>
-                      </button>
-                      <span className="break-all text-xs text-slate-500">
-                        {form.proxy ? form.proxy : "填写代理后可检查出口 IP、国家、时区和语言"}
-                      </span>
-                    </div>
-                    <FieldNote>保存前建议先检查一次；检查结果可以一键写入时区和语言。即使不点“应用”，启动时也会尽量跟随代理地区。</FieldNote>
-                    {proxyTestError && <div className="text-xs text-red-600">{proxyTestError}</div>}
-                    {proxyTest && (
-                      <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
-                        <div className="flex flex-wrap gap-x-4 gap-y-1">
-                          <span>出口 IP：{proxyTest.ip ?? "未知"}</span>
-                          <span>国家：{proxyTest.country ?? "未知"}</span>
-                          <span>时区：{proxyTest.timezone ?? "未知"}</span>
-                          <span>建议语言：{proxyTest.suggested_locale ?? "未知"}</span>
+                  {proxyParts.kind !== "none" && (
+                    <>
+                      <label className="pt-2 text-right text-sm font-medium text-slate-600">代理检测</label>
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={handleProxyTest}
+                            disabled={testingProxy || !form.proxy}
+                            className="btn-secondary flex items-center gap-1.5 disabled:opacity-60"
+                          >
+                            {testingProxy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wifi className="h-3.5 w-3.5" />}
+                            <span>{testingProxy ? "检查中..." : "检查代理"}</span>
+                          </button>
+                          <span className="break-all text-xs text-slate-500">
+                            {form.proxy ? form.proxy : "填写代理后可检查出口 IP、国家、时区和语言"}
+                          </span>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => applyProxyGeo()}
-                          disabled={!proxyTest.timezone && !proxyTest.suggested_locale}
-                          className="mt-2 inline-flex items-center gap-1.5 text-accent disabled:opacity-60"
-                        >
-                          <Globe className="h-3.5 w-3.5" />
-                          <span>应用到时区和语言</span>
-                        </button>
+                        <FieldNote>保存前建议先检查一次；检查结果可以一键写入时区和语言。即使不点“应用”，启动时也会尽量跟随代理地区。</FieldNote>
+                        {proxyTestError && <div className="text-xs text-red-600">{proxyTestError}</div>}
+                        {proxyTest && (
+                          <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
+                            <div className="flex flex-wrap gap-x-4 gap-y-1">
+                              <span>出口 IP：{proxyTest.ip ?? "未知"}</span>
+                              <span>国家：{proxyTest.country ?? "未知"}</span>
+                              <span>时区：{proxyTest.timezone ?? "未知"}</span>
+                              <span>建议语言：{proxyTest.suggested_locale ?? "未知"}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => applyProxyGeo()}
+                              disabled={!proxyTest.timezone && !proxyTest.suggested_locale}
+                              className="mt-2 inline-flex items-center gap-1.5 text-accent disabled:opacity-60"
+                            >
+                              <Globe className="h-3.5 w-3.5" />
+                              <span>应用到时区和语言</span>
+                            </button>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
+                    </>
+                  )}
 
                   <label className="pt-2 text-right text-sm font-medium text-slate-600">时区语言</label>
                   <div>
@@ -983,7 +1009,7 @@ export function ProfileForm({
                         placeholder="zh-CN"
                       />
                     </div>
-                    <FieldNote>左边填 IANA 时区，例如 Asia/Taipei；右边填浏览器语言，例如 zh-TW 或 en-US。留空时会先跟随代理地区，手动填写会作为优先值。</FieldNote>
+                    <FieldNote>左边填 IANA 时区，例如 Asia/Taipei；右边填浏览器语言，例如 zh-TW 或 en-US。代理模式留空时会先跟随代理地区；直连模式留空时使用浏览器和系统默认值。</FieldNote>
                   </div>
 
                   <label className="pt-2 text-right text-sm font-medium text-slate-600">跟随 IP</label>
@@ -991,13 +1017,14 @@ export function ProfileForm({
                     <label className="flex items-center gap-2 text-sm text-slate-700">
                       <input
                         type="checkbox"
-                        checked={form.geoip ?? false}
+                        checked={proxyParts.kind !== "none" && (form.geoip ?? false)}
                         onChange={(e) => set("geoip", e.target.checked)}
+                        disabled={proxyParts.kind === "none"}
                         className="rounded border-slate-300"
                       />
                       根据代理 IP 自动匹配时区和语言区域
                     </label>
-                    <FieldNote>勾选后会强制覆盖上面的手动值；不勾选时，只要时区/语言留空，启动时也会尽量跟随代理。</FieldNote>
+                    <FieldNote>{proxyParts.kind === "none" ? "直连没有代理 IP，这项仅在选择代理后生效。" : "勾选后会强制覆盖上面的手动值；不勾选时，只要时区/语言留空，启动时也会尽量跟随代理。"}</FieldNote>
                   </div>
                 </div>
               </section>
