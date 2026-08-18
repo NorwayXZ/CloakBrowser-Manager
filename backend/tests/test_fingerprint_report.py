@@ -167,3 +167,31 @@ def test_external_probe_failure_is_a_warning():
 
     issue = next(issue for issue in result["issues"] if issue["signal"] == "network.external_probe")
     assert issue["severity"] == "warning"
+
+
+def test_impossible_window_geometry_is_reported():
+    raw = _raw_platform(
+        user_agent=(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_0) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/145.0.0.0 Safari/537.36"
+        ),
+        platform="MacIntel",
+        ua_ch_platform="macOS",
+    )
+    raw["main"]["screen"] = {
+        "width": 1512,
+        "height": 982,
+        "innerWidth": 1646,
+        "innerHeight": 1167,
+        "outerWidth": 0,
+        "outerHeight": 0,
+    }
+
+    result = _analyze(raw, "macos")
+    signals = {issue["signal"] for issue in result["issues"]}
+
+    assert "window.outerWidth" in signals
+    assert "window.outerHeight" in signals
+    assert "screen.width_geometry" in signals
+    assert "screen.height_geometry" in signals

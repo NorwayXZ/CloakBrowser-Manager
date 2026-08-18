@@ -30,10 +30,19 @@ def _configured_chromium_version() -> str:
 def get_effective_chromium_version() -> str:
     """Return the selected update-marker version, not only the bundled default."""
     from cloakbrowser import config
+    try:
+        from cloakbrowser.license import resolve_license_key
+    except ImportError:
+        resolve_license_key = lambda: None  # type: ignore[assignment]
 
     resolver = getattr(config, "get_effective_version", None)
     if callable(resolver):
-        return str(resolver())
+        try:
+            resolved = resolver(pro=bool(resolve_license_key()))
+        except TypeError:
+            resolved = resolver()
+        if resolved:
+            return str(resolved)
     return _configured_chromium_version()
 
 
@@ -61,6 +70,7 @@ def inspect_cloak_runtime(*, ensure_binary: bool = False) -> CloakRuntimeInfo:
         from cloakbrowser.download import ensure_binary as download_binary
 
         binary_path = Path(download_binary()).resolve()
+        effective = get_effective_chromium_version()
         binary_version = _cached_binary_version(binary_path)
         file_ready = binary_path.is_file() and binary_path.stat().st_size > 0
         local_override = bool(os.environ.get("CLOAKBROWSER_BINARY_PATH"))

@@ -18,6 +18,22 @@ def test_effective_version_prefers_update_marker(monkeypatch: pytest.MonkeyPatch
     assert get_effective_chromium_version() == "150.0.1.2.3"
 
 
+def test_effective_version_reads_license_scoped_marker(monkeypatch: pytest.MonkeyPatch):
+    cloak_license = types.ModuleType("cloakbrowser.license")
+    seen: list[bool] = []
+
+    def effective(*, pro: bool = False):
+        seen.append(pro)
+        return "150.0.1.2.3" if pro else "145.0.1.2.3"
+
+    cloak_license.resolve_license_key = lambda: "free-key"  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "cloakbrowser.license", cloak_license)
+    monkeypatch.setattr(cloak_config, "get_effective_version", effective, raising=False)
+
+    assert get_effective_chromium_version() == "150.0.1.2.3"
+    assert seen == [True]
+
+
 def test_inspect_runtime_verifies_effective_cached_binary(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

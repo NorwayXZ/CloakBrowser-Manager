@@ -12,10 +12,11 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 from dataclasses import dataclass
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -47,6 +48,8 @@ BLANK_PAGE_URLS = {
     "chrome://new-tab-page/",
 }
 COOKIE_IMPORTER_DIRNAME = "manager-cookie-importer"
+MACOS_CHROMIUM_DEFAULTS_DOMAIN = "org.chromium.Chromium"
+_MACOS_LOCALE_LAUNCH_LOCK = threading.Lock()
 
 
 def _read_json_file(path: Path) -> dict[str, Any]:
@@ -158,6 +161,40 @@ def _sync_session_restore(user_data_dir: Path) -> None:
         session["restore_on_startup"] = 1
     else:
         prefs["session"] = {"restore_on_startup": 1}
+    _write_json_file(prefs_path, prefs)
+
+
+def _sync_native_window_placement(user_data_dir: Path, width: int, height: int) -> None:
+    """Keep Chromium's saved headed window bounds aligned with the profile screen."""
+    if width <= 0 or height <= 0:
+        return
+
+    default_dir = user_data_dir / "Default"
+    default_dir.mkdir(parents=True, exist_ok=True)
+    prefs_path = default_dir / "Preferences"
+    prefs = _read_json_file(prefs_path)
+    browser = prefs.setdefault("browser", {})
+    if not isinstance(browser, dict):
+        browser = {}
+        prefs["browser"] = browser
+    placement = browser.setdefault("window_placement", {})
+    if not isinstance(placement, dict):
+        placement = {}
+        browser["window_placement"] = placement
+
+    left = placement.get("left", 0)
+    top = placement.get("top", 30)
+    if not isinstance(left, int):
+        left = 0
+    if not isinstance(top, int):
+        top = 30
+    placement.update({
+        "left": left,
+        "top": top,
+        "right": left + width,
+        "bottom": top + height,
+        "maximized": False,
+    })
     _write_json_file(prefs_path, prefs)
 
 
@@ -389,12 +426,74 @@ def _build_locale_timezone_env(
         env_updates.update({
             "LANG": posix_locale,
             "LC_ALL": posix_locale,
+            "LC_CTYPE": posix_locale,
             "LC_MESSAGES": posix_locale,
             "LANGUAGE": ":".join(lang.replace("-", "_") for lang in _locale_fallbacks(locale)),
         })
     if not env_updates:
         return None
     return {**os.environ, **env_updates}
+
+
+def _read_macos_default(key: str) -> str | list[str] | None:
+    result = subprocess.run(
+        ["/usr/bin/defaults", "read", MACOS_CHROMIUM_DEFAULTS_DOMAIN, key],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+
+    raw = result.stdout.strip()
+    if key != "AppleLanguages":
+        return raw or None
+
+    quoted = re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"', raw)
+    if quoted:
+        return [bytes(value, "utf-8").decode("unicode_escape") for value in quoted]
+    values = [
+        value.strip().strip('"')
+        for value in raw.strip("()\n ").split(",")
+        if value.strip()
+    ]
+    return values or None
+
+
+def _write_macos_default(key: str, value: str | list[str] | None) -> None:
+    if value is None:
+        subprocess.run(
+            ["/usr/bin/defaults", "delete", MACOS_CHROMIUM_DEFAULTS_DOMAIN, key],
+            capture_output=True,
+            check=False,
+        )
+        return
+
+    command = ["/usr/bin/defaults", "write", MACOS_CHROMIUM_DEFAULTS_DOMAIN, key]
+    if isinstance(value, list):
+        command.extend(["-array", *value])
+    else:
+        command.extend(["-string", value])
+    subprocess.run(command, capture_output=True, check=True)
+
+
+@contextmanager
+def _macos_application_locale(locale: str | None):
+    """Apply Cocoa's locale while Chromium initializes, then restore defaults."""
+    if sys.platform != "darwin" or not locale:
+        yield
+        return
+
+    with _MACOS_LOCALE_LAUNCH_LOCK:
+        previous_languages = _read_macos_default("AppleLanguages")
+        previous_locale = _read_macos_default("AppleLocale")
+        try:
+            _write_macos_default("AppleLanguages", [locale])
+            _write_macos_default("AppleLocale", locale.replace("-", "_"))
+            yield
+        finally:
+            _write_macos_default("AppleLanguages", previous_languages)
+            _write_macos_default("AppleLocale", previous_locale)
 
 
 def _has_chrome_arg(args: list[str], flag: str) -> bool:
@@ -539,6 +638,39 @@ def _chrome_popen_kwargs(env: dict[str, str] | None = None) -> dict[str, Any]:
     return popen_kwargs
 
 
+def _sync_macos_window_after_launch(process: subprocess.Popen[Any], viewport: Any) -> None:
+    """Normalize a restored macOS window without opening a DevTools channel."""
+    if sys.platform != "darwin" or not isinstance(viewport, dict):
+        return
+    width = viewport.get("width")
+    height = viewport.get("height")
+    if not isinstance(width, int) or not isinstance(height, int) or width <= 0 or height <= 0:
+        return
+
+    script = f'''tell application "System Events"
+  set targetProcess to first application process whose unix id is {process.pid}
+  set frontmost of targetProcess to true
+  repeat 30 times
+    if (count of windows of targetProcess) > 0 then
+      set position of front window of targetProcess to {{30, 30}}
+      set size of front window of targetProcess to {{{width}, {height}}}
+      exit repeat
+    end if
+    delay 0.1
+  end repeat
+end tell'''
+    try:
+        subprocess.run(
+            ["/usr/bin/osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("Could not normalize macOS browser window: %s", exc)
+
+
 def _has_restorable_chrome_session(user_data_dir: Path) -> bool:
     default_dir = user_data_dir / "Default"
     session_candidates = [
@@ -594,10 +726,12 @@ def _launch_system_chrome_manual_process(
         chrome_args.append(start_url)
     for url in start_urls or []:
         chrome_args.append(url)
-    return subprocess.Popen(
+    process = subprocess.Popen(
         [os.fspath(chrome_path), *chrome_args],
         **_chrome_popen_kwargs(env),
     )
+    _sync_macos_window_after_launch(process, viewport)
+    return process
 
 
 def _launch_cloakbrowser_manual_process(
@@ -639,18 +773,33 @@ def _launch_cloakbrowser_manual_process(
         if width and height:
             _append_chrome_arg_once(extra_args, "--window-size", f"{width},{height}")
 
+    if sys.platform == "darwin":
+        from cloakbrowser.config import binary_supports_maximized_window
+
+        start_maximized = binary_supports_maximized_window()
+    else:
+        start_maximized = False
+
     chrome_args = build_args(
-        True,
+        sys.platform != "darwin",
         extra_args,
         timezone=timezone,
         locale=locale,
         headless=False,
+        start_maximized=start_maximized,
     )
     chrome_args.extend(start_urls or [])
-    return subprocess.Popen(
-        [os.fspath(browser_path), *chrome_args],
-        **_chrome_popen_kwargs(env),
-    )
+    with _macos_application_locale(locale):
+        process = subprocess.Popen(
+            [os.fspath(browser_path), *chrome_args],
+            **_chrome_popen_kwargs(env),
+        )
+        if sys.platform == "darwin" and locale:
+            # Cocoa reads per-app language defaults during early startup. Keep
+            # them in place until the browser process has initialized them.
+            time.sleep(0.35)
+        _sync_macos_window_after_launch(process, viewport)
+        return process
 
 
 async def _terminate_process_async(process: subprocess.Popen[Any] | None) -> None:
@@ -2029,6 +2178,16 @@ class BrowserManager:
 
             _init_profile_defaults(user_data_dir)
             _sync_session_restore(user_data_dir)
+            if (
+                requested_launch_mode == "manual"
+                and self.runtime.runtime_mode == "native"
+                and not bool(profile.get("headless", False))
+            ):
+                _sync_native_window_placement(
+                    user_data_dir,
+                    int(profile.get("screen_width", 1440)),
+                    int(profile.get("screen_height", 900)),
+                )
 
             if display is not None and ws_port is not None:
                 await self.vnc.start_vnc(
@@ -2178,6 +2337,19 @@ class BrowserManager:
                 launch_options["viewport"] = {
                     "width": profile.get("screen_width", 1920),
                     "height": profile.get("screen_height", 1080) - 133,
+                }
+            elif (
+                requested_launch_mode == "manual"
+                and self.runtime.runtime_mode == "native"
+                and not bool(profile.get("headless", False))
+            ):
+                # Headed native launches need an explicit outer window size.
+                # Without it, older macOS CloakBrowser builds can report
+                # outerWidth/outerHeight as zero and create a content area
+                # larger than the profile's screen geometry.
+                launch_options["viewport"] = {
+                    "width": profile.get("screen_width", 1440),
+                    "height": profile.get("screen_height", 900),
                 }
 
             use_manual_system_chrome = (
@@ -2525,13 +2697,19 @@ class BrowserManager:
 
         expected_locale = running.effective_locale or profile.get("locale")
         expected_timezone = running.effective_timezone or profile.get("timezone")
+        seed_derived_macos = (
+            running.browser_engine == "cloakbrowser"
+            and self.runtime.host_os == "macos"
+            and profile.get("platform") == "macos"
+        )
+        native_or_seed_derived = running.browser_engine == "system_chrome" or seed_derived_macos
         expected_screen_width = None if running.browser_engine == "system_chrome" else profile.get("screen_width")
         expected_screen_height = None if running.browser_engine == "system_chrome" else profile.get("screen_height")
         expected_hardware_concurrency = (
-            None if running.browser_engine == "system_chrome" else profile.get("hardware_concurrency")
+            None if native_or_seed_derived else profile.get("hardware_concurrency")
         )
         expected_device_memory = (
-            None if running.browser_engine == "system_chrome" else profile.get("device_memory")
+            None if native_or_seed_derived else profile.get("device_memory")
         )
         analysis = analyze_fingerprint(
             raw,
@@ -2542,8 +2720,8 @@ class BrowserManager:
             expected_screen_height=expected_screen_height,
             expected_hardware_concurrency=expected_hardware_concurrency,
             expected_device_memory=expected_device_memory,
-            expected_gpu_vendor=None if running.browser_engine == "system_chrome" else profile.get("gpu_vendor"),
-            expected_gpu_renderer=None if running.browser_engine == "system_chrome" else profile.get("gpu_renderer"),
+            expected_gpu_vendor=None if native_or_seed_derived else profile.get("gpu_vendor"),
+            expected_gpu_renderer=None if native_or_seed_derived else profile.get("gpu_renderer"),
             expected_user_agent=profile.get("user_agent"),
             proxy_configured=bool(profile.get("proxy")),
             expected_proxy_ip=(running.proxy_geo or {}).get("ip") if isinstance(running.proxy_geo, dict) else None,
@@ -2570,8 +2748,9 @@ class BrowserManager:
                 "screen_height": expected_screen_height,
                 "hardware_concurrency": expected_hardware_concurrency,
                 "device_memory": expected_device_memory,
-                "gpu_vendor": None if running.browser_engine == "system_chrome" else profile.get("gpu_vendor"),
-                "gpu_renderer": None if running.browser_engine == "system_chrome" else profile.get("gpu_renderer"),
+                "gpu_vendor": None if native_or_seed_derived else profile.get("gpu_vendor"),
+                "gpu_renderer": None if native_or_seed_derived else profile.get("gpu_renderer"),
+                "hardware_profile_source": "seed" if seed_derived_macos else "configured",
             },
             "proxy_geo": running.proxy_geo,
             "network": {
@@ -2683,10 +2862,7 @@ class BrowserManager:
 
     def _build_fingerprint_args(self, profile: dict[str, Any]) -> list[str]:
         """Build extra Chromium args from profile fingerprint settings."""
-        args: list[str] = [
-            "--disable-infobars",
-            "--test-type",  # suppress "unsupported flag: --no-sandbox" bad flags warning
-        ]
+        args: list[str] = []
         if self.runtime.viewer_mode == "vnc":
             args.append("--use-angle=swiftshader")
 
@@ -2696,8 +2872,24 @@ class BrowserManager:
 
         p = profile.get("platform")
         if p:
-            # Map our "macos" to binary's "macos"
             args.append(f"--fingerprint-platform={p}")
+
+        if (
+            p == "macos"
+            and self.runtime.host_os == "macos"
+            and self.runtime.runtime_mode == "native"
+        ):
+            # Let the binary derive one complete Apple Silicon identity from
+            # the fixed seed. Screen geometry is kept explicit because it must
+            # also match the headed window that Chromium restores on macOS.
+            args.append("--fingerprint-noise=false")
+            sw = profile.get("screen_width")
+            sh = profile.get("screen_height")
+            if sw:
+                args.append(f"--fingerprint-screen-width={sw}")
+            if sh:
+                args.append(f"--fingerprint-screen-height={sh}")
+            return args
 
         vendor = profile.get("gpu_vendor")
         if vendor:

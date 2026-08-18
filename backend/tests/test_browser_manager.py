@@ -27,6 +27,8 @@ from backend.browser_manager import (
     _quarantine_macos_cloak_sync_data,
     _startup_urls_for_profile,
     _sync_profile_locale,
+    _sync_macos_window_after_launch,
+    _sync_native_window_placement,
     _sync_session_restore,
     _sync_cookie_import_extension,
     _validate_proxy,
@@ -174,9 +176,9 @@ _mgr = BrowserManager(DOCKER_RUNTIME)
 
 def test_build_args_always_includes_base():
     args = _mgr._build_fingerprint_args({})
-    assert "--disable-infobars" in args
-    assert "--test-type" in args
     assert "--use-angle=swiftshader" in args
+    assert "--disable-infobars" not in args
+    assert "--test-type" not in args
 
 
 def test_build_args_seed():
@@ -221,13 +223,34 @@ def test_build_args_screen():
 
 def test_build_args_empty_profile():
     args = _mgr._build_fingerprint_args({})
-    # Two shared flags plus Docker's software rendering flag.
-    assert len(args) == 3
+    assert args == ["--use-angle=swiftshader"]
 
 
 def test_native_build_args_do_not_force_software_gl():
     args = BrowserManager(NATIVE_RUNTIME)._build_fingerprint_args({})
     assert "--use-angle=swiftshader" not in args
+
+
+def test_native_macos_uses_seed_derived_hardware_profile(tmp_path: Path):
+    manager = BrowserManager(RuntimeConfig("macos", "native", "native-window", tmp_path))
+    args = manager._build_fingerprint_args({
+        "fingerprint_seed": 89168,
+        "platform": "macos",
+        "gpu_vendor": "Google Inc. (Apple)",
+        "gpu_renderer": "ANGLE (Apple, Apple M1 Max)",
+        "hardware_concurrency": 10,
+        "device_memory": 8,
+        "screen_width": 1512,
+        "screen_height": 982,
+    })
+
+    assert args == [
+        "--fingerprint=89168",
+        "--fingerprint-platform=macos",
+        "--fingerprint-noise=false",
+        "--fingerprint-screen-width=1512",
+        "--fingerprint-screen-height=982",
+    ]
 
 
 def test_preflight_blocks_cross_platform_profile(tmp_path: Path):
@@ -360,7 +383,7 @@ async def test_native_launch_skips_vnc_and_display(monkeypatch, tmp_path: Path):
     manager.vnc.start_vnc.assert_not_awaited()
     options = manual_launch.call_args.kwargs
     assert "env" not in options
-    assert "viewport" not in options
+    assert options["viewport"] == {"width": 1920, "height": 1080}
     assert "--use-angle=swiftshader" not in options["args"]
     assert "--restore-last-session" in options["args"]
     assert not any(arg.startswith("--remote-debugging") for arg in options["args"])
@@ -502,6 +525,26 @@ def test_system_chrome_manual_process_has_no_cdp_flags(monkeypatch, tmp_path: Pa
     assert "--proxy-server=socks5://127.0.0.1:1080" in command
     assert "--lang=zh-TW" in command
     assert command[-1] == "http://127.0.0.1:8080/profile/profile-1/start"
+
+
+def test_macos_window_normalizer_targets_launched_process(monkeypatch):
+    from backend import browser_manager as module
+
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    process = MagicMock(pid=12345)
+
+    _sync_macos_window_after_launch(process, {"width": 1512, "height": 982})
+
+    assert calls
+    assert calls[0][0][:2] == ["/usr/bin/osascript", "-e"]
+    assert "unix id is 12345" in calls[0][0][2]
+    assert "set size of front window of targetProcess to {1512, 982}" in calls[0][0][2]
 
 
 @pytest.mark.asyncio
@@ -835,6 +878,36 @@ def test_normal_exit_does_not_quarantine_sync_metadata(tmp_path: Path):
     assert sync_data_dir.exists()
 
 
+def test_sync_native_window_placement_preserves_profile_data(tmp_path: Path):
+    user_data_dir = tmp_path / "profile"
+    prefs_path = user_data_dir / "Default" / "Preferences"
+    _init_profile_defaults(user_data_dir)
+    prefs = json.loads(prefs_path.read_text())
+    prefs["browser"] = {
+        "window_placement": {
+            "left": 297,
+            "top": 30,
+            "right": 1943,
+            "bottom": 1318,
+            "maximized": True,
+        },
+    }
+    prefs["profile"] = {"keep": "history"}
+    prefs_path.write_text(json.dumps(prefs))
+
+    _sync_native_window_placement(user_data_dir, 1512, 982)
+
+    updated = json.loads(prefs_path.read_text())
+    assert updated["browser"]["window_placement"] == {
+        "left": 297,
+        "top": 30,
+        "right": 1809,
+        "bottom": 1012,
+        "maximized": False,
+    }
+    assert updated["profile"] == {"keep": "history"}
+
+
 @pytest.mark.asyncio
 async def test_macos_cloak_launch_does_not_turn_locale_into_startup_urls(monkeypatch, tmp_path: Path):
     from backend import browser_manager as module
@@ -855,6 +928,28 @@ async def test_macos_cloak_launch_does_not_turn_locale_into_startup_urls(monkeyp
     assert not any(arg.startswith(("-AppleLanguages", "-AppleLocale")) for arg in args)
     assert "(en-US)" not in args
     assert "en_US" not in args
+
+
+@pytest.mark.asyncio
+async def test_native_manual_launch_passes_profile_window_size(monkeypatch, tmp_path: Path):
+    from backend import browser_manager as module
+
+    manager = BrowserManager(RuntimeConfig("macos", "native", "native-window", tmp_path))
+    manual_launch = MagicMock(return_value=MagicMock())
+    monkeypatch.setattr(module, "_launch_cloakbrowser_manual_process", manual_launch)
+    monkeypatch.setattr(manager, "_watch_process", AsyncMock())
+
+    await manager.launch({
+        **_launch_profile(tmp_path),
+        "screen_width": 1440,
+        "screen_height": 900,
+        "platform": "macos",
+    })
+
+    assert manual_launch.call_args.kwargs["viewport"] == {
+        "width": 1440,
+        "height": 900,
+    }
 
 
 def test_cookie_import_extension_is_profile_local_and_hash_stable(tmp_path: Path):
@@ -946,6 +1041,7 @@ def test_build_locale_timezone_env_sets_process_time_and_language():
     assert env["TZ"] == "America/New_York"
     assert env["LANG"] == "en_US.UTF-8"
     assert env["LC_ALL"] == "en_US.UTF-8"
+    assert env["LC_CTYPE"] == "en_US.UTF-8"
     assert env["LANGUAGE"] == "en_US:en"
 
 

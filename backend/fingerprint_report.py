@@ -761,6 +761,61 @@ def analyze_fingerprint(
             message="Screen height differs from the configured profile height",
         )
 
+    inner_width = screen.get("innerWidth")
+    inner_height = screen.get("innerHeight")
+    outer_width = screen.get("outerWidth")
+    outer_height = screen.get("outerHeight")
+    screen_width = screen.get("width")
+    screen_height = screen.get("height")
+    if isinstance(outer_width, (int, float)) and outer_width <= 0:
+        _add_issue(
+            issues,
+            severity="error",
+            signal="window.outerWidth",
+            scope="main",
+            expected="> 0",
+            actual=outer_width,
+            message="浏览器窗口宽度为 0，属于不可能的窗口几何值。",
+        )
+    if isinstance(outer_height, (int, float)) and outer_height <= 0:
+        _add_issue(
+            issues,
+            severity="error",
+            signal="window.outerHeight",
+            scope="main",
+            expected="> 0",
+            actual=outer_height,
+            message="浏览器窗口高度为 0，属于不可能的窗口几何值。",
+        )
+    for signal, inner, outer in (
+        ("window.width", inner_width, outer_width),
+        ("window.height", inner_height, outer_height),
+    ):
+        if all(isinstance(value, (int, float)) and value > 0 for value in (inner, outer)) and inner > outer:
+            _add_issue(
+                issues,
+                severity="error",
+                signal=signal,
+                scope="main",
+                expected=f"inner <= outer ({outer})",
+                actual=inner,
+                message="页面内部尺寸大于浏览器外部窗口，窗口画像不一致。",
+            )
+    for signal, inner, total in (
+        ("screen.width_geometry", inner_width, screen_width),
+        ("screen.height_geometry", inner_height, screen_height),
+    ):
+        if all(isinstance(value, (int, float)) and value > 0 for value in (inner, total)) and inner > total:
+            _add_issue(
+                issues,
+                severity="error",
+                signal=signal,
+                scope="main",
+                expected=f"window <= screen ({total})",
+                actual=inner,
+                message="浏览器内容区域大于画像屏幕尺寸，容易被识别为屏幕参数遮罩。",
+            )
+
     webgl = graphics.get("webgl") if isinstance(graphics.get("webgl"), dict) else {}
     if expected_gpu_vendor and webgl.get("vendor") and str(expected_gpu_vendor).lower() not in str(webgl.get("vendor")).lower():
         _add_issue(

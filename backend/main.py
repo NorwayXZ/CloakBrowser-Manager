@@ -1112,7 +1112,9 @@ async def profile_start_page(profile_id: str):
         statusNode.style.color = "#ff8a8a";
       }}
     }};
-    void submitFingerprintReport();
+    // Restored macOS windows may need a moment to settle before their geometry
+    // is observable by the page. Report after the native launch normalizer runs.
+    window.setTimeout(() => {{ void submitFingerprintReport(); }}, 1000);
   </script>
 </body>
 </html>"""
