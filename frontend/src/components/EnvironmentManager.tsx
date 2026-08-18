@@ -184,7 +184,7 @@ function proxyType(profile: Profile) {
 }
 
 function proxyHost(profile: Profile) {
-  if (!profile.proxy?.trim()) return "本地网络";
+  if (!profile.proxy?.trim()) return profile.proxy_geo?.ip ?? "本地网络";
   if (profile.proxy_geo?.ip) return profile.proxy_geo.ip;
   const value = profile.proxy.trim();
   try {
@@ -197,8 +197,7 @@ function proxyHost(profile: Profile) {
 
 function locationText(profile: Profile) {
   const geo = profile.proxy_geo;
-  if (!profile.proxy) return "使用当前电脑出口";
-  if (!geo) return "打开后检测";
+  if (!geo) return profile.proxy ? "打开后检测" : "启动时检测本地出口";
   const country = [geo.country_code, geo.country].filter(Boolean).join(" - ");
   const city = [geo.region, geo.city].filter(Boolean).join(" / ");
   return [country, city].filter(Boolean).join(" · ") || "未知地区";

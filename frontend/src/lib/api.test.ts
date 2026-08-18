@@ -151,6 +151,23 @@ describe("api.getPreflight", () => {
   });
 });
 
+describe("api.testProxy", () => {
+  it("can test the direct local-network exit", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      ip: "203.0.113.20",
+      timezone: "Asia/Hong_Kong",
+      connection_mode: "direct",
+    }));
+
+    await api.testProxy(null);
+
+    const [url, options] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/proxy/test");
+    expect(JSON.parse(options.body)).toEqual({ proxy: null });
+  });
+});
+
 describe("configuration backup", () => {
   it("exports the Manager configuration", async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({ format: "cloakbrowser-manager-configuration" }));

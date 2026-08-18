@@ -28,7 +28,7 @@ def test_profile_create_minimal():
     assert p.screen_height == 1080
     assert p.humanize is True
     assert p.headless is False
-    assert p.geoip is False
+    assert p.geoip is True
     assert p.human_preset == "default"
 
 

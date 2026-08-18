@@ -176,7 +176,7 @@ def _choose_geo_result(results: list[dict[str, Any]]) -> dict[str, Any]:
     return chosen
 
 
-async def fetch_proxy_geo(proxy: str) -> dict[str, Any]:
+async def fetch_proxy_geo(proxy: str | None) -> dict[str, Any]:
     errors: list[str] = []
     async with httpx.AsyncClient(
         proxy=proxy,

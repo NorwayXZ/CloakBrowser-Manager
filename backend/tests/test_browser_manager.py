@@ -53,6 +53,15 @@ NATIVE_RUNTIME = RuntimeConfig(
 )
 
 
+@pytest.fixture(autouse=True)
+def _disable_live_geo_lookups(monkeypatch: pytest.MonkeyPatch):
+    from backend import browser_manager as module
+
+    lookup = AsyncMock(side_effect=RuntimeError("GeoIP unavailable in unit test"))
+    monkeypatch.setattr(module, "fetch_proxy_geo", lookup)
+    return lookup
+
+
 # ── _normalize_proxy ─────────────────────────────────────────────────────────
 
 
@@ -1277,9 +1286,50 @@ async def test_launch_uses_proxy_geo_when_geoip_off(
 
     running = await manager.launch(profile, launch_mode="debug")
 
-    assert running.proxy_geo == geo
+    assert running.proxy_geo == {**geo, "connection_mode": "proxy"}
     options = launch.await_args.kwargs
     assert options["timezone"] == "America/Chicago"
     assert options["locale"] == "en-US"
     assert running.effective_timezone == "America/Chicago"
     assert running.effective_locale == "en-US"
+
+
+@pytest.mark.asyncio
+async def test_direct_launch_uses_exit_geo_when_timezone_and_locale_are_empty(
+    monkeypatch,
+    tmp_path: Path,
+):
+    from backend import browser_manager as module
+
+    context = MagicMock()
+    context.pages = []
+    context.add_init_script = AsyncMock()
+    manager = BrowserManager(NATIVE_RUNTIME)
+    manager._wait_for_cdp = AsyncMock()
+    launch = AsyncMock(return_value=context)
+    geo = {
+        "ip": "203.0.113.20",
+        "country_code": "HK",
+        "country": "Hong Kong",
+        "timezone": "Asia/Hong_Kong",
+        "suggested_locale": "zh-HK",
+        "source": "test",
+    }
+    lookup = AsyncMock(return_value=geo)
+    monkeypatch.setattr(module, "launch_persistent_context_async", launch)
+    monkeypatch.setattr(module, "fetch_proxy_geo", lookup)
+
+    profile = _launch_profile(tmp_path)
+    profile["proxy"] = None
+    profile["geoip"] = False
+
+    running = await manager.launch(profile, launch_mode="debug")
+
+    lookup.assert_awaited_once_with(None)
+    assert running.proxy_geo == {**geo, "connection_mode": "direct"}
+    options = launch.await_args.kwargs
+    assert options["proxy"] is None
+    assert options["timezone"] == "Asia/Hong_Kong"
+    assert options["locale"] == "zh-HK"
+    assert running.effective_timezone == "Asia/Hong_Kong"
+    assert running.effective_locale == "zh-HK"

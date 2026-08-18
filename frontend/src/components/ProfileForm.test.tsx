@@ -17,14 +17,15 @@ describe("ProfileForm proxy mode", () => {
     expect(screen.getByRole("button", { name: "直连" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByText("直连已启用")).toBeTruthy();
     expect(screen.queryByText("主机:端口")).toBeNull();
-    expect((screen.getByRole("checkbox", { name: /根据代理 IP/ }) as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("checkbox", { name: /根据出口 IP/ }) as HTMLInputElement).disabled).toBe(false);
+    expect(screen.getByRole("button", { name: "检查直连出口" })).toBeTruthy();
 
     fireEvent.change(screen.getByPlaceholderText("例如 Amazon Seller #1"), { target: { value: "Direct profile" } });
     fireEvent.click(screen.getByRole("button", { name: "创建" }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
     expect(onSave.mock.calls[0][0].proxy ?? null).toBeNull();
-    expect(onSave.mock.calls[0][0].geoip).toBe(false);
+    expect(onSave.mock.calls[0][0].geoip).toBe(true);
   });
 
   it("clears a custom proxy when direct mode is selected", async () => {

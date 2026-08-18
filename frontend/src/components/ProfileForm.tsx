@@ -213,7 +213,7 @@ function createDefaultForm(hostOS?: HostOS | null): ProfileCreateData {
     humanize: true,
     human_preset: "default",
     headless: false,
-    geoip: false,
+    geoip: true,
     clipboard_sync: true,
     auto_launch: false,
     group_name: "未分组",
@@ -427,7 +427,7 @@ export function ProfileForm({
       const safeForm = form.platform === allowedPlatform && form.device_profile === selectedDeviceProfile.id
         ? form
         : applyDeviceProfile(form, selectedDeviceProfile);
-      await onSave(form.proxy ? safeForm : { ...safeForm, proxy: null, geoip: false });
+      await onSave(form.proxy ? safeForm : { ...safeForm, proxy: null });
     } finally {
       setSaving(false);
     }
@@ -487,7 +487,6 @@ export function ProfileForm({
     };
     setProxyParts(next);
     set("proxy", proxyFromParts(next));
-    if (kind === "none") set("geoip", false);
     setProxyTest(null);
     setProxyTestError(null);
   };
@@ -499,7 +498,7 @@ export function ProfileForm({
   };
 
   const handleProxyTest = async () => {
-    if (!form.proxy) {
+    if (proxyParts.kind !== "none" && !form.proxy) {
       setProxyTest(null);
       setProxyTestError("请先填写代理主机和端口");
       return;
@@ -508,7 +507,7 @@ export function ProfileForm({
     setProxyTest(null);
     setProxyTestError(null);
     try {
-      const result = await api.testProxy(form.proxy);
+      const result = await api.testProxy(form.proxy ?? null);
       setProxyTest(result);
       if (form.geoip) {
         applyProxyGeo(result);
@@ -540,13 +539,13 @@ export function ProfileForm({
     : form.gpu_renderer?.includes("Renderer: ")
     ? rendererName?.replace(", Unspecified Version)", ")")
     : form.gpu_renderer ?? "真实设备";
-  const proxyGeoFallbackLabel = form.geoip ? "代理 IP 自动覆盖" : "代理 IP 自动补全";
+  const proxyGeoFallbackLabel = form.geoip ? "出口 IP 自动覆盖" : "出口 IP 自动补全";
   const effectiveTimezonePreview = form.timezone
     || proxyTest?.timezone
-    || (form.proxy ? proxyGeoFallbackLabel : "未设置");
+    || proxyGeoFallbackLabel;
   const effectiveLocalePreview = form.locale
     || proxyTest?.suggested_locale
-    || (form.proxy ? proxyGeoFallbackLabel : "未设置");
+    || proxyGeoFallbackLabel;
 
   const handleDeviceProfileChange = (id: string) => {
     const nextProfile = platformProfiles.find((preset) => preset.id === id) ?? getDeviceProfile(getDefaultDeviceProfileId(allowedPlatform));
@@ -950,48 +949,44 @@ export function ProfileForm({
                     </>
                   )}
 
-                  {proxyParts.kind !== "none" && (
-                    <>
-                      <label className="pt-2 text-right text-sm font-medium text-slate-600">代理检测</label>
-                      <div className="space-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={handleProxyTest}
-                            disabled={testingProxy || !form.proxy}
-                            className="btn-secondary flex items-center gap-1.5 disabled:opacity-60"
-                          >
-                            {testingProxy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wifi className="h-3.5 w-3.5" />}
-                            <span>{testingProxy ? "检查中..." : "检查代理"}</span>
-                          </button>
-                          <span className="break-all text-xs text-slate-500">
-                            {form.proxy ? form.proxy : "填写代理后可检查出口 IP、国家、时区和语言"}
-                          </span>
+                  <label className="pt-2 text-right text-sm font-medium text-slate-600">出口检测</label>
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleProxyTest}
+                        disabled={testingProxy || (proxyParts.kind !== "none" && !form.proxy)}
+                        className="btn-secondary flex items-center gap-1.5 disabled:opacity-60"
+                      >
+                        {testingProxy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wifi className="h-3.5 w-3.5" />}
+                        <span>{testingProxy ? "检查中..." : proxyParts.kind === "none" ? "检查直连出口" : "检查代理"}</span>
+                      </button>
+                      <span className="break-all text-xs text-slate-500">
+                        {form.proxy ? form.proxy : "使用当前电脑网络检测公网 IP、国家、时区和语言"}
+                      </span>
+                    </div>
+                    <FieldNote>保存前可以先检查一次；直连和代理都会在启动时重新检测出口。时区/语言留空时自动补全，开启“跟随出口 IP”时强制覆盖手动值。</FieldNote>
+                    {proxyTestError && <div className="text-xs text-red-600">{proxyTestError}</div>}
+                    {proxyTest && (
+                      <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
+                        <div className="flex flex-wrap gap-x-4 gap-y-1">
+                          <span>出口 IP：{proxyTest.ip ?? "未知"}</span>
+                          <span>国家：{proxyTest.country ?? "未知"}</span>
+                          <span>时区：{proxyTest.timezone ?? "未知"}</span>
+                          <span>建议语言：{proxyTest.suggested_locale ?? "未知"}</span>
                         </div>
-                        <FieldNote>保存前建议先检查一次；检查结果可以一键写入时区和语言。即使不点“应用”，启动时也会尽量跟随代理地区。</FieldNote>
-                        {proxyTestError && <div className="text-xs text-red-600">{proxyTestError}</div>}
-                        {proxyTest && (
-                          <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
-                            <div className="flex flex-wrap gap-x-4 gap-y-1">
-                              <span>出口 IP：{proxyTest.ip ?? "未知"}</span>
-                              <span>国家：{proxyTest.country ?? "未知"}</span>
-                              <span>时区：{proxyTest.timezone ?? "未知"}</span>
-                              <span>建议语言：{proxyTest.suggested_locale ?? "未知"}</span>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => applyProxyGeo()}
-                              disabled={!proxyTest.timezone && !proxyTest.suggested_locale}
-                              className="mt-2 inline-flex items-center gap-1.5 text-accent disabled:opacity-60"
-                            >
-                              <Globe className="h-3.5 w-3.5" />
-                              <span>应用到时区和语言</span>
-                            </button>
-                          </div>
-                        )}
+                        <button
+                          type="button"
+                          onClick={() => applyProxyGeo()}
+                          disabled={!proxyTest.timezone && !proxyTest.suggested_locale}
+                          className="mt-2 inline-flex items-center gap-1.5 text-accent disabled:opacity-60"
+                        >
+                          <Globe className="h-3.5 w-3.5" />
+                          <span>应用到时区和语言</span>
+                        </button>
                       </div>
-                    </>
-                  )}
+                    )}
+                  </div>
 
                   <label className="pt-2 text-right text-sm font-medium text-slate-600">时区语言</label>
                   <div>
@@ -1009,7 +1004,7 @@ export function ProfileForm({
                         placeholder="zh-CN"
                       />
                     </div>
-                    <FieldNote>左边填 IANA 时区，例如 Asia/Taipei；右边填浏览器语言，例如 zh-TW 或 en-US。代理模式留空时会先跟随代理地区；直连模式留空时使用浏览器和系统默认值。</FieldNote>
+                    <FieldNote>左边填 IANA 时区，例如 Asia/Hong_Kong；右边填浏览器语言，例如 zh-HK。留空时按当前出口 IP 自动补全；手动填写时仅在开启“跟随出口 IP”后被覆盖。</FieldNote>
                   </div>
 
                   <label className="pt-2 text-right text-sm font-medium text-slate-600">跟随 IP</label>
@@ -1017,14 +1012,13 @@ export function ProfileForm({
                     <label className="flex items-center gap-2 text-sm text-slate-700">
                       <input
                         type="checkbox"
-                        checked={proxyParts.kind !== "none" && (form.geoip ?? false)}
+                        checked={form.geoip ?? false}
                         onChange={(e) => set("geoip", e.target.checked)}
-                        disabled={proxyParts.kind === "none"}
                         className="rounded border-slate-300"
                       />
-                      根据代理 IP 自动匹配时区和语言区域
+                      根据出口 IP 自动匹配时区和语言区域
                     </label>
-                    <FieldNote>{proxyParts.kind === "none" ? "直连没有代理 IP，这项仅在选择代理后生效。" : "勾选后会强制覆盖上面的手动值；不勾选时，只要时区/语言留空，启动时也会尽量跟随代理。"}</FieldNote>
+                    <FieldNote>适用于直连和代理。勾选后强制覆盖手动值；不勾选时，只要时区或语言留空，启动时也会按出口地区自动补全。</FieldNote>
                   </div>
                 </div>
               </section>

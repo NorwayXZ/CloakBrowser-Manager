@@ -2144,10 +2144,11 @@ class BrowserManager:
                 "message": "屏幕尺寸必须是至少 320×240 的有效逻辑分辨率。",
             })
 
-        if profile.get("proxy") and profile.get("geoip") and not profile.get("proxy_geo"):
+        if profile.get("geoip") and not profile.get("proxy_geo"):
+            connection_label = "代理" if profile.get("proxy") else "直连出口"
             issues.append({
                 "severity": "warning", "code": "proxy_geo_pending",
-                "message": "已开启按代理匹配语言/时区，但当前还没有保存的代理 GeoIP 结果；启动时会重新测试代理。",
+                "message": f"已开启按出口 IP 匹配语言/时区，但当前还没有保存的{connection_label} GeoIP 结果；启动时会重新检测。",
             })
         if profile.get("cookies_json") and mode == "manual":
             issues.append({
@@ -2294,41 +2295,42 @@ class BrowserManager:
             resolved_timezone = profile.get("timezone") or None
             resolved_locale = profile.get("locale") or None
             proxy_geo: dict[str, Any] | None = None
-            if browser_proxy:
-                try:
-                    geo = await fetch_proxy_geo(browser_proxy)
-                    proxy_geo = geo
-                    proxy_timezone = geo.get("timezone") or None
-                    proxy_locale = geo.get("suggested_locale") or None
-                    applied_timezone = False
-                    applied_locale = False
-                    if proxy_timezone and (profile.get("geoip") or not resolved_timezone):
-                        resolved_timezone = proxy_timezone
-                        applied_timezone = True
-                    if proxy_locale and (profile.get("geoip") or not resolved_locale):
-                        resolved_locale = proxy_locale
-                        applied_locale = True
-                    logger.info(
-                        (
-                            "GeoIP detected for %s: ip=%s country=%s "
-                            "proxy_timezone=%s proxy_locale=%s resolved_timezone=%s "
-                            "resolved_locale=%s applied_timezone=%s applied_locale=%s "
-                            "geoip_enabled=%s source=%s"
-                        ),
-                        profile_id,
-                        geo.get("ip"),
-                        geo.get("country_code") or geo.get("country"),
-                        proxy_timezone,
-                        proxy_locale,
-                        resolved_timezone,
-                        resolved_locale,
-                        applied_timezone,
-                        applied_locale,
-                        bool(profile.get("geoip")),
-                        geo.get("source"),
-                    )
-                except Exception as exc:
-                    logger.warning("GeoIP lookup failed for %s: %s", profile_id, exc)
+            try:
+                connection_mode = "proxy" if browser_proxy else "direct"
+                geo = await asyncio.wait_for(fetch_proxy_geo(browser_proxy), timeout=15)
+                proxy_geo = {**geo, "connection_mode": connection_mode}
+                exit_timezone = geo.get("timezone") or None
+                exit_locale = geo.get("suggested_locale") or None
+                applied_timezone = False
+                applied_locale = False
+                if exit_timezone and (profile.get("geoip") or not resolved_timezone):
+                    resolved_timezone = exit_timezone
+                    applied_timezone = True
+                if exit_locale and (profile.get("geoip") or not resolved_locale):
+                    resolved_locale = exit_locale
+                    applied_locale = True
+                logger.info(
+                    (
+                        "GeoIP detected for %s: connection=%s ip=%s country=%s "
+                        "exit_timezone=%s exit_locale=%s resolved_timezone=%s "
+                        "resolved_locale=%s applied_timezone=%s applied_locale=%s "
+                        "geoip_enabled=%s source=%s"
+                    ),
+                    profile_id,
+                    connection_mode,
+                    geo.get("ip"),
+                    geo.get("country_code") or geo.get("country"),
+                    exit_timezone,
+                    exit_locale,
+                    resolved_timezone,
+                    resolved_locale,
+                    applied_timezone,
+                    applied_locale,
+                    bool(profile.get("geoip")),
+                    geo.get("source"),
+                )
+            except Exception as exc:
+                logger.warning("GeoIP lookup failed for %s: %s", profile_id, exc)
 
             _sync_profile_locale(user_data_dir, resolved_locale)
             if browser_engine == "system_chrome" and proxy:

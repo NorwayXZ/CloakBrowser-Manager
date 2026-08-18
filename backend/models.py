@@ -31,7 +31,7 @@ class ProfileCreate(BaseModel):
     humanize: bool = True
     human_preset: Literal["default", "careful"] = "default"
     headless: bool = False
-    geoip: bool = False
+    geoip: bool = True
     clipboard_sync: bool = True
     auto_launch: bool = False
     color_scheme: Literal["light", "dark", "no-preference"] | None = None
@@ -106,7 +106,7 @@ class ProfileResponse(BaseModel):
     humanize: bool = True
     human_preset: str = "default"
     headless: bool = False
-    geoip: bool = False
+    geoip: bool = True
     clipboard_sync: bool = True
     auto_launch: bool = False
     group_name: str | None = "未分组"
@@ -204,7 +204,7 @@ class PreflightResponse(BaseModel):
 
 
 class ProxyTestRequest(BaseModel):
-    proxy: str
+    proxy: str | None = None
 
 
 class ProxyTestResponse(BaseModel):
@@ -219,6 +219,7 @@ class ProxyTestResponse(BaseModel):
     org: str | None = None
     asn: str | None = None
     source: str = "ipapi.co"
+    connection_mode: Literal["direct", "proxy"] | None = None
 
 
 class GroupCreate(BaseModel):

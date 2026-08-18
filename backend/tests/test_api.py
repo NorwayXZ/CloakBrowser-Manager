@@ -99,6 +99,24 @@ def test_update_profile_not_found(app_client: TestClient):
     assert resp.status_code == 404
 
 
+def test_direct_connection_test_uses_local_network(app_client: TestClient):
+    geo = {
+        "ip": "203.0.113.20",
+        "country": "Hong Kong",
+        "country_code": "HK",
+        "timezone": "Asia/Hong_Kong",
+        "suggested_locale": "zh-HK",
+        "source": "test",
+    }
+    with patch("backend.main.fetch_proxy_geo", AsyncMock(return_value=geo)) as lookup:
+        response = app_client.post("/api/proxy/test", json={"proxy": None})
+
+    assert response.status_code == 200
+    assert response.json()["timezone"] == "Asia/Hong_Kong"
+    assert response.json()["connection_mode"] == "direct"
+    lookup.assert_awaited_once_with(None)
+
+
 def test_delete_profile(app_client: TestClient):
     create = app_client.post("/api/profiles", json={"name": "Delete Me"})
     pid = create.json()["id"]

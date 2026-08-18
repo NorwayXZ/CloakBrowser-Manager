@@ -645,8 +645,11 @@ async def auth_logout(request: Request, response: Response):
 
 def _profile_response(profile: dict) -> ProfileResponse:
     status = browser_mgr.get_status(profile["id"], profile)
-    if profile.get("proxy") and not status.get("proxy_geo") and profile.get("proxy_geo"):
-        status["proxy_geo"] = profile.get("proxy_geo")
+    stored_geo = profile.get("proxy_geo")
+    if not status.get("proxy_geo") and stored_geo and (
+        profile.get("proxy") or stored_geo.get("connection_mode") == "direct"
+    ):
+        status["proxy_geo"] = stored_geo
     payload = {**profile, **status}
     payload["tags"] = [TagResponse(**tag) for tag in profile.get("tags", [])]
     return ProfileResponse(**payload)
@@ -1190,15 +1193,14 @@ async def update_browser_binary():
 
 @app.post("/api/proxy/test", response_model=ProxyTestResponse)
 async def test_proxy(req: ProxyTestRequest):
-    raw_proxy = req.proxy.strip()
-    if not raw_proxy:
-        raise HTTPException(status_code=400, detail="请先填写代理")
-
-    try:
-        proxy = _normalize_proxy(raw_proxy)
-        _validate_proxy(proxy)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=f"代理格式无效：{exc}") from exc
+    raw_proxy = (req.proxy or "").strip()
+    proxy = None
+    if raw_proxy:
+        try:
+            proxy = _normalize_proxy(raw_proxy)
+            _validate_proxy(proxy)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"代理格式无效：{exc}") from exc
 
     xray_process = None
     proxy_bridge = None
@@ -1212,14 +1214,16 @@ async def test_proxy(req: ProxyTestRequest):
                 data_dir=browser_mgr.runtime.data_dir,
             )
             effective_proxy = xray_process.browser_proxy
-        elif urlparse(proxy).scheme == "socks5" and (
+        elif proxy and urlparse(proxy).scheme == "socks5" and (
             urlparse(proxy).username or urlparse(proxy).password
         ):
             proxy_bridge = HttpProxyBridge(proxy)
             effective_proxy = await proxy_bridge.start()
         data = await fetch_proxy_geo(effective_proxy)
+        data["connection_mode"] = "proxy" if effective_proxy else "direct"
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"代理测试失败：{exc}") from exc
+        label = "代理测试" if proxy else "直连出口检测"
+        raise HTTPException(status_code=400, detail=f"{label}失败：{exc}") from exc
     finally:
         if proxy_bridge is not None:
             await proxy_bridge.close()

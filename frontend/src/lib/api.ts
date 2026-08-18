@@ -159,6 +159,7 @@ export interface ProxyTestResult {
   org: string | null;
   asn: string | null;
   source: string;
+  connection_mode?: "direct" | "proxy" | null;
 }
 
 export interface ProfileGroup {
@@ -413,7 +414,7 @@ export const api = {
   getFingerprintReport: (id: string) =>
     request<FingerprintReport>(`/api/profiles/${id}/fingerprint-report`),
 
-  testProxy: (proxy: string) =>
+  testProxy: (proxy: string | null) =>
     request<ProxyTestResult>("/api/proxy/test", {
       method: "POST",
       body: JSON.stringify({ proxy }),
