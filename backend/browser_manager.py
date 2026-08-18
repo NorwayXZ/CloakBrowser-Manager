@@ -50,7 +50,25 @@ BLANK_PAGE_URLS = {
 COOKIE_IMPORTER_DIRNAME = "manager-cookie-importer"
 MACOS_CHROMIUM_DEFAULTS_DOMAIN = "org.chromium.Chromium"
 CLOAKBROWSER_LICENSE_HOST = "cloakbrowser.dev"
+CLOAKBROWSER_LICENSE_STARTUP_GRACE = 0.5
 _MACOS_LOCALE_LAUNCH_LOCK = threading.Lock()
+
+LICENSE_EXIT_REASONS = {
+    76: "启动失败：授权并发已满，请先关闭其他伪装画像（免费版仅支持 1 个）",
+    77: "启动失败：CloakBrowser 授权无效、已过期或缺失",
+    78: "启动失败：无法连接 CloakBrowser 授权服务器，请检查网络",
+    79: "启动失败：本地授权配置异常，请检查 ~/.cloakbrowser 目录权限",
+}
+
+
+class BrowserLaunchError(RuntimeError):
+    """Browser process exited during its startup handshake."""
+
+
+def _browser_exit_reason(returncode: int | None) -> str:
+    if returncode in (0, None):
+        return "正常关闭"
+    return LICENSE_EXIT_REASONS.get(returncode, f"异常退出（代码 {returncode}）")
 
 
 def _read_json_file(path: Path) -> dict[str, Any]:
@@ -2412,6 +2430,14 @@ class BrowserManager:
                     **launch_options,
                     start_urls=manual_start_urls,
                 )
+                if use_manual_cloakbrowser:
+                    await asyncio.sleep(CLOAKBROWSER_LICENSE_STARTUP_GRACE)
+                    returncode = browser_process.poll()
+                    if isinstance(returncode, int):
+                        reason = _browser_exit_reason(returncode)
+                        if returncode == 0:
+                            reason = "启动失败：浏览器在启动阶段已关闭"
+                        raise BrowserLaunchError(reason)
             else:
                 debug_args = [*extra_args, "--remote-debugging-address=127.0.0.1"]
                 last_cdp_error: Exception | None = None
@@ -2590,9 +2616,10 @@ class BrowserManager:
         except Exception as exc:
             logger.debug("Process watcher failed for %s: %s", profile_id, exc)
             return
-        returncode = process.returncode
-        reason = "正常关闭" if returncode in (0, None) else f"异常退出（代码 {returncode}）"
-        await self._on_browser_closed(profile_id, exit_reason=reason)
+        await self._on_browser_closed(
+            profile_id,
+            exit_reason=_browser_exit_reason(process.returncode),
+        )
 
     async def _dispose_running(
         self,

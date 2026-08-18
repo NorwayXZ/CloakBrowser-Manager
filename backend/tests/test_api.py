@@ -250,6 +250,19 @@ def test_launch_failure_500(app_client: TestClient):
     assert resp.json()["detail"] == "Failed to launch browser"
 
 
+def test_license_launch_failure_returns_actionable_conflict(app_client: TestClient):
+    create = app_client.post("/api/profiles", json={"name": "License limited"})
+    pid = create.json()["id"]
+    reason = "启动失败：授权并发已满，请先关闭其他伪装画像（免费版仅支持 1 个）"
+    main.browser_mgr.launch = AsyncMock(side_effect=main.BrowserLaunchError(reason))
+
+    resp = app_client.post(f"/api/profiles/{pid}/launch")
+
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == reason
+    assert main.db.get_profile(pid)["last_exit_reason"] == reason
+
+
 def test_native_launch_has_no_vnc_display(
     app_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

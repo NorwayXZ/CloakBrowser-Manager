@@ -13,6 +13,7 @@ import pytest
 from backend.browser_manager import (
     _accept_language_value,
     _build_locale_timezone_env,
+    _browser_exit_reason,
     _chrome_proxy_args,
     _build_fingerprint_init_script,
     _build_worker_fingerprint_patch,
@@ -162,6 +163,13 @@ def test_cloak_proxy_bypasses_license_host():
     resolver = next(arg for arg in args if arg.startswith("--host-resolver-rules="))
     assert "cloakbrowser.dev" in bypass
     assert "EXCLUDE cloakbrowser.dev" in resolver
+
+
+def test_license_exit_code_has_actionable_reason():
+    assert _browser_exit_reason(76) == (
+        "启动失败：授权并发已满，请先关闭其他伪装画像（免费版仅支持 1 个）"
+    )
+    assert _browser_exit_reason(42) == "异常退出（代码 42）"
 
 
 # ── startup URLs ─────────────────────────────────────────────────────────────

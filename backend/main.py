@@ -31,7 +31,7 @@ import starlette.requests
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from . import database as db
-from .browser_manager import BrowserManager, _normalize_proxy, _validate_proxy
+from .browser_manager import BrowserLaunchError, BrowserManager, _normalize_proxy, _validate_proxy
 from .cloak_runtime import get_effective_chromium_version, inspect_cloak_runtime
 from .fingerprint_report import DEFAULT_NETWORK_PROBE_URL, DIAGNOSTIC_SCRIPT
 from .proxy_bridge import HttpProxyBridge
@@ -854,6 +854,9 @@ async def launch_profile(
             profile,
             launch_mode=(req.launch_mode if req else "manual"),
         )
+    except BrowserLaunchError as exc:
+        db.mark_profile_exit(profile_id, str(exc))
+        raise HTTPException(status_code=409, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
