@@ -17,6 +17,7 @@ import { NativeWindowStatus } from "./components/NativeWindowStatus";
 import { LoginPage } from "./components/LoginPage";
 import { AccountSettings } from "./components/AccountSettings";
 import { PreflightDialog, type PreflightEntry } from "./components/PreflightDialog";
+import { shouldEnterProfileViewer } from "./lib/launchNavigation";
 
 type AuthState = "checking" | "required" | "ok" | "error";
 type View = "list" | "create" | "edit" | "view";
@@ -294,7 +295,7 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
     setPendingLaunch(null);
     for (const entry of entries) {
       const result = await launch(entry.id, mode);
-      if (entries.length === 1 && result && (result.viewer_mode === "vnc" || result.viewer_mode === "native-window")) {
+      if (result && shouldEnterProfileViewer(result.viewer_mode, entries.length)) {
         setSelectedId(entry.id);
         setView("view");
       }
