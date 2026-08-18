@@ -161,6 +161,35 @@ def _sync_session_restore(user_data_dir: Path) -> None:
     _write_json_file(prefs_path, prefs)
 
 
+def _quarantine_macos_cloak_sync_data(
+    user_data_dir: Path,
+    last_exit_reason: str | None,
+) -> Path | None:
+    """Preserve incompatible Chromium sync metadata after a macOS SIGTRAP."""
+    if not last_exit_reason or not re.search(r"(?:代码\s*-5|SIGTRAP)", last_exit_reason, re.I):
+        return None
+
+    sync_data_dir = user_data_dir / "Default" / "Sync Data"
+    if not sync_data_dir.exists():
+        return None
+
+    recovery_dir = user_data_dir / ".manager-recovery"
+    recovery_dir.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    destination = recovery_dir / f"Sync Data-{stamp}"
+    suffix = 1
+    while destination.exists():
+        destination = recovery_dir / f"Sync Data-{stamp}-{suffix}"
+        suffix += 1
+
+    shutil.move(os.fspath(sync_data_dir), os.fspath(destination))
+    logger.warning(
+        "Quarantined incompatible Chromium sync metadata after macOS SIGTRAP: %s",
+        destination,
+    )
+    return destination
+
+
 def _parse_profile_cookies(
     raw: str | None,
     *,
@@ -378,30 +407,6 @@ def _append_chrome_arg_once(args: list[str], flag: str, value: str | None = None
     args.append(flag if value is None else f"{flag}={value}")
 
 
-def _set_macos_application_locale(args: list[str], locale: str) -> None:
-    """Set Chromium's Cocoa application locale using NSArgumentDomain values."""
-    cleaned: list[str] = []
-    index = 0
-    while index < len(args):
-        arg = args[index]
-        if arg in {"-AppleLanguages", "-AppleLocale"}:
-            index += 2
-            continue
-        if arg.startswith(("-AppleLanguages=", "-AppleLocale=")):
-            index += 1
-            continue
-        cleaned.append(arg)
-        index += 1
-
-    args[:] = cleaned
-    args.extend([
-        "-AppleLanguages",
-        f"({locale})",
-        "-AppleLocale",
-        locale.replace("-", "_"),
-    ])
-
-
 def _format_proxy_endpoint(parsed: Any) -> str:
     host = parsed.hostname or ""
     if ":" in host and not host.startswith("["):
@@ -517,10 +522,6 @@ def _build_system_chrome_command_args(
     if locale:
         _append_chrome_arg_once(chrome_args, "--lang", locale)
         _append_chrome_arg_once(chrome_args, "--accept-lang", _accept_language_value(locale))
-        if sys.platform == "darwin":
-            # On macOS Chromium derives renderer Intl defaults from Cocoa's
-            # application locale. --lang alone only changes web languages.
-            _set_macos_application_locale(chrome_args, locale)
 
     return chrome_args
 
@@ -2061,6 +2062,11 @@ class BrowserManager:
                 _validate_proxy(proxy)
 
             browser_engine = self._browser_engine(profile)
+            if self.runtime.host_os == "macos" and browser_engine == "cloakbrowser":
+                _quarantine_macos_cloak_sync_data(
+                    user_data_dir,
+                    profile.get("last_exit_reason"),
+                )
             browser_proxy = proxy
             if proxy and is_xray_link(proxy):
                 xray_process = await start_xray_proxy(
@@ -2146,8 +2152,6 @@ class BrowserManager:
                 if SESSION_RESTORE_ARG not in extra_args:
                     extra_args.append(SESSION_RESTORE_ARG)
             extra_args += user_launch_args
-            if self.runtime.host_os == "macos" and resolved_locale:
-                _set_macos_application_locale(extra_args, resolved_locale)
 
             launch_env = _build_locale_timezone_env(
                 locale=resolved_locale,

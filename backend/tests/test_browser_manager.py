@@ -24,7 +24,7 @@ from backend.browser_manager import (
     _normalize_proxy,
     _parse_profile_cookies,
     _playwright_proxy,
-    _set_macos_application_locale,
+    _quarantine_macos_cloak_sync_data,
     _startup_urls_for_profile,
     _sync_profile_locale,
     _sync_session_restore,
@@ -626,12 +626,12 @@ async def test_macos_cloak_debug_uses_direct_process_launcher(monkeypatch, tmp_p
 
     launch.assert_awaited_once()
     package_launch.assert_not_awaited()
-    assert launch.await_args.kwargs["args"][-6:-2] == [
-        "-AppleLanguages",
-        "(en-US)",
-        "-AppleLocale",
-        "en_US",
-    ]
+    args = launch.await_args.kwargs["args"]
+    assert "--lang=en-US" in args
+    assert "--fingerprint-locale=en-US" in args
+    assert not any(arg.startswith(("-AppleLanguages", "-AppleLocale")) for arg in args)
+    assert "(en-US)" not in args
+    assert "en_US" not in args
 
 
 @pytest.mark.asyncio
@@ -803,29 +803,40 @@ def test_accept_language_value_adds_base_language():
     assert _accept_language_value("zh-HK") == "zh-HK,zh"
 
 
-def test_set_macos_application_locale_replaces_stale_values():
-    args = [
-        "--lang=zh-CN",
-        "-AppleLanguages",
-        "(zh-CN)",
-        "-AppleLocale=zh_CN",
-        "--restore-last-session",
-    ]
+def test_macos_sigtrap_quarantines_only_sync_metadata(tmp_path: Path):
+    user_data_dir = tmp_path / "profile"
+    sync_data_dir = user_data_dir / "Default" / "Sync Data"
+    sync_data_dir.mkdir(parents=True)
+    (sync_data_dir / "LevelDB").write_text("sync-state")
+    cookies = user_data_dir / "Default" / "Cookies"
+    cookies.write_text("cookies")
+    history = user_data_dir / "Default" / "History"
+    history.write_text("history")
 
-    _set_macos_application_locale(args, "en-US")
+    destination = _quarantine_macos_cloak_sync_data(
+        user_data_dir,
+        "异常退出（代码 -5）",
+    )
 
-    assert args == [
-        "--lang=zh-CN",
-        "--restore-last-session",
-        "-AppleLanguages",
-        "(en-US)",
-        "-AppleLocale",
-        "en_US",
-    ]
+    assert destination is not None
+    assert destination.parent == user_data_dir / ".manager-recovery"
+    assert (destination / "LevelDB").read_text() == "sync-state"
+    assert not sync_data_dir.exists()
+    assert cookies.read_text() == "cookies"
+    assert history.read_text() == "history"
+
+
+def test_normal_exit_does_not_quarantine_sync_metadata(tmp_path: Path):
+    user_data_dir = tmp_path / "profile"
+    sync_data_dir = user_data_dir / "Default" / "Sync Data"
+    sync_data_dir.mkdir(parents=True)
+
+    assert _quarantine_macos_cloak_sync_data(user_data_dir, "正常关闭") is None
+    assert sync_data_dir.exists()
 
 
 @pytest.mark.asyncio
-async def test_macos_cloak_launch_adds_cocoa_application_locale(monkeypatch, tmp_path: Path):
+async def test_macos_cloak_launch_does_not_turn_locale_into_startup_urls(monkeypatch, tmp_path: Path):
     from backend import browser_manager as module
 
     manager = BrowserManager(RuntimeConfig("macos", "native", "native-window", tmp_path))
@@ -839,12 +850,11 @@ async def test_macos_cloak_launch_adds_cocoa_application_locale(monkeypatch, tmp
     })
 
     args = manual_launch.call_args.kwargs["args"]
-    assert args[-4:] == [
-        "-AppleLanguages",
-        "(en-US)",
-        "-AppleLocale",
-        "en_US",
-    ]
+    assert "--lang=en-US" in args
+    assert "--fingerprint-locale=en-US" in args
+    assert not any(arg.startswith(("-AppleLanguages", "-AppleLocale")) for arg in args)
+    assert "(en-US)" not in args
+    assert "en_US" not in args
 
 
 def test_cookie_import_extension_is_profile_local_and_hash_stable(tmp_path: Path):
