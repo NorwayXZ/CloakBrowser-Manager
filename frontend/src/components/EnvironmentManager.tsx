@@ -214,12 +214,17 @@ function noteText(profile: Profile) {
 function lastOpenedText(profile: Profile) {
   if (profile.status === "running") return "运行中";
   const exitReason = profile.last_exit_reason;
-  if (exitReason === "异常退出（代码 76）") return "授权并发已满，请先关闭其他伪装画像";
-  if (exitReason === "异常退出（代码 77）") return "CloakBrowser 授权无效或已过期";
-  if (exitReason === "异常退出（代码 78）") return "CloakBrowser 授权服务器连接失败";
-  if (exitReason === "异常退出（代码 79）") return "本地授权配置异常";
-  if (exitReason?.startsWith("异常退出") || exitReason?.startsWith("启动失败")) return exitReason;
+  if (exitReason?.startsWith("异常退出") || exitReason?.startsWith("启动失败")) return "上次启动失败";
   return formatDate(profile.last_opened_at || profile.updated_at);
+}
+
+function launchFailureReason(profile: Profile) {
+  const reason = profile.last_exit_reason;
+  if (reason === "异常退出（代码 76）") return "授权并发已满，请先关闭其他伪装画像";
+  if (reason === "异常退出（代码 77）") return "CloakBrowser 授权无效或已过期";
+  if (reason === "异常退出（代码 78）") return "CloakBrowser 授权服务器连接失败";
+  if (reason === "异常退出（代码 79）") return "本地授权配置异常";
+  return reason || "上一次启动未成功";
 }
 
 function hasLaunchFailure(profile: Profile) {
@@ -915,7 +920,7 @@ export function EnvironmentManager({
                     <th className="border-b border-border px-3 py-3 text-left font-medium">分组</th>
                     <th className="border-b border-border px-3 py-3 text-left font-medium">名称</th>
                     <th className="border-b border-border px-3 py-3 text-left font-medium">IP / 代理</th>
-                    <th className="border-b border-border px-3 py-3 text-left font-medium">最近打开</th>
+                    <th className="border-b border-border px-3 py-3 text-left font-medium">最近状态</th>
                     <th className="border-b border-border px-3 py-3 text-left font-medium">备注</th>
                     <th className="border-b border-border px-3 py-3 text-left font-medium">操作</th>
                   </tr>
@@ -997,7 +1002,9 @@ export function EnvironmentManager({
                           ) : (
                             <Clock3 className="h-3.5 w-3.5 shrink-0 text-slate-400" />
                           )}
-                          <span>{lastOpenedText(profile)}</span>
+                          <span title={hasLaunchFailure(profile) ? launchFailureReason(profile) : undefined}>
+                            {lastOpenedText(profile)}
+                          </span>
                         </div>
                       </td>
                       <td className="border-b border-border px-3 py-3 align-middle">
