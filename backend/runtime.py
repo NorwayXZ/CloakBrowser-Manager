@@ -15,7 +15,10 @@ ViewerMode = Literal["native-window", "vnc"]
 
 _RUNTIME_ENV = "CLOAKBROWSER_MANAGER_RUNTIME"
 _DATA_DIR_ENV = "CLOAKBROWSER_MANAGER_DATA_DIR"
+_PORT_ENV = "CLOAKBROWSER_MANAGER_PORT"
 _LEGACY_DATA_DIR_ENVS = ("CLOAKBROWSER_DATA_DIR",)
+
+DEFAULT_SERVER_PORT = 8080
 
 
 @dataclass(frozen=True)
@@ -100,3 +103,19 @@ def resolve_runtime(
         viewer_mode=viewer_mode,
         data_dir=default_data_dir(host_os, env, home),
     )
+
+
+def server_port(environ: Mapping[str, str] | None = None) -> int:
+    """Manager HTTP port. Shared by the uvicorn launcher and any URL the
+    launched browser is told to open, so custom-port deployments stay consistent."""
+    env = os.environ if environ is None else environ
+    raw = env.get(_PORT_ENV)
+    if not raw:
+        return DEFAULT_SERVER_PORT
+    try:
+        port = int(raw)
+    except ValueError:
+        return DEFAULT_SERVER_PORT
+    if not 1 <= port <= 65535:
+        return DEFAULT_SERVER_PORT
+    return port

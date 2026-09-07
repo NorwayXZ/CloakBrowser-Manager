@@ -630,6 +630,12 @@ class XrayProcess:
             self.log_handle.close()
         except Exception:
             pass
+        # Remove the config that holds the user's VLESS UUID / Trojan / SS
+        # credentials so it is not left on disk or synced in the profile dir.
+        try:
+            self.config_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 async def _wait_for_xray(process: asyncio.subprocess.Process, port: int) -> None:
@@ -678,7 +684,15 @@ async def start_xray_proxy(
             stdout=log_handle,
             stderr=asyncio.subprocess.STDOUT,
             cwd=str(xray_asset_dir),
-            env={**os.environ, "XRAY_LOCATION_ASSET": str(xray_asset_dir)},
+            # Only pass the minimal environment Xray needs; do NOT inherit the
+            # Manager's full environment (which may contain GITHUB_TOKEN /
+            # AUTH_TOKEN and other secrets).
+            env={
+                "PATH": os.environ.get("PATH", ""),
+                "HOME": os.environ.get("HOME", ""),
+                "TMPDIR": os.environ.get("TMPDIR", ""),
+                "XRAY_LOCATION_ASSET": str(xray_asset_dir),
+            },
         )
         await _wait_for_xray(process, local_port)
     except BaseException:

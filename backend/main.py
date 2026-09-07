@@ -231,6 +231,28 @@ def _is_https(request: Request) -> bool:
     return "https" in proto
 
 
+# Hosts considered "local" — these start-page endpoints are only ever opened by
+# a browser that Manager launched on the same machine, so remote/hosted clients
+# must never be allowed to read proxy exit IPs or push fake fingerprint reports.
+_LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
+
+
+def _require_local(request: Request) -> None:
+    """Reject non-local access to locally-opened profile pages.
+
+    Guards /profile/* endpoints that are intentionally unauthenticated (the
+    launched browser has no auth cookie) but must not be reachable by remote
+    attackers when the Manager is exposed beyond localhost.
+    """
+    if getattr(request, "client", None) and request.client.host in _LOCAL_HOSTS:
+        return
+    # Also accept requests already proxied from localhost (common in dev/reverse setups).
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if any(h.strip() in _LOCAL_HOSTS for h in forwarded.split(",")):
+        return
+    raise HTTPException(status_code=403, detail="仅允许本地浏览器访问")
+
+
 async def _check_websocket_origin(websocket: WebSocket) -> bool:
     """Reject cross-origin WebSocket connections (CSWSH protection).
 
@@ -733,7 +755,19 @@ async def purge_profile(profile_id: str):
     if not db.purge_profile(profile_id):
         raise HTTPException(status_code=404, detail="Profile not found")
     if user_data_dir.exists():
-        shutil.rmtree(user_data_dir, ignore_errors=True)
+        # Guard against arbitrary directory deletion: only remove directories
+        # that live under the Manager's profiles root.
+        try:
+            resolved = user_data_dir.resolve()
+            profiles_root = (db.DATA_DIR / "profiles").resolve()
+            if not resolved.is_relative_to(profiles_root):
+                logger.error(
+                    "Refusing to purge %s: outside profiles root", user_data_dir
+                )
+            else:
+                shutil.rmtree(resolved, ignore_errors=True)
+        except ValueError:
+            logger.error("Refusing to purge %s: invalid path", user_data_dir)
     return {"ok": True}
 
 
@@ -923,9 +957,11 @@ async def get_fingerprint_report(profile_id: str):
 @app.post("/profile/{profile_id}/fingerprint-report", include_in_schema=False)
 async def receive_passive_fingerprint_report(
     profile_id: str,
+    request: Request,
     raw: dict = Body(...),
 ):
     """Receive a same-origin report from a browser launched without CDP."""
+    _require_local(request)
     profile = db.get_profile(profile_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
@@ -938,8 +974,9 @@ async def receive_passive_fingerprint_report(
 
 
 @app.get("/profile/{profile_id}/start", response_class=HTMLResponse, include_in_schema=False)
-async def profile_start_page(profile_id: str):
+async def profile_start_page(profile_id: str, request: Request):
     """Show proxy and browser time details when a native profile opens."""
+    _require_local(request)
     profile = db.get_profile(profile_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
@@ -1710,7 +1747,17 @@ if FRONTEND_DIR.exists():
         """Serve React SPA — all non-API routes return index.html."""
         if full_path.startswith("api/"):
             raise HTTPException(status_code=404, detail="Not found")
-        file_path = FRONTEND_DIR / full_path
-        if full_path and file_path.exists() and file_path.is_file():
-            return FileResponse(file_path)
+        if full_path:
+            # Prevent path traversal: resolve and ensure the target stays inside
+            # FRONTEND_DIR. Without this, encoded `..` segments could escape the
+            # web root and read arbitrary local files (the route also bypasses
+            # the auth middleware because it is not under /api/).
+            try:
+                file_path = (FRONTEND_DIR / full_path).resolve()
+                if not file_path.is_relative_to(FRONTEND_DIR.resolve()):
+                    raise HTTPException(status_code=404, detail="Not found")
+            except (ValueError, HTTPException):
+                raise HTTPException(status_code=404, detail="Not found")
+            if file_path.exists() and file_path.is_file():
+                return FileResponse(file_path)
         return FileResponse(FRONTEND_DIR / "index.html")

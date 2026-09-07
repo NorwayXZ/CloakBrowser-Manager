@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hmac
 import ipaddress
 import logging
+import secrets
 import ssl
 from dataclasses import dataclass
 from urllib.parse import unquote, urlparse
@@ -237,6 +239,11 @@ class HttpProxyBridge:
 
     def __init__(self, upstream_url: str):
         self.upstream = _UpstreamProxy.parse(upstream_url)
+        # One-time random token: the bridge listens on loopback without OS-level
+        # access control, so any local process could otherwise use the paid
+        # upstream proxy. Embedding the token in the proxy URL handed to the
+        # browser means only that launched browser can use the bridge.
+        self._token = secrets.token_hex(16)
         self._server: asyncio.AbstractServer | None = None
         self._writers: set[asyncio.StreamWriter] = set()
         self._tasks: set[asyncio.Task[object]] = set()
@@ -249,7 +256,9 @@ class HttpProxyBridge:
 
     @property
     def browser_proxy(self) -> str:
-        return f"http://127.0.0.1:{self.port}"
+        # Token is carried as the HTTP-proxy username so the browser presents it
+        # as Proxy-Authorization automatically.
+        return f"http://{self._token}@127.0.0.1:{self.port}"
 
     async def start(self) -> str:
         self._server = await asyncio.start_server(self._handle_client, "127.0.0.1", 0)
@@ -278,6 +287,21 @@ class HttpProxyBridge:
         self._writers.clear()
         self._tasks.clear()
 
+    def _check_token(self, headers: list[tuple[str, str]]) -> bool:
+        """Validate the one-time bridge token presented by the browser."""
+        value = _header(headers, "Proxy-Authorization")
+        if not value:
+            return False
+        try:
+            scheme, _, encoded = value.partition(" ")
+            if scheme.lower() != "basic":
+                return False
+            decoded = base64.b64decode(encoded).decode("utf-8", "replace")
+            username = decoded.split(":", 1)[0]
+            return hmac.compare_digest(username, self._token)
+        except (ValueError, UnicodeDecodeError):
+            return False
+
     async def _handle_client(
         self,
         client_reader: asyncio.StreamReader,
@@ -291,6 +315,23 @@ class HttpProxyBridge:
         try:
             request_data = await _read_headers(client_reader)
             method, target, version, headers = _request_parts(request_data)
+            # Reject clients that don't present the one-time bridge token. Only
+            # the launched browser knows it (embedded in its proxy URL).
+            if not self._check_token(headers):
+                client_writer.write(
+                    b"HTTP/1.1 407 Proxy Authentication Required\r\n"
+                    b"Proxy-Authenticate: Basic realm=\"cloak-bridge\"\r\n"
+                    b"Connection: close\r\n\r\n"
+                )
+                await client_writer.drain()
+                return
+            # Strip the bridge token before forwarding: it is not the upstream's
+            # credential and would otherwise leak to (or confuse) the upstream.
+            headers = [
+                (name, value)
+                for name, value in headers
+                if name.lower() != "proxy-authorization"
+            ]
             if method.upper() == "CONNECT":
                 target_host, target_port = _split_host_port(target)
                 upstream_reader, upstream_writer = await self._open_target(

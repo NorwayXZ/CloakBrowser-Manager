@@ -33,6 +33,7 @@ export function useProfiles() {
         return profile;
       } catch (err) {
         setError(err instanceof Error ? err.message : "创建配置失败");
+        throw err;
       }
     },
     [],
@@ -46,6 +47,7 @@ export function useProfiles() {
         return profile;
       } catch (err) {
         setError(err instanceof Error ? err.message : "保存配置失败");
+        throw err;
       }
     },
     [],

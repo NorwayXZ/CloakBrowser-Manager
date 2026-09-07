@@ -345,6 +345,7 @@ export function ProfileForm({
   const [testingProxy, setTestingProxy] = useState(false);
 
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [launchArgInput, setLaunchArgInput] = useState("");
   const [launchArgsOpen, setLaunchArgsOpen] = useState(false);
@@ -423,11 +424,16 @@ export function ProfileForm({
     e.preventDefault();
     if (!form.name.trim()) return;
     setSaving(true);
+    setSaveError(null);
     try {
       const safeForm = form.platform === allowedPlatform && form.device_profile === selectedDeviceProfile.id
         ? form
         : applyDeviceProfile(form, selectedDeviceProfile);
       await onSave(form.proxy ? safeForm : { ...safeForm, proxy: null });
+    } catch (err) {
+      // Surface the failure inline: the list view's error banner is hidden
+      // behind this full-screen form, so without this the user sees nothing.
+      setSaveError(err instanceof Error && err.message ? err.message : "保存失败，请检查输入后重试");
     } finally {
       setSaving(false);
     }
@@ -662,6 +668,13 @@ export function ProfileForm({
           </button>
         </div>
       </div>
+
+      {saveError && (
+        <div className="shrink-0 border-b border-red-200 bg-red-50 px-5 py-2.5 text-sm text-red-700">
+          <span className="font-medium">保存失败：</span>
+          {saveError}
+        </div>
+      )}
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="grid min-h-full grid-cols-[minmax(0,1fr)_360px] gap-6 px-6 py-6">
@@ -1137,7 +1150,11 @@ export function ProfileForm({
                       className="input max-w-xl"
                       value=""
                       onChange={(e) => {
-                        if (e.target.value) applyGpuPreset(e.target.value);
+                        const name = e.target.value;
+                        if (name) applyGpuPreset(name);
+                        // Reset the control so the same preset can be applied
+                        // again even after the field already holds its value.
+                        e.target.value = "";
                       }}
                     >
                       <option value="">选择预设...</option>

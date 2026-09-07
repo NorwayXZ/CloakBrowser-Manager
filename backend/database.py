@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .runtime import resolve_runtime
+from .secrets_crypto import decrypt_value, encrypt_json, decrypt_json, encrypt_value
 
 RUNTIME = resolve_runtime()
 DATA_DIR = RUNTIME.data_dir
@@ -356,7 +357,7 @@ def create_profile(
                 fields.get("browser_engine", "auto"),
                 fields.get("device_profile"),
                 seed,
-                fields.get("proxy"),
+                encrypt_value(fields.get("proxy")),
                 fields.get("timezone"),
                 fields.get("locale"),
                 fields.get("platform", "windows"),
@@ -376,7 +377,7 @@ def create_profile(
                 fields.get("color_scheme"),
                 fields.get("group_name") or "未分组",
                 fields.get("account_platform"),
-                fields.get("cookies_json"),
+                encrypt_value(fields.get("cookies_json")),
                 json.dumps(fields.get("startup_urls") or []),
                 json.dumps(fields.get("launch_args") or []),
                 fields.get("notes"),
@@ -402,6 +403,8 @@ def get_profile(profile_id: str) -> dict[str, Any] | None:
         profile["startup_urls"] = _load_json_list(profile.get("startup_urls"))
         profile["launch_args"] = _load_json_list(profile.get("launch_args"))
         profile["proxy_geo"] = _load_json_dict(profile.get("proxy_geo_json"))
+        profile["proxy"] = decrypt_value(profile.get("proxy"))
+        profile["cookies_json"] = decrypt_value(profile.get("cookies_json"))
         tags = conn.execute(
             "SELECT tag, color FROM profile_tags WHERE profile_id = ?",
             (profile_id,),
@@ -415,6 +418,8 @@ def _hydrate_profile(row: sqlite3.Row) -> dict[str, Any]:
     profile["startup_urls"] = _load_json_list(profile.get("startup_urls"))
     profile["launch_args"] = _load_json_list(profile.get("launch_args"))
     profile["proxy_geo"] = _load_json_dict(profile.get("proxy_geo_json"))
+    profile["proxy"] = decrypt_value(profile.get("proxy"))
+    profile["cookies_json"] = decrypt_value(profile.get("cookies_json"))
     with get_db() as conn:
         tags = conn.execute(
             "SELECT tag, color FROM profile_tags WHERE profile_id = ?",
@@ -470,8 +475,11 @@ def update_profile(profile_id: str, **fields: Any) -> dict[str, Any] | None:
         "startup_urls", "launch_args", "notes",
     ):
         if col in fields:
+            value = fields[col]
+            if col == "proxy" or col == "cookies_json":
+                value = encrypt_value(value)
             update_cols.append(f"{col} = ?")
-            update_vals.append(fields[col])
+            update_vals.append(value)
 
     if update_cols:
         update_cols.append("updated_at = ?")
@@ -597,7 +605,10 @@ def delete_group(group_id: str) -> bool:
 def list_proxy_presets() -> list[dict[str, Any]]:
     with get_db() as conn:
         rows = conn.execute("SELECT * FROM proxy_presets ORDER BY created_at DESC").fetchall()
-        return [dict(row) for row in rows]
+        presets = [dict(row) for row in rows]
+    for preset in presets:
+        preset["proxy"] = decrypt_value(preset.get("proxy"))
+    return presets
 
 
 def create_proxy_preset(name: str, proxy: str, mode: str) -> dict[str, Any]:
@@ -613,14 +624,16 @@ def create_proxy_preset(name: str, proxy: str, mode: str) -> dict[str, Any]:
                 mode = excluded.mode,
                 updated_at = excluded.updated_at
             """,
-            (preset_id, name, proxy, mode, now, now),
+            (preset_id, name, encrypt_value(proxy), mode, now, now),
         )
         conn.commit()
         row = conn.execute(
             "SELECT * FROM proxy_presets WHERE name = ?",
             (name,),
         ).fetchone()
-        return dict(row)
+        preset = dict(row)
+    preset["proxy"] = decrypt_value(preset.get("proxy"))
+    return preset
 
 
 def delete_proxy_preset(preset_id: str) -> bool:

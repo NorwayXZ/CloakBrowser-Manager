@@ -76,7 +76,7 @@ def test_profile_start_page(app_client: TestClient):
     create = app_client.post("/api/profiles", json={"name": "Start Page"})
     profile_id = create.json()["id"]
 
-    resp = app_client.get(f"/profile/{profile_id}/start")
+    resp = app_client.get(f"/profile/{profile_id}/start", headers={"X-Forwarded-For": "127.0.0.1"})
 
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/html")
@@ -767,6 +767,7 @@ def test_manual_profile_accepts_and_returns_passive_fingerprint_report(app_clien
     submitted = app_client.post(
         f"/profile/{pid}/fingerprint-report",
         json=_passive_report_payload(),
+        headers={"X-Forwarded-For": "127.0.0.1"},
     )
     assert submitted.status_code == 200
     report = submitted.json()
@@ -784,7 +785,7 @@ def test_profile_start_page_embeds_automatic_passive_check(app_client: TestClien
     create = app_client.post("/api/profiles", json={"name": "Start report"})
     pid = create.json()["id"]
 
-    response = app_client.get(f"/profile/{pid}/start")
+    response = app_client.get(f"/profile/{pid}/start", headers={"X-Forwarded-For": "127.0.0.1"})
 
     assert response.status_code == 200
     assert "启动自检" in response.text

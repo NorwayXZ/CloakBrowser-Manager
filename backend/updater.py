@@ -173,8 +173,32 @@ def update_from_git(
         timeout=600,
         log=log,
     )
-    _run_checked([npm, "ci"], cwd=frontend_dir, runner=runner, timeout=600, log=log)
-    _run_checked([npm, "run", "build"], cwd=frontend_dir, runner=runner, timeout=300, log=log)
+    try:
+        _run_checked([npm, "ci"], cwd=frontend_dir, runner=runner, timeout=600, log=log)
+        _run_checked([npm, "run", "build"], cwd=frontend_dir, runner=runner, timeout=300, log=log)
+    except UpdateError:
+        # Build/install failed after the code was already updated: roll the
+        # repository back to the pre-update commit so the next launch isn't left
+        # on a half-updated tree with a broken frontend build.
+        log.append(f"升级构建失败，回滚到 {before} ...")
+        try:
+            _run_checked(
+                ["git", "reset", "--hard", before],
+                cwd=root,
+                runner=runner,
+                timeout=120,
+                log=log,
+            )
+        except UpdateError as rollback_err:
+            log.append(f"回滚失败：{rollback_err}")
+            raise UpdateError(
+                "升级后的前端构建失败，且自动回滚失败。请手动执行 "
+                f"`git reset --hard {before}` 后重试，或改用干净安装。"
+            )
+        raise UpdateError(
+            "升级后的前端构建失败，已自动回滚到升级前的版本（你仍然可以使用当前版本）。\n"
+            "常见原因：Node.js 版本过旧或网络问题导致 npm 构建失败。"
+        )
 
     pull_output = pull_result.output
     return UpdateResult(

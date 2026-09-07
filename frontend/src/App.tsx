@@ -122,7 +122,12 @@ export default function App() {
       authUsername={authUsername}
       onAccountUpdated={setAuthUsername}
       onLogout={async () => {
-        await api.logout();
+        try {
+          await api.logout();
+        } catch {
+          // If the service is unavailable, still log out locally so the user
+          // is never trapped in the panel.
+        }
         setAuthState("required");
       }}
     />
@@ -177,7 +182,7 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
     }
 
     if (failures.some((result) => isMissingManagerApi(result.reason))) {
-      setManagerError("当前 8080 后端还是旧版本，缺少分组/代理/回收站接口。请重启 Manager：./bin/cloak restart");
+      setManagerError("当前 Manager 后端还是旧版本，缺少分组/代理/回收站接口。请重启 Manager：./bin/cloak restart");
       return;
     }
 
@@ -325,6 +330,16 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
       setView("list");
     }
   }, [selectedId, stop, view]);
+
+  // If we are showing a profile viewer but the running browser goes away
+  // (crashed or closed by the user), fall back to the list instead of leaving
+  // a blank screen. The 3s polling in useProfiles updates `selected.status`.
+  useEffect(() => {
+    if (view === "view" && selected && selected.status !== "running") {
+      setView("list");
+      setSelectedId(null);
+    }
+  }, [view, selected]);
 
   const handleBatchStopProfiles = useCallback(async (ids: string[]) => {
     for (const id of ids) {

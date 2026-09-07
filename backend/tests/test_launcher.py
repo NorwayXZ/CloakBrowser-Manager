@@ -7,7 +7,7 @@ import run as launcher
 
 def test_linux_directs_users_to_docker(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(launcher.sys, "platform", "linux")
-    with pytest.raises(RuntimeError, match="use Docker on Linux"):
+    with pytest.raises(RuntimeError, match="Linux 请使用 Docker"):
         launcher._ensure_environment()
 
 

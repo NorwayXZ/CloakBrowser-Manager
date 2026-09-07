@@ -10,7 +10,10 @@ from typing import Any
 
 PROBE_URL = "https://example.com/"
 FALLBACK_PROBE_URL = "data:text/html,<title>fingerprint-probe</title><body></body>"
-DEFAULT_NETWORK_PROBE_URL = "https://cloakbrowser-network-probe-norwayx.424982.workers.dev"
+# Empty by default: the external network probe only runs when an operator
+# explicitly sets CLOAKBROWSER_NETWORK_PROBE_URL. This avoids silently
+# phoning home on every fingerprint scan.
+DEFAULT_NETWORK_PROBE_URL = ""
 
 
 DIAGNOSTIC_SCRIPT = """

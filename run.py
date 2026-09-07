@@ -21,7 +21,23 @@ ROOT = Path(__file__).resolve().parent
 VENV_DIR = ROOT / ".venv"
 SETUP_MARKER = VENV_DIR / ".manager-setup.json"
 FRONTEND_DIR = ROOT / "frontend"
-SERVER_URL = "http://127.0.0.1:8080"
+DEFAULT_SERVER_PORT = 8080
+
+
+def _resolve_port() -> int:
+    raw = os.environ.get("CLOAKBROWSER_MANAGER_PORT")
+    if not raw:
+        return DEFAULT_SERVER_PORT
+    try:
+        port = int(raw)
+    except ValueError:
+        return DEFAULT_SERVER_PORT
+    if not 1 <= port <= 65535:
+        return DEFAULT_SERVER_PORT
+    return port
+
+
+SERVER_URL = f"http://127.0.0.1:{_resolve_port()}"
 
 
 def _venv_python() -> Path:
@@ -94,15 +110,15 @@ def _print_data_locations() -> None:
 
 def _ensure_environment() -> Path:
     if sys.version_info < (3, 10):
-        raise RuntimeError("Python 3.10 or newer is required")
+        raise RuntimeError("需要 Python 3.10 或更高版本，请先升级 Python。")
     if sys.platform not in {"win32", "darwin"}:
         raise RuntimeError(
-            "Native Manager supports Windows and macOS; use Docker on Linux"
+            "本地版仅支持 Windows 和 macOS；Linux 请使用 Docker 方式运行。"
         )
 
     python = _venv_python()
     if not python.exists():
-        print("[setup] Creating Python environment", flush=True)
+        print("[setup] 正在创建 Python 虚拟环境", flush=True)
         venv.EnvBuilder(with_pip=True).create(VENV_DIR)
 
     state = _load_setup_state()
@@ -117,7 +133,21 @@ def _ensure_environment() -> Path:
 
     npm = shutil.which("npm.cmd" if os.name == "nt" else "npm")
     if not npm:
-        raise RuntimeError("Node.js 18 or newer is required to build the Manager UI")
+        raise RuntimeError("需要 Node.js 18 或更高版本才能构建管理面板，请先安装 Node.js。")
+    node = shutil.which("node.cmd" if os.name == "nt" else "node")
+    if node:
+        try:
+            out = subprocess.run(
+                [node, "--version"], capture_output=True, text=True, check=True
+            )
+            version_parts = out.stdout.strip().lstrip("v").split(".")
+            node_major = int(version_parts[0]) if version_parts else 0
+            if node_major < 18:
+                raise RuntimeError(
+                    f"检测到 Node.js {out.stdout.strip()}，需要 18 或更高版本，请升级 Node.js。"
+                )
+        except (ValueError, subprocess.SubprocessError):
+            pass
 
     package_lock = FRONTEND_DIR / "package-lock.json"
     frontend_hash = _file_hash(package_lock)
@@ -138,14 +168,14 @@ def _ensure_environment() -> Path:
     return python
 
 
-def _ensure_server_port_available() -> None:
+def _ensure_server_port_available(port: int) -> None:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
         server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
-            server_socket.bind(("127.0.0.1", 8080))
+            server_socket.bind(("127.0.0.1", port))
         except OSError as exc:
             raise RuntimeError(
-                "Port 8080 is already in use; stop the existing Manager or service"
+                f"端口 {port} 已被占用，请先关闭正在运行的 Manager 或其他占用该端口的服务。"
             ) from exc
 
 
@@ -157,7 +187,7 @@ def _open_when_ready() -> None:
                 return
         except OSError:
             time.sleep(0.1)
-    print(f"[error] Manager did not become ready at {SERVER_URL}", file=sys.stderr)
+    print(f"[error] Manager 未能在 {SERVER_URL} 就绪，请查看上方日志排查问题。", file=sys.stderr)
 
 
 def main() -> int:
@@ -190,20 +220,25 @@ def main() -> int:
         print(f"[error] {exc}", file=sys.stderr, flush=True)
         return 1
 
+    port = _resolve_port()
     try:
-        _ensure_server_port_available()
+        _ensure_server_port_available(port)
     except RuntimeError as exc:
         print(f"[error] {exc}", file=sys.stderr, flush=True)
         return 1
 
-    env = {**os.environ, "CLOAKBROWSER_MANAGER_RUNTIME": "native"}
+    env = {
+        **os.environ,
+        "CLOAKBROWSER_MANAGER_RUNTIME": "native",
+        "CLOAKBROWSER_MANAGER_PORT": str(port),
+    }
     print(f"[start] CloakBrowser Manager: {SERVER_URL}", flush=True)
     _print_data_locations()
     threading.Thread(target=_open_when_ready, daemon=True).start()
     process = subprocess.Popen(
         [
             str(python), "-m", "uvicorn", "backend.main:app",
-            "--host", "127.0.0.1", "--port", "8080",
+            "--host", "127.0.0.1", "--port", str(port),
         ],
         cwd=ROOT,
         env=env,

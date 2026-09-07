@@ -89,9 +89,15 @@ async def test_authenticated_socks5_bridge_forwards_connect() -> None:
     try:
         await bridge.start()
         reader, writer = await asyncio.open_connection("127.0.0.1", bridge.port)
+        # The browser embeds the one-time bridge token as the HTTP-proxy
+        # username, which Chromium presents as Proxy-Authorization.
+        import base64 as _base64
+
+        token_auth = "Basic " + _base64.b64encode(f"{bridge._token}:".encode()).decode()
         writer.write(
             f"CONNECT 127.0.0.1:{echo_port} HTTP/1.1\r\n"
-            f"Host: 127.0.0.1:{echo_port}\r\n\r\n".encode("ascii")
+            f"Host: 127.0.0.1:{echo_port}\r\n"
+            f"Proxy-Authorization: {token_auth}\r\n\r\n".encode("ascii")
         )
         await writer.drain()
         response = await reader.readuntil(b"\r\n\r\n")

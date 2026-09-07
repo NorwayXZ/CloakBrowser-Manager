@@ -27,7 +27,7 @@ from .fingerprint_report import DEFAULT_NETWORK_PROBE_URL, analyze_fingerprint, 
 from .cloak_runtime import get_effective_chromium_version
 from .proxy_geo import fetch_proxy_geo
 from .proxy_bridge import HttpProxyBridge
-from .runtime import RuntimeConfig, resolve_runtime
+from .runtime import RuntimeConfig, resolve_runtime, server_port
 from .vnc_manager import VNCManager
 from .xray_runtime import XrayProcess, is_xray_link, parse_xray_link, start_xray_proxy
 
@@ -40,7 +40,6 @@ SYSTEM_CHROME_BASE_ARGS = [
     "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
     SESSION_RESTORE_ARG,
 ]
-NATIVE_START_PAGE_TEMPLATE = "http://127.0.0.1:8080/profile/{profile_id}/start"
 BLANK_PAGE_URLS = {
     "",
     "about:blank",
@@ -409,7 +408,13 @@ def _startup_urls_for_profile(profile: dict[str, Any], profile_id: str) -> list[
     urls = _clean_startup_urls(profile.get("startup_urls"))
     if urls:
         return urls
-    return [NATIVE_START_PAGE_TEMPLATE.format(profile_id=profile_id)]
+    return [native_start_page_url(profile_id)]
+
+
+def native_start_page_url(profile_id: str) -> str:
+    """Local report page the launched browser opens. Uses the Manager's actual
+    bound port so custom-port deployments stay consistent."""
+    return f"http://127.0.0.1:{server_port()}/profile/{profile_id}/start"
 
 
 def _playwright_proxy(proxy: str | None) -> dict[str, str] | None:
@@ -1090,7 +1095,7 @@ async def _open_native_start_page(
         pages = list(getattr(context, "pages", []) or [])
         if any(str(getattr(page, "url", "") or "") not in BLANK_PAGE_URLS for page in pages):
             return
-        urls = startup_urls or [NATIVE_START_PAGE_TEMPLATE.format(profile_id=profile_id)]
+        urls = startup_urls or [native_start_page_url(profile_id)]
         first_page = pages[0] if pages else await context.new_page()
         for idx, url in enumerate(urls):
             page = first_page if idx == 0 else await context.new_page()
@@ -1107,7 +1112,7 @@ async def _open_native_start_page(
 
 def _build_worker_fingerprint_patch(payload: dict[str, Any]) -> str:
     """Patch locale/timezone surfaces inside classic dedicated workers."""
-    return """
+    return r"""
         (() => {
             const cfg = __PAYLOAD__;
             const locale = cfg.locale;
@@ -2419,7 +2424,7 @@ class BrowserManager:
                     # Keep restored tabs and add one local report tab so manual,
                     # no-CDP launches are still checked on every startup.
                     manual_start_urls = [
-                        NATIVE_START_PAGE_TEMPLATE.format(profile_id=profile_id)
+                        native_start_page_url(profile_id)
                     ]
                 else:
                     manual_start_urls = startup_urls
