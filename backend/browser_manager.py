@@ -2660,7 +2660,7 @@ class BrowserManager:
 
         if running:
             logger.info("Browser closed for profile %s, cleaning up", profile_id)
-            await self._dispose_running(running, close_context=False)
+            await self._dispose_running(running, close_context=True)
             try:
                 from . import database as db
                 db.mark_profile_exit(profile_id, exit_reason)
