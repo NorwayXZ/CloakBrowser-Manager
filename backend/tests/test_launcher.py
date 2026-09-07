@@ -73,3 +73,33 @@ def test_frontend_source_timestamp_is_available():
     ]
     assert source_files
     assert max(path.stat().st_mtime for path in source_files) > 0
+
+
+def test_running_manager_is_detected_from_status_api(monkeypatch: pytest.MonkeyPatch):
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"running_count": 0, "profiles_total": 1, "runtime_mode": "native"}'
+
+    monkeypatch.setattr(launcher.urllib.request, "urlopen", lambda *_args, **_kwargs: Response())
+    assert launcher._manager_is_running() is True
+
+
+def test_other_service_is_not_treated_as_manager(monkeypatch: pytest.MonkeyPatch):
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"status": "ok"}'
+
+    monkeypatch.setattr(launcher.urllib.request, "urlopen", lambda *_args, **_kwargs: Response())
+    assert launcher._manager_is_running() is False

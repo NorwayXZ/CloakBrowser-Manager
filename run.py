@@ -179,6 +179,18 @@ def _ensure_server_port_available(port: int) -> None:
             ) from exc
 
 
+def _manager_is_running() -> bool:
+    """Return true only when the port is serving this Manager's status API."""
+    try:
+        with urllib.request.urlopen(f"{SERVER_URL}/api/status", timeout=0.5) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        return isinstance(payload, dict) and all(
+            key in payload for key in ("running_count", "profiles_total", "runtime_mode")
+        )
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False
+
+
 def _open_when_ready() -> None:
     for _ in range(100):
         try:
@@ -212,6 +224,11 @@ def main() -> int:
             print(f"[error] {exc}", file=sys.stderr, flush=True)
             return 1
         print("[done] CloakBrowser Manager uninstalled", flush=True)
+        return 0
+
+    if _manager_is_running():
+        print(f"[info] Manager 已经运行，正在打开 {SERVER_URL}", flush=True)
+        webbrowser.open(SERVER_URL)
         return 0
 
     try:
