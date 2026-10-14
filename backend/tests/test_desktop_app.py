@@ -94,10 +94,10 @@ def test_find_chrome_returns_first_existing_app(tmp_path: Path):
 
 def test_open_panel_prefers_chrome_app_window(tmp_path: Path):
     chrome = tmp_path / "Google Chrome.app"
-    assert open_panel_command("http://127.0.0.1:8080", chrome) == [
+    assert open_panel_command("http://127.0.0.1:8080", chrome, "darwin") == [
         "open", "-na", str(chrome), "--args", "--app=http://127.0.0.1:8080",
     ]
-    assert open_panel_command("http://127.0.0.1:8080", None) == ["open", "http://127.0.0.1:8080"]
+    assert open_panel_command("http://127.0.0.1:8080", None, "darwin") == ["open", "http://127.0.0.1:8080"]
 
     calls: list[list[str]] = []
     open_panel("http://127.0.0.1:8080", chrome_app=chrome, runner=calls.append)

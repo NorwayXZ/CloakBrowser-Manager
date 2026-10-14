@@ -3,7 +3,9 @@ from __future__ import annotations
 import io
 import json
 import sqlite3
+import sys
 import zipfile
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -39,7 +41,8 @@ def test_full_backup_contains_data_but_not_caches(data_with_profile):
 
     assert path.parent == data_dir / "backups" / "full"
     assert backups.FULL_BACKUP_RE.match(path.name)
-    assert path.stat().st_mode & 0o077 == 0
+    if sys.platform != "win32":  # Windows has no Unix permission bits
+        assert path.stat().st_mode & 0o077 == 0
     with zipfile.ZipFile(path) as archive:
         names = set(archive.namelist())
         manifest = json.loads(archive.read("manifest.json"))
@@ -59,7 +62,7 @@ def test_full_backup_round_trip_keeps_previous_data(data_with_profile):
     backup_path = backups.create_full_backup(data_dir)
 
     # Simulate damage after the backup.
-    with sqlite3.connect(data_dir / "profiles.db") as conn:
+    with closing(sqlite3.connect(data_dir / "profiles.db")) as conn, conn:
         conn.execute("DELETE FROM profiles")
     cookies = data_dir / "profiles" / profile["id"] / "Default" / "Cookies"
     cookies.write_bytes(b"corrupted")
@@ -78,7 +81,7 @@ def test_full_backup_round_trip_keeps_previous_data(data_with_profile):
 
 def test_restore_rewrites_profile_paths_for_this_machine(data_with_profile, tmp_path: Path):
     data_dir, profile = data_with_profile
-    with sqlite3.connect(data_dir / "profiles.db") as conn:
+    with closing(sqlite3.connect(data_dir / "profiles.db")) as conn, conn:
         conn.execute("UPDATE profiles SET user_data_dir = ?", ("/Users/old/profiles/" + profile["id"],))
     backup_path = backups.create_full_backup(data_dir)
 
@@ -125,7 +128,7 @@ def test_auto_snapshots_rotate(tmp_db: Path):
 def test_restore_database_snapshot(tmp_db: Path):
     kept = db.create_profile(name="Before", fingerprint_seed=1)
     snapshot = backups.snapshot_database(tmp_db)
-    with sqlite3.connect(tmp_db / "profiles.db") as conn:
+    with closing(sqlite3.connect(tmp_db / "profiles.db")) as conn, conn:
         conn.execute("DELETE FROM profiles")
 
     backups.restore_database_snapshot(tmp_db, snapshot)
