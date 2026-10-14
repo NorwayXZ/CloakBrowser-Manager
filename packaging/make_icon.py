@@ -1,4 +1,7 @@
-"""Render the app icon as a 1024px PNG (converted to .icns by build-dmg.sh)."""
+"""Render the app icon: a 1024px PNG (macOS .icns via iconutil) and/or a Windows .ico.
+
+    python make_icon.py icon.png [icon.ico]
+"""
 
 from __future__ import annotations
 
@@ -64,4 +67,7 @@ def render(path: Path) -> None:
 
 
 if __name__ == "__main__":
-    render(Path(sys.argv[1]))
+    png = Path(sys.argv[1])
+    render(png)
+    if len(sys.argv) > 2:
+        Image.open(png).save(sys.argv[2], sizes=[(s, s) for s in (16, 24, 32, 48, 64, 128, 256)])

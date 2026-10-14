@@ -74,3 +74,25 @@ def test_inspect_runtime_rejects_stale_cached_binary(
     monkeypatch.setattr(cloak_config, "get_effective_version", lambda: "150.0.1.2.3", raising=False)
     monkeypatch.setattr(cloak_config, "get_chromium_version", lambda: "145.0.1.2.3", raising=False)
     assert inspect_cloak_runtime(ensure_binary=True).binary_verified is False
+
+
+def test_inspect_runtime_accepts_pro_cache_folder(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # Pro licences cache the binary in chromium-<version>-pro.
+    version = "154.0.8037.57.1"
+    binary = tmp_path / f"chromium-{version}-pro" / "Chromium.app" / "Contents" / "MacOS" / "Chromium"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"runtime")
+
+    cloak_download = types.ModuleType("cloakbrowser.download")
+    cloak_download.ensure_binary = lambda: str(binary)  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "cloakbrowser.download", cloak_download)
+    monkeypatch.setattr(cloak_config, "get_effective_version", lambda: version, raising=False)
+    monkeypatch.setattr(cloak_config, "get_chromium_version", lambda: version, raising=False)
+
+    result = inspect_cloak_runtime(ensure_binary=True)
+
+    assert result.binary_version == f"{version}-pro"
+    assert result.binary_verified is True

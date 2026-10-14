@@ -41,6 +41,7 @@ class UpdateResult:
     restart_required: bool
     message: str
     log: list[str] = field(default_factory=list)
+    download_url: str | None = None
 
 
 Runner = Callable[[list[str], Path, int], CommandResult]
@@ -86,6 +87,39 @@ def _npm_executable() -> str:
     return npm
 
 
+def _check_packaged_app(log: list[str]) -> UpdateResult:
+    """DMG/installer builds have no Git checkout: point at the newest release instead.
+
+    Returns ok=True even when the check fails so the browser-kernel check still runs.
+    """
+    from .desktop_app import app_version, check_for_app_update
+
+    current = app_version()
+    try:
+        info = check_for_app_update(current)
+    except Exception as exc:  # network errors, GitHub rate limits
+        log.append(f"检查新版本失败：{exc}")
+        return UpdateResult(
+            ok=True, updated=False, before=current, after=None, branch=None,
+            restart_required=False, log=log,
+            message=f"当前版本 {current or '未知'}；暂时无法连接 GitHub 检查新版本，请稍后再试。",
+        )
+    if info["newer"]:
+        message = (
+            f"发现新版本 {info['latest']}（当前 {current}）。点击下方链接下载，"
+            "打开后把新 App 拖到「应用程序」覆盖旧版即可；画像、Cookie 等数据不受影响。"
+        )
+    elif info["latest"]:
+        message = f"当前版本 {current or '未知'} 已是最新。"
+    else:
+        message = f"当前版本 {current or '未知'}；GitHub 上还没有发布版本。"
+    return UpdateResult(
+        ok=True, updated=False, before=current, after=info["latest"], branch=None,
+        restart_required=False, log=log, message=message,
+        download_url=info["download_url"] if info["newer"] else None,
+    )
+
+
 def update_from_git(
     root: Path,
     *,
@@ -95,20 +129,7 @@ def update_from_git(
     root = root.resolve()
     log: list[str] = []
     if getattr(sys, "frozen", False):
-        # DMG/app builds have no Git checkout; let the browser-kernel check still run.
-        return UpdateResult(
-            ok=True,
-            updated=False,
-            before=None,
-            after=None,
-            branch=None,
-            restart_required=False,
-            message=(
-                "当前是 DMG 安装版，面板程序需要用新版 DMG 拖到「应用程序」覆盖升级；"
-                "浏览器画像、Cookie 等数据不受影响。"
-            ),
-            log=log,
-        )
+        return _check_packaged_app(log)
     if not (root / ".git").exists():
         raise UpdateError("当前不是 Git 安装版，无法在面板里自动升级。请用 git clone 安装，或手动下载新版 ZIP。")
 

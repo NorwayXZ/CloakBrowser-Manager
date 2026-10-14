@@ -173,6 +173,7 @@ class ManagerUpdateResponse(BaseModel):
     restart_required: bool = False
     message: str
     log: list[str] = []
+    download_url: str | None = None
 
 
 class BrowserUpdateResponse(BaseModel):

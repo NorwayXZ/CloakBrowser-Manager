@@ -34,13 +34,8 @@ macOS:   ./run-macos.sh
 Windows: 双击 run-windows.bat
 ```
 
-macOS 也可以打包成 DMG，装进「应用程序」后双击就能用，不用再开终端：
-
-```bash
-./packaging/macos/build-dmg.sh
-```
-
-详见 [README.md](README.md) 里的「可选：打包成 DMG，双击就能用」。
+也可以直接下载安装包版（macOS DMG / Windows 安装程序），双击就能用，不用再开终端：
+[Releases 页面](https://github.com/NorwayXZ/CloakBrowser-Manager/releases/latest)。详见 [README.md](README.md) 里的「可选：安装包版，双击就能用」。
 
 数据目录：
 

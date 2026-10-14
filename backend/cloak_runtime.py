@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -53,6 +54,13 @@ def _cached_binary_version(binary_path: Path) -> str | None:
     return None
 
 
+def _version_core(version: str | None) -> str | None:
+    """Drop the channel suffix Pro builds add to their cache folder ("-pro")."""
+    if not version:
+        return version
+    return re.sub(r"-[A-Za-z]+$", "", version)
+
+
 def inspect_cloak_runtime(*, ensure_binary: bool = False) -> CloakRuntimeInfo:
     import cloakbrowser
     from cloakbrowser import config
@@ -74,7 +82,7 @@ def inspect_cloak_runtime(*, ensure_binary: bool = False) -> CloakRuntimeInfo:
         binary_version = _cached_binary_version(binary_path)
         file_ready = binary_path.is_file() and binary_path.stat().st_size > 0
         local_override = bool(os.environ.get("CLOAKBROWSER_BINARY_PATH"))
-        version_matches = local_override or binary_version == effective
+        version_matches = local_override or _version_core(binary_version) == _version_core(effective)
         binary_verified = file_ready and version_matches
 
     return CloakRuntimeInfo(

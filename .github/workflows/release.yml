@@ -1,0 +1,127 @@
+name: Release
+
+# Push a tag like v0.2.0 to build the macOS DMGs (Apple silicon + Intel) and the
+# Windows installer, then publish them as a GitHub Release. Running the
+# workflow by hand builds the same files as downloadable artifacts only.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.10"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build DMG
+        env:
+          CLOAKBROWSER_APP_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+        run: |
+          export CLOAKBROWSER_APP_VERSION="${CLOAKBROWSER_APP_VERSION#v}"
+          [ -n "$CLOAKBROWSER_APP_VERSION" ] || unset CLOAKBROWSER_APP_VERSION
+          ./packaging/macos/build-dmg.sh
+      - name: Smoke test app bundle
+        run: |
+          app="build/macos/dist/CloakBrowser Manager.app/Contents/MacOS/CloakBrowser Manager"
+          data="$RUNNER_TEMP/cbm-data"
+          CLOAKBROWSER_MANAGER_PORT=18080 CLOAKBROWSER_MANAGER_DATA_DIR="$data" "$app" --background &
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:18080/api/status && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:18080/ >/dev/null
+          kill %1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: macos-${{ matrix.arch }}
+          path: build/macos/*.dmg
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.10"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Ensure Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup -y --no-progress
+          }
+      - name: Build installer
+        shell: pwsh
+        env:
+          CLOAKBROWSER_APP_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+        run: |
+          if ($env:CLOAKBROWSER_APP_VERSION) { $env:CLOAKBROWSER_APP_VERSION = $env:CLOAKBROWSER_APP_VERSION.TrimStart("v") }
+          ./packaging/windows/build-installer.ps1
+      - name: Smoke test app
+        shell: pwsh
+        run: |
+          $env:CLOAKBROWSER_MANAGER_PORT = "18080"
+          $env:CLOAKBROWSER_MANAGER_DATA_DIR = "$env:RUNNER_TEMP\cbm-data"
+          $app = Start-Process -PassThru "build\windows\dist\CloakBrowser Manager\CloakBrowser Manager.exe" -ArgumentList "--background"
+          $ok = $false
+          foreach ($i in 1..60) {
+            try { Invoke-RestMethod http://127.0.0.1:18080/api/status | Out-Null; $ok = $true; break } catch { Start-Sleep 1 }
+          }
+          Stop-Process -Id $app.Id -Force
+          if (-not $ok) {
+            Get-Content "$env:LOCALAPPDATA\CloakBrowser Manager\Logs\manager.log" -ErrorAction SilentlyContinue
+            throw "Manager did not start"
+          }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-x64
+          path: build/windows/*-setup.exe
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "CloakBrowser Manager $GITHUB_REF_NAME" \
+            --generate-notes

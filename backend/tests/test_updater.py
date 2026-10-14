@@ -88,11 +88,49 @@ def test_update_from_git_requires_git_install(tmp_path: Path):
         update_from_git(tmp_path)
 
 
-def test_update_from_git_explains_dmg_install(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    (tmp_path / ".git").mkdir()
+def _packaged(monkeypatch: pytest.MonkeyPatch, release, version: str = "0.2.0"):
+    from backend import desktop_app
+
     monkeypatch.setattr("sys.frozen", True, raising=False)
+    monkeypatch.setattr(desktop_app, "app_version", lambda: version)
+    monkeypatch.setattr(desktop_app, "fetch_latest_release", release)
+    monkeypatch.setattr(desktop_app, "asset_keyword", lambda: "arm64.dmg")
+
+
+def test_packaged_app_offers_newer_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    release = {
+        "tag_name": "v0.3.0",
+        "html_url": "https://github.com/x/releases/tag/v0.3.0",
+        "assets": [
+            {"name": "CloakBrowser-Manager-0.3.0-x86_64.dmg", "browser_download_url": "https://dl/x86.dmg"},
+            {"name": "CloakBrowser-Manager-0.3.0-arm64.dmg", "browser_download_url": "https://dl/arm.dmg"},
+        ],
+    }
+    _packaged(monkeypatch, lambda: release)
 
     result = update_from_git(tmp_path, runner=lambda *_: pytest.fail("must not run commands"))
 
     assert result.ok and not result.updated and not result.restart_required
-    assert "DMG 安装版" in result.message
+    assert "发现新版本 0.3.0" in result.message
+    assert result.download_url == "https://dl/arm.dmg"
+
+
+def test_packaged_app_reports_latest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _packaged(monkeypatch, lambda: {"tag_name": "v0.2.0", "assets": []})
+
+    result = update_from_git(tmp_path)
+
+    assert "已是最新" in result.message
+    assert result.download_url is None
+
+
+def test_packaged_app_survives_network_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def offline():
+        raise OSError("offline")
+
+    _packaged(monkeypatch, offline)
+
+    result = update_from_git(tmp_path)
+
+    assert result.ok
+    assert "无法连接 GitHub" in result.message

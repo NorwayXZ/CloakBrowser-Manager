@@ -19,7 +19,10 @@ hiddenimports = (
     + ["AppKit", "Foundation", "PyObjCTools.AppHelper", "objc"]
 )
 
-datas = [(str(ROOT / "frontend" / "dist"), "frontend/dist")]
+datas = [
+    (str(ROOT / "frontend" / "dist"), "frontend/dist"),
+    (str(BUILD_DIR / "app_version.json"), "."),
+]
 datas += collect_data_files("cloakbrowser")
 for package in ("cloakbrowser", "playwright", "fastapi", "uvicorn", "pydantic", "geoip2", "maxminddb"):
     datas += copy_metadata(package)

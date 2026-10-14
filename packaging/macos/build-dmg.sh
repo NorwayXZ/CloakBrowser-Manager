@@ -29,6 +29,7 @@ export CLOAKBROWSER_APP_VERSION="$VERSION"
 echo "[build] version $VERSION build $BUILD_NUMBER ($COMMIT, $ARCH)"
 
 mkdir -p "$BUILD"
+printf '{"version": "%s", "build": "%s", "commit": "%s"}\n' "$VERSION" "$BUILD_NUMBER" "$COMMIT" > "$BUILD/app_version.json"
 
 echo "[build] frontend"
 (cd "$ROOT/frontend" && npm ci --no-audit --no-fund && npm run build)
@@ -40,13 +41,13 @@ fi
 "$VENV/bin/python" -m pip install -q --disable-pip-version-check \
     -r "$ROOT/backend/requirements.txt" \
     -r "$HERE/requirements-build.txt" \
-    -c "$HERE/constraints.txt"
+    -c "$ROOT/packaging/constraints.txt"
 
 echo "[build] icon"
 ICONSET="$BUILD/AppIcon.iconset"
 rm -rf "$ICONSET"
 mkdir -p "$ICONSET"
-"$VENV/bin/python" "$HERE/make_icon.py" "$BUILD/icon-1024.png"
+"$VENV/bin/python" "$ROOT/packaging/make_icon.py" "$BUILD/icon-1024.png"
 for size in 16 32 128 256 512; do
     sips -z "$size" "$size" "$BUILD/icon-1024.png" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
     double=$((size * 2))
@@ -72,7 +73,16 @@ cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 DMG="$BUILD/CloakBrowser-Manager-$VERSION-$COMMIT-$ARCH.dmg"
 rm -f "$DMG"
-hdiutil create -volname "$APP_NAME" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
+# hdiutil occasionally fails with "Resource busy" on CI runners; retry a few times.
+attempt=1
+until hdiutil create -volname "$APP_NAME" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null; do
+    if [ "$attempt" -ge 5 ]; then
+        echo "[error] hdiutil create failed" >&2
+        exit 1
+    fi
+    attempt=$((attempt + 1))
+    sleep 5
+done
 rm -rf "$STAGE"
 
 echo "[done] $DMG"

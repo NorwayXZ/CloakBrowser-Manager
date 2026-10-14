@@ -6,6 +6,7 @@ import {
   Clock3,
   Copy,
   Database,
+  Download,
   Edit3,
   Folder,
   Globe2,
@@ -706,6 +707,17 @@ export function EnvironmentManager({
                     : "升级检查完成"}
                 </div>
                 <div className="mt-0.5 whitespace-pre-wrap break-words text-xs leading-5">{updateNotice.text}</div>
+                {updateNotice.result?.download_url && (
+                  <a
+                    className="btn-primary mt-2 inline-flex items-center gap-1.5 px-3 text-xs"
+                    href={updateNotice.result.download_url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    <span>下载新版本</span>
+                  </a>
+                )}
                 {updateNotice.browser && (
                   <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 rounded-md bg-white/70 px-2.5 py-2 text-xs">
                     <span>Wrapper：{updateNotice.browser.wrapper_version || "未知"}</span>

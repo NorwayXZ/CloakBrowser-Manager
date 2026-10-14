@@ -134,29 +134,39 @@ Control + C
 ./bin/cloak restart
 ```
 
-### 可选：打包成 DMG，双击就能用
+### 可选：安装包版，双击就能用
 
-不想每次开终端的话，可以把 Manager 打包成 macOS 应用。打包需要第 2 步装好的 Python 和 Node.js，只需要做一次：
+不想每次开终端的话，可以直接用安装包版。安装包版自带 Python 运行环境，不需要再装 Python、Node.js。
 
-```bash
-./packaging/macos/build-dmg.sh
-```
+**下载**：打开 GitHub 的 [Releases 页面](https://github.com/NorwayXZ/CloakBrowser-Manager/releases/latest)，按电脑选择：
 
-完成后在 `build/macos/` 里得到 `CloakBrowser-Manager-<版本>-<提交>-arm64.dmg`。双击打开 DMG，把 `CloakBrowser Manager` 拖到「应用程序」。以后：
+- Apple 芯片 Mac（M1/M2/M3/M4…）：`CloakBrowser-Manager-<版本>-<提交>-arm64.dmg`
+- Intel 芯片 Mac：`CloakBrowser-Manager-<版本>-<提交>-x86_64.dmg`
+- Windows：`CloakBrowser-Manager-<版本>-windows-x64-setup.exe`
 
-- 在启动台或「应用程序」里双击 `CloakBrowser Manager`，面板会自动在独立窗口打开（装了 Chrome 时用 Chrome 应用窗口，否则用默认浏览器）。
+也可以自己打包 macOS 版：`./packaging/macos/build-dmg.sh`，结果在 `build/macos/`。
+
+**macOS 使用**：双击 DMG，把 `CloakBrowser Manager` 拖到「应用程序」。安装包没有 Apple 开发者签名，从网上下载的第一次打开时要在 App 上右键选「打开」。
+
+- 双击 App，面板会自动在独立窗口打开（装了 Chrome 时用 Chrome 应用窗口，否则用默认浏览器）。
 - 面板窗口关掉后，点 Dock 上的图标可以重新打开。
 - 按 `Command + Q` 或在 Dock 上右键「退出」，会先关闭所有正在运行的浏览器，再退出 Manager。
-- 菜单栏里有「打开画像数据目录」「打开日志目录」。日志在 `~/Library/Logs/CloakBrowser Manager/manager.log`。
+- 菜单栏里有「检查更新…」「登录时自动启动（不弹出面板）」「打开画像数据目录」「打开日志目录」。日志在 `~/Library/Logs/CloakBrowser Manager/manager.log`。
+- 启动后会自动检查一次新版本，有新版本时弹窗提示下载。升级：下载新 DMG，把新 App 拖到「应用程序」覆盖旧版。面板里的「升级」按钮在安装包版会检查新版本和浏览器内核。
+
+**Windows 使用**：运行 `setup.exe` 安装（不需要管理员权限）。之后从开始菜单或桌面打开 `CloakBrowser Manager`，右下角托盘会出现图标，右键可以打开面板、检查更新、设置开机自启、退出（退出会先关闭所有浏览器）。日志在 `%LOCALAPPDATA%\CloakBrowser Manager\Logs\manager.log`。
 
 说明：
 
-- App 和终端版共用同一个数据目录 `~/Library/Application Support/CloakBrowser Manager`，画像、Cookie、登录状态都还在，不需要迁移。
-- 如果终端版已经在运行，双击 App 只会打开已有面板，不会重复启动。
-- App 内置了 Python 运行环境，安装后不再需要项目文件夹里的 `.venv`。
-- DMG 按打包电脑的芯片生成（Apple 芯片为 `arm64`，Intel 为 `x86_64`），要在另一种芯片的 Mac 上用，需要在那台电脑上重新打包。
-- App 没有 Apple 开发者签名。在自己电脑上打包的可以直接打开；拷到别的 Mac 时，第一次要在 App 上右键选「打开」。
-- 升级：拉取新代码后重新运行打包脚本，把新 DMG 里的 App 拖到「应用程序」覆盖旧版即可。面板里的「升级」按钮在 App 版只检查浏览器内核。
+- 安装包版和终端版共用同一个数据目录，画像、Cookie、登录状态都还在，不需要迁移；卸载安装包版也不会删除数据。
+- 如果终端版已经在运行，打开安装包版只会打开已有面板，不会重复启动。
+
+**发布新版本（维护者）**：推送一个 `v` 开头的标签，GitHub Actions 会自动打出三个安装包并发布到 Releases：
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
 
 ## Windows 安装教程
 

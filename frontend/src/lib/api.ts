@@ -117,6 +117,7 @@ export interface ManagerUpdateResult {
   restart_required: boolean;
   message: string;
   log: string[];
+  download_url?: string | null;
 }
 
 export interface BrowserUpdateResult {
