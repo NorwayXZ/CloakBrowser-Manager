@@ -622,6 +622,7 @@ def test_macos_window_normalizer_targets_launched_process(monkeypatch):
         return MagicMock(returncode=0)
 
     monkeypatch.setattr(module.subprocess, "run", fake_run)
+    monkeypatch.setattr(module.sys, "platform", "darwin")
     process = MagicMock(pid=12345)
 
     _sync_macos_window_after_launch(process, {"width": 1512, "height": 982})

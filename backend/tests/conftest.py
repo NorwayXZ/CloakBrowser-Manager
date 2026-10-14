@@ -30,6 +30,18 @@ from backend import database as db  # noqa: E402
 from backend.runtime import RuntimeConfig  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def isolated_secret_key(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch):
+    """Keep the encryption key in a temp dir: never read or create the real
+    user's .secret_key (and /data does not exist on CI runners)."""
+    from backend import secrets_crypto
+
+    monkeypatch.setattr(secrets_crypto, "DATA_DIR", tmp_path_factory.mktemp("secret-key"))
+    secrets_crypto.reset_key_cache()
+    yield
+    secrets_crypto.reset_key_cache()
+
+
 @pytest.fixture()
 def tmp_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Point database module at a temp directory and init schema."""
