@@ -16,6 +16,7 @@ import logging
 import os
 import secrets
 import struct
+import subprocess
 import shutil
 import time
 from contextlib import asynccontextmanager
@@ -30,7 +31,9 @@ from fastapi.staticfiles import StaticFiles
 import starlette.requests
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from . import backup as backups
 from . import database as db
+from . import secrets_crypto
 from .browser_manager import BrowserLaunchError, BrowserManager, _normalize_proxy, _validate_proxy
 from .cloak_runtime import get_effective_chromium_version, inspect_cloak_runtime
 from .fingerprint_report import DEFAULT_NETWORK_PROBE_URL, DIAGNOSTIC_SCRIPT
@@ -549,6 +552,10 @@ def _filter_rfb_client_messages(data: bytes) -> bytes:
 async def lifespan(app: FastAPI):
     browser_mgr.vnc.validate_available()
     db.init_db()
+    try:
+        backups.snapshot_database(db.DATA_DIR)
+    except Exception:
+        logger.exception("Automatic database snapshot failed")
     _ensure_auth_bootstrap()
     await browser_mgr.cleanup_stale()
     browser_mgr._auto_launch_task = asyncio.create_task(browser_mgr.auto_launch_all())
@@ -846,6 +853,106 @@ async def delete_proxy_preset(preset_id: str):
     if not db.delete_proxy_preset(preset_id):
         raise HTTPException(status_code=404, detail="Proxy preset not found")
     return {"ok": True}
+
+
+# ── Full data backups ─────────────────────────────────────────────────────────
+
+
+def _require_no_running_browsers(action: str) -> None:
+    if browser_mgr.running:
+        raise HTTPException(status_code=409, detail=f"{action}前请先关闭所有浏览器")
+
+
+def _backup_http_error(exc: backups.BackupError) -> HTTPException:
+    return HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/backups")
+async def list_backups():
+    items = await asyncio.to_thread(backups.list_backups, db.DATA_DIR)
+    return {
+        "backups": [backups.describe(item) for item in items],
+        "location": str(backups.backups_dir(db.DATA_DIR)),
+    }
+
+
+@app.post("/api/backups")
+async def create_backup():
+    _require_no_running_browsers("完整备份")
+    try:
+        path = await asyncio.to_thread(backups.create_full_backup, db.DATA_DIR)
+    except backups.BackupError as exc:
+        raise _backup_http_error(exc) from exc
+    item = next(b for b in backups.list_backups(db.DATA_DIR) if b.name == path.name)
+    return backups.describe(item)
+
+
+@app.get("/api/backups/full/{name}/download")
+async def download_backup(name: str):
+    try:
+        path = backups.resolve_backup(db.DATA_DIR, "full", name)
+    except backups.BackupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return FileResponse(path, media_type="application/zip", filename=name)
+
+
+@app.delete("/api/backups/{kind}/{name}")
+async def delete_backup(kind: str, name: str):
+    try:
+        path = backups.resolve_backup(db.DATA_DIR, kind, name)
+    except backups.BackupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    path.unlink(missing_ok=True)
+    return {"ok": True}
+
+
+def _after_restore(result: dict) -> dict:
+    secrets_crypto.reset_key_cache()
+    profiles = db.list_profiles()
+    return {"ok": True, **result, "profiles": len(profiles)}
+
+
+@app.post("/api/backups/{kind}/{name}/restore")
+async def restore_backup(kind: str, name: str):
+    _require_no_running_browsers("恢复备份")
+    try:
+        path = backups.resolve_backup(db.DATA_DIR, kind, name)
+        if kind == "full":
+            result = await asyncio.to_thread(backups.restore_full_backup, db.DATA_DIR, path)
+        else:
+            result = await asyncio.to_thread(backups.restore_database_snapshot, db.DATA_DIR, path)
+    except backups.BackupError as exc:
+        raise _backup_http_error(exc) from exc
+    return _after_restore(result)
+
+
+@app.post("/api/backups/restore-upload")
+async def restore_uploaded_backup(request: Request):
+    """Restore from a zip sent as the raw request body (no multipart needed)."""
+    _require_no_running_browsers("恢复备份")
+    backups.backups_dir(db.DATA_DIR).mkdir(parents=True, exist_ok=True)
+    upload = backups.backups_dir(db.DATA_DIR) / f"upload-{secrets.token_hex(8)}.zip"
+    try:
+        with open(upload, "wb") as handle:
+            async for chunk in request.stream():
+                handle.write(chunk)
+        result = await asyncio.to_thread(backups.restore_full_backup, db.DATA_DIR, upload)
+    except backups.BackupError as exc:
+        raise _backup_http_error(exc) from exc
+    finally:
+        upload.unlink(missing_ok=True)
+    return _after_restore(result)
+
+
+@app.post("/api/backups/reveal")
+async def reveal_backups():
+    if not browser_mgr.runtime.is_native:
+        raise HTTPException(status_code=409, detail="只有本地版可以打开备份文件夹")
+    folder = backups.backups_dir(db.DATA_DIR)
+    folder.mkdir(parents=True, exist_ok=True)
+    opener = ["explorer", str(folder)] if os.name == "nt" else ["open", str(folder)]
+    await asyncio.to_thread(subprocess.run, opener, check=False)
+    return {"ok": True, "location": str(folder)}
 
 
 @app.get("/api/configuration/export")

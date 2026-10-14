@@ -6,7 +6,6 @@ import {
   Clock3,
   Copy,
   Database,
-  Download,
   Edit3,
   Folder,
   Globe2,
@@ -24,11 +23,11 @@ import {
   Square,
   StickyNote,
   Trash2,
-  Upload,
   XCircle,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, type BrowserUpdateResult, type LaunchMode, type ManagerUpdateResult, type Profile, type ProfileGroup, type ProxyPreset } from "../lib/api";
+import { BackupPanel } from "./BackupPanel";
 import { StatusIndicator } from "./StatusIndicator";
 
 interface EnvironmentManagerProps {
@@ -287,9 +286,6 @@ export function EnvironmentManager({
   const [proxySaving, setProxySaving] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [updateNotice, setUpdateNotice] = useState<UpdateNotice | null>(null);
-  const [backupBusy, setBackupBusy] = useState<"export" | "import" | null>(null);
-  const [backupNotice, setBackupNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
-  const backupInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
@@ -354,54 +350,9 @@ export function EnvironmentManager({
     profiles: `总数 ${profiles.length} · 已打开 ${runningCount}`,
     groups: `共 ${groups.length} 个分组`,
     proxies: `共 ${proxyPresets.length} 个保存代理`,
-    backup: "导出或恢复浏览器配置、分组和代理库",
+    backup: "完整备份 Cookie 与登录状态，或只导出配置",
     trash: `共 ${trashProfiles.length} 个待清理浏览器 · 7 天后自动清理`,
   }[section];
-
-  const handleExportConfiguration = async () => {
-    setBackupBusy("export");
-    setBackupNotice(null);
-    try {
-      const backup = await api.exportConfiguration();
-      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `cloakbrowser-configuration-${new Date().toISOString().slice(0, 10)}.json`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-      setBackupNotice({ tone: "success", text: "配置备份已下载。文件包含代理和 Cookie，请妥善保管。" });
-    } catch (err) {
-      setBackupNotice({ tone: "error", text: err instanceof Error ? err.message : "导出失败" });
-    } finally {
-      setBackupBusy(null);
-    }
-  };
-
-  const handleImportConfiguration = async (file: File | null) => {
-    if (!file) return;
-    setBackupBusy("import");
-    setBackupNotice(null);
-    try {
-      const parsed: unknown = JSON.parse(await file.text());
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        throw new Error("备份文件格式不正确");
-      }
-      const result = await api.importConfiguration(parsed as Record<string, unknown>);
-      await onRefresh();
-      setBackupNotice({
-        tone: "success",
-        text: `已导入 ${result.profiles} 个浏览器配置、${result.groups} 个新分组、${result.proxy_presets} 个代理。`,
-      });
-    } catch (err) {
-      setBackupNotice({ tone: "error", text: err instanceof Error ? err.message : "导入失败" });
-    } finally {
-      setBackupBusy(null);
-      if (backupInputRef.current) backupInputRef.current.value = "";
-    }
-  };
 
   const toggleSelected = (id: string) => {
     setSelectedIds((prev) => {
@@ -1483,74 +1434,7 @@ export function EnvironmentManager({
           </section>
         )}
 
-        {section === "backup" && (
-          <section className="flex min-h-0 flex-1 flex-col p-4">
-            <div className="max-w-4xl overflow-hidden rounded-md border border-border bg-white">
-              <div className="border-b border-border px-5 py-4">
-                <h2 className="text-sm font-semibold text-slate-900">配置备份与恢复</h2>
-                <p className="mt-1 text-xs leading-5 text-slate-500">
-                  备份包含浏览器配置、分组、代理、Cookie JSON 和启动设置。代理密码与 Cookie 属于敏感信息，不要公开上传备份文件。
-                </p>
-              </div>
-              <div className="grid gap-0 md:grid-cols-2">
-                <div className="border-b border-border p-5 md:border-b-0 md:border-r">
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-blue-50 text-blue-700">
-                      <Download className="h-4 w-4" />
-                    </div>
-                    <div>
-                      <div className="text-sm font-semibold text-slate-900">导出配置</div>
-                      <div className="mt-1 text-xs leading-5 text-slate-500">生成 JSON 文件，适合迁移设置或在修改前保留一份配置快照。</div>
-                    </div>
-                  </div>
-                  <button
-                    className="btn-primary mt-4 flex items-center gap-1.5 px-4 disabled:opacity-60"
-                    disabled={backupBusy !== null}
-                    onClick={() => void handleExportConfiguration()}
-                  >
-                    <Download className="h-4 w-4" />
-                    <span>{backupBusy === "export" ? "导出中..." : "下载配置备份"}</span>
-                  </button>
-                </div>
-                <div className="p-5">
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-emerald-50 text-emerald-700">
-                      <Upload className="h-4 w-4" />
-                    </div>
-                    <div>
-                      <div className="text-sm font-semibold text-slate-900">导入配置</div>
-                      <div className="mt-1 text-xs leading-5 text-slate-500">导入为新的浏览器记录；同名代理会更新，同名分组不会重复创建。</div>
-                    </div>
-                  </div>
-                  <input
-                    ref={backupInputRef}
-                    type="file"
-                    accept="application/json,.json"
-                    className="hidden"
-                    onChange={(event) => void handleImportConfiguration(event.target.files?.[0] ?? null)}
-                  />
-                  <button
-                    className="btn-secondary mt-4 flex items-center gap-1.5 px-4 disabled:opacity-60"
-                    disabled={backupBusy !== null || runningCount > 0}
-                    title={runningCount > 0 ? "请先关闭所有浏览器" : "选择配置备份文件"}
-                    onClick={() => backupInputRef.current?.click()}
-                  >
-                    <Upload className="h-4 w-4" />
-                    <span>{backupBusy === "import" ? "导入中..." : "选择备份文件"}</span>
-                  </button>
-                </div>
-              </div>
-              <div className="border-t border-amber-200 bg-amber-50 px-5 py-3 text-xs leading-5 text-amber-800">
-                这个按钮不复制 Chrome 用户数据目录，所以不会备份网站缓存、历史记录或已经登录的网站会话。完整迁移登录状态时，关闭所有浏览器后复制系统里的整个 `CloakBrowser Manager` 数据目录。
-              </div>
-            </div>
-            {backupNotice && (
-              <div className={`mt-3 max-w-4xl rounded-md border px-4 py-3 text-sm ${backupNotice.tone === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-800"}`}>
-                {backupNotice.text}
-              </div>
-            )}
-          </section>
-        )}
+        {section === "backup" && <BackupPanel runningCount={runningCount} onRefresh={onRefresh} />}
       </main>
     </div>
   );

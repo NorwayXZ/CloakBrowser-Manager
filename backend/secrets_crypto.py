@@ -53,6 +53,13 @@ def _load_key() -> Fernet:
         return _key
 
 
+def reset_key_cache() -> None:
+    """Forget the loaded key, e.g. after a backup restore replaced the key file."""
+    global _key
+    with _lock:
+        _key = None
+
+
 def encrypt_value(value: str | None) -> str | None:
     """Encrypt a string for storage. Returns ``None`` as-is, else ``enc::<b64>``."""
     if value is None:

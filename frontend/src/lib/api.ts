@@ -261,6 +261,24 @@ export interface ExternalNetworkProbe {
   error?: string;
 }
 
+export interface BackupItem {
+  name: string;
+  kind: "full" | "auto";
+  size: number;
+  created_at: string;
+}
+
+export interface BackupListResult {
+  backups: BackupItem[];
+  location: string;
+}
+
+export interface BackupRestoreResult {
+  ok: boolean;
+  profiles: number;
+  previous_data: string;
+}
+
 export interface ConfigurationImportResult {
   ok: boolean;
   profiles: number;
@@ -410,6 +428,32 @@ export const api = {
       method: "POST",
       body: JSON.stringify(backup),
     }),
+
+  listBackups: () => request<BackupListResult>("/api/backups"),
+
+  createBackup: () => request<BackupItem>("/api/backups", { method: "POST" }),
+
+  backupDownloadUrl: (name: string) => `/api/backups/full/${encodeURIComponent(name)}/download`,
+
+  restoreBackup: (item: Pick<BackupItem, "kind" | "name">) =>
+    request<BackupRestoreResult>(
+      `/api/backups/${item.kind}/${encodeURIComponent(item.name)}/restore`,
+      { method: "POST" },
+    ),
+
+  restoreBackupFile: (file: File) =>
+    request<BackupRestoreResult>("/api/backups/restore-upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/zip" },
+      body: file,
+    }),
+
+  deleteBackup: (item: Pick<BackupItem, "kind" | "name">) =>
+    request<{ ok: boolean }>(`/api/backups/${item.kind}/${encodeURIComponent(item.name)}`, {
+      method: "DELETE",
+    }),
+
+  revealBackups: () => request<{ ok: boolean; location: string }>("/api/backups/reveal", { method: "POST" }),
 
   getFingerprintReport: (id: string) =>
     request<FingerprintReport>(`/api/profiles/${id}/fingerprint-report`),
