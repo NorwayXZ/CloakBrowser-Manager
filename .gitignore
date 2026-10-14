@@ -25,3 +25,6 @@ CLAUDE.md
 publish-docker.sh
 .beads
 debug
+
+# macOS app / DMG build output
+/build/

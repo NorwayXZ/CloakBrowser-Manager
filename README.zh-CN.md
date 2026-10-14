@@ -34,6 +34,14 @@ macOS:   ./run-macos.sh
 Windows: 双击 run-windows.bat
 ```
 
+macOS 也可以打包成 DMG，装进「应用程序」后双击就能用，不用再开终端：
+
+```bash
+./packaging/macos/build-dmg.sh
+```
+
+详见 [README.md](README.md) 里的「可选：打包成 DMG，双击就能用」。
+
 数据目录：
 
 ```text

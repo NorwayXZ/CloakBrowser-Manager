@@ -86,3 +86,13 @@ def test_update_from_git_stops_when_worktree_is_dirty(tmp_path: Path):
 def test_update_from_git_requires_git_install(tmp_path: Path):
     with pytest.raises(UpdateError, match="不是 Git 安装版"):
         update_from_git(tmp_path)
+
+
+def test_update_from_git_explains_dmg_install(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    (tmp_path / ".git").mkdir()
+    monkeypatch.setattr("sys.frozen", True, raising=False)
+
+    result = update_from_git(tmp_path, runner=lambda *_: pytest.fail("must not run commands"))
+
+    assert result.ok and not result.updated and not result.restart_required
+    assert "DMG 安装版" in result.message

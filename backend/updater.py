@@ -94,6 +94,21 @@ def update_from_git(
     """Pull the current branch and rebuild runtime files when new code arrives."""
     root = root.resolve()
     log: list[str] = []
+    if getattr(sys, "frozen", False):
+        # DMG/app builds have no Git checkout; let the browser-kernel check still run.
+        return UpdateResult(
+            ok=True,
+            updated=False,
+            before=None,
+            after=None,
+            branch=None,
+            restart_required=False,
+            message=(
+                "当前是 DMG 安装版，面板程序需要用新版 DMG 拖到「应用程序」覆盖升级；"
+                "浏览器画像、Cookie 等数据不受影响。"
+            ),
+            log=log,
+        )
     if not (root / ".git").exists():
         raise UpdateError("当前不是 Git 安装版，无法在面板里自动升级。请用 git clone 安装，或手动下载新版 ZIP。")
 
