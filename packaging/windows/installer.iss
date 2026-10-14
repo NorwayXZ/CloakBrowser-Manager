@@ -28,7 +28,11 @@ ArchitecturesInstallIn64BitMode=x64compatible
 CloseApplications=yes
 
 [Languages]
-Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+; Simplified Chinese is not bundled with every Inno Setup 6 install; build-installer.ps1
+; downloads it and passes /DChineseIsl=<path>. Without it the wizard is English.
+#ifdef ChineseIsl
+Name: "chinesesimplified"; MessagesFile: "{#ChineseIsl}"
+#endif
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]

@@ -76,7 +76,16 @@ if (-not $Iscc) {
     ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 }
 if (-not $Iscc) { throw "Inno Setup 6 (ISCC.exe) not found. Install it from https://jrsoftware.org/isinfo.php" }
-Invoke-Checked $Iscc @(
+$IsccArgs = @()
+$ChineseIsl = Join-Path $Build "ChineseSimplified.isl"
+try {
+    Invoke-WebRequest -UseBasicParsing -OutFile $ChineseIsl `
+        "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/ChineseSimplified.isl"
+    $IsccArgs += "/DChineseIsl=$ChineseIsl"
+} catch {
+    Write-Warning "Simplified Chinese installer translation unavailable; building an English installer"
+}
+$BaseArgs = @(
     "/Q",
     "/DAppVersion=$Version",
     "/DSourceDir=$(Join-Path $Build 'dist\CloakBrowser Manager')",
@@ -84,5 +93,13 @@ Invoke-Checked $Iscc @(
     "/DIconFile=$(Join-Path $Build 'AppIcon.ico')",
     (Join-Path $Here "installer.iss")
 )
+& $Iscc @IsccArgs @BaseArgs
+if ($LASTEXITCODE -ne 0 -and $IsccArgs.Count -gt 0) {
+    # The translation tracks the newest Inno Setup; an older ISCC may reject it.
+    Write-Warning "Installer build with Simplified Chinese failed; retrying in English"
+    Invoke-Checked $Iscc $BaseArgs
+} elseif ($LASTEXITCODE -ne 0) {
+    throw "$Iscc failed with exit code $LASTEXITCODE"
+}
 
 Write-Host "[done] $(Join-Path $Build "CloakBrowser-Manager-$Version-windows-x64-setup.exe")"
