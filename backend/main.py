@@ -36,6 +36,7 @@ from .cloak_runtime import get_effective_chromium_version, inspect_cloak_runtime
 from .fingerprint_report import DEFAULT_NETWORK_PROBE_URL, DIAGNOSTIC_SCRIPT
 from .proxy_bridge import HttpProxyBridge
 from .proxy_geo import fetch_proxy_geo
+from .request_guard import RequestGuardMiddleware
 from .updater import UpdateError, update_from_git
 from .xray_runtime import is_xray_link, start_xray_proxy
 from .models import (
@@ -562,6 +563,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="CloakBrowser Manager", lifespan=lifespan)
 app.add_middleware(AuthMiddleware)
+# Added last so it runs first: reject DNS-rebinding and cross-site requests
+# before auth (local installs usually run without a password).
+app.add_middleware(RequestGuardMiddleware, local_only=lambda: browser_mgr.runtime.is_native)
 
 
 # ── Authentication ────────────────────────────────────────────────────────────

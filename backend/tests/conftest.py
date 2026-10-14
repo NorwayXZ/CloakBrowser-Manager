@@ -67,5 +67,5 @@ def app_client(tmp_db: Path, monkeypatch: pytest.MonkeyPatch):
 
     from starlette.testclient import TestClient
 
-    with TestClient(main.app) as client:
+    with TestClient(main.app, base_url="http://127.0.0.1:8080") as client:
         yield client

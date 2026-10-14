@@ -22,7 +22,7 @@ def client_no_auth(tmp_db, monkeypatch):
     monkeypatch.setattr(main.browser_mgr, "cleanup_all", AsyncMock())
     monkeypatch.setattr(main.browser_mgr.vnc, "cleanup_stale", AsyncMock())
 
-    with TestClient(main.app) as client:
+    with TestClient(main.app, base_url="http://127.0.0.1:8080") as client:
         yield client
 
 
@@ -37,7 +37,7 @@ def client_auth(tmp_db, monkeypatch):
     monkeypatch.setattr(main.browser_mgr, "cleanup_all", AsyncMock())
     monkeypatch.setattr(main.browser_mgr.vnc, "cleanup_stale", AsyncMock())
 
-    with TestClient(main.app) as client:
+    with TestClient(main.app, base_url="http://127.0.0.1:8080") as client:
         yield client
 
 
@@ -55,7 +55,7 @@ def client_password_auth(tmp_db, monkeypatch):
     monkeypatch.setattr(main.browser_mgr, "cleanup_all", AsyncMock())
     monkeypatch.setattr(main.browser_mgr.vnc, "cleanup_stale", AsyncMock())
 
-    with TestClient(main.app) as client:
+    with TestClient(main.app, base_url="http://127.0.0.1:8080") as client:
         yield client
 
 

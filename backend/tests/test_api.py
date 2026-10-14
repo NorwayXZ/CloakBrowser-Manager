@@ -814,7 +814,7 @@ def test_cdp_json_version_rewrites_ws_url(app_client: TestClient):
 
     assert resp.status_code == 200
     data = resp.json()
-    assert data["webSocketDebuggerUrl"] == f"ws://testserver/api/profiles/{pid}/cdp"
+    assert data["webSocketDebuggerUrl"] == f"ws://127.0.0.1:8080/api/profiles/{pid}/cdp"
     assert data["Browser"] == "Chrome/145.0.0.0"
     main.browser_mgr.running.pop(pid, None)
 
@@ -873,7 +873,7 @@ def test_cdp_json_list_rewrites_page_urls(app_client: TestClient):
     assert resp.status_code == 200
     data = resp.json()
     assert data[0]["webSocketDebuggerUrl"] == (
-        f"ws://testserver/api/profiles/{pid}/cdp/devtools/page/DEADBEEF"
+        f"ws://127.0.0.1:8080/api/profiles/{pid}/cdp/devtools/page/DEADBEEF"
     )
     assert "webSocketDebuggerUrl" not in data[1]
     main.browser_mgr.running.pop(pid, None)
@@ -942,7 +942,7 @@ def test_ws_allows_same_origin(app_client: TestClient):
     try:
         with app_client.websocket_connect(
             f"/api/profiles/{pid}/vnc",
-            headers={"origin": "http://testserver"},
+            headers={"origin": "http://127.0.0.1:8080"},
         ) as ws:
             pass  # connection accepted = Origin check passed
     except Exception as exc:
