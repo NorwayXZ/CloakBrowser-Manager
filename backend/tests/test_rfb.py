@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import struct
 
-from backend.main import (
+from backend.rfb import (
     _build_server_cut_text,
     _filter_rfb_client_messages,
     _parse_kasmvnc_clipboard,

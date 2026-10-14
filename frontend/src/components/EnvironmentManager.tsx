@@ -29,6 +29,10 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { api, type BrowserUpdateResult, type LaunchMode, type ManagerUpdateResult, type Profile, type ProfileGroup, type ProxyPreset } from "../lib/api";
 import { BackupPanel } from "./BackupPanel";
+import { GroupsPanel } from "./GroupsPanel";
+import { ProxyPresetsPanel } from "./ProxyPresetsPanel";
+import { TrashPanel } from "./TrashPanel";
+import { formatDate } from "../lib/format";
 import { StatusIndicator } from "./StatusIndicator";
 
 interface EnvironmentManagerProps {
@@ -61,8 +65,6 @@ interface EnvironmentManagerProps {
 }
 
 type ManagerSection = "profiles" | "groups" | "proxies" | "backup" | "trash";
-type ProxyInputMode = "single" | "batch";
-type ProxyMode = "http" | "https" | "socks5" | "vless" | "vmess" | "trojan" | "ss";
 type UpdateNotice = {
   tone: "success" | "info" | "error";
   text: string;
@@ -77,98 +79,6 @@ const navItems: { id: ManagerSection; label: string; icon: typeof LayoutGrid }[]
   { id: "backup", label: "数据备份", icon: Database },
   { id: "trash", label: "回收站", icon: Archive },
 ];
-
-const DIRECT_PROXY_MODES: ProxyMode[] = ["http", "https", "socks5"];
-const LINK_PROXY_MODES: ProxyMode[] = ["vless", "vmess", "trojan", "ss"];
-
-function isDirectProxyMode(mode: string): mode is ProxyMode {
-  return DIRECT_PROXY_MODES.includes(mode as ProxyMode);
-}
-
-function normalizeProxyHost(host: string) {
-  let value = host.trim();
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
-    try {
-      value = new URL(value).hostname;
-    } catch {
-      // Keep the original value and let backend validation report the error.
-    }
-  }
-  if (value.includes(":") && !value.startsWith("[") && !value.endsWith("]")) {
-    return `[${value}]`;
-  }
-  return value;
-}
-
-function buildDirectProxyUrl(
-  mode: ProxyMode,
-  host: string,
-  port: string,
-  username = "",
-  password = "",
-) {
-  const cleanHost = normalizeProxyHost(host);
-  const cleanPort = port.trim();
-  if (!cleanHost || !cleanPort) return "";
-  const user = username.trim();
-  const pass = password.trim();
-  const auth = user || pass
-    ? `${encodeURIComponent(user)}:${encodeURIComponent(pass)}@`
-    : "";
-  return `${mode}://${auth}${cleanHost}:${cleanPort}`;
-}
-
-function proxyNameFromUrl(proxy: string, fallbackMode: string, index: number) {
-  try {
-    const url = new URL(proxy);
-    const fragment = decodeURIComponent(url.hash.replace(/^#/, "")).trim();
-    if (fragment) return fragment.slice(0, 64);
-    if (url.hostname) return `${fallbackMode.toUpperCase()} ${url.hostname}${url.port ? `:${url.port}` : ""}`.slice(0, 64);
-  } catch {
-    // Fall through to generic name.
-  }
-  return `${fallbackMode.toUpperCase()} 代理 ${index}`;
-}
-
-function parseProxyBatchLine(line: string, defaultMode: ProxyMode, index: number) {
-  const value = line.trim();
-  if (!value || value.startsWith("#")) return null;
-
-  const scheme = value.split(":", 1)[0]?.toLowerCase() as ProxyMode;
-  if ([...DIRECT_PROXY_MODES, ...LINK_PROXY_MODES].includes(scheme)) {
-    return {
-      name: proxyNameFromUrl(value, scheme, index),
-      proxy: value,
-      mode: scheme,
-    };
-  }
-
-  const parts = value.split(":");
-  if (parts.length === 2 || parts.length >= 4) {
-    const [host, port, username = "", password = ""] = parts;
-    const proxy = buildDirectProxyUrl(defaultMode, host ?? "", port ?? "", username, password);
-    if (!proxy) return null;
-    return {
-      name: `${defaultMode.toUpperCase()} ${host}:${port}`.slice(0, 64),
-      proxy,
-      mode: defaultMode,
-    };
-  }
-
-  return null;
-}
-
-function formatDate(value: string | null | undefined) {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
 
 function proxyType(profile: Profile) {
   const value = profile.proxy?.trim();
@@ -273,18 +183,6 @@ export function EnvironmentManager({
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
   const [savingNoteId, setSavingNoteId] = useState<string | null>(null);
   const [noteErrorId, setNoteErrorId] = useState<string | null>(null);
-  const [groupName, setGroupName] = useState("");
-  const [proxyName, setProxyName] = useState("");
-  const [proxyInputMode, setProxyInputMode] = useState<ProxyInputMode>("single");
-  const [proxyMode, setProxyMode] = useState<ProxyMode>("socks5");
-  const [proxyHostInput, setProxyHostInput] = useState("");
-  const [proxyPortInput, setProxyPortInput] = useState("");
-  const [proxyUsernameInput, setProxyUsernameInput] = useState("");
-  const [proxyPasswordInput, setProxyPasswordInput] = useState("");
-  const [proxyValue, setProxyValue] = useState("");
-  const [proxyBatchText, setProxyBatchText] = useState("");
-  const [proxyError, setProxyError] = useState<string | null>(null);
-  const [proxySaving, setProxySaving] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [updateNotice, setUpdateNotice] = useState<UpdateNotice | null>(null);
 
@@ -472,86 +370,6 @@ export function EnvironmentManager({
   const handleDelete = async (profile: Profile) => {
     if (!confirm(`确定删除「${profile.name}」吗？删除后会进入回收站，7 天内可以恢复。`)) return;
     await runRowAction(profile.id, () => onDelete(profile.id));
-  };
-
-  const handleDeleteGroup = async (group: ProfileGroup) => {
-    const count = profiles.filter((profile) => profile.group_name === group.name).length;
-    const detail = count > 0 ? `其中 ${count} 个浏览器会回到“未分组”。` : "";
-    if (!confirm(`确定删除分组「${group.name}」吗？${detail}`)) return;
-    await onDeleteGroup(group.id);
-  };
-
-  const handleDeleteProxyPreset = async (preset: ProxyPreset) => {
-    if (!confirm(`确定删除保存代理「${preset.name}」吗？不会影响已经使用这个代理的浏览器。`)) return;
-    await onDeleteProxyPreset(preset.id);
-  };
-
-  const handlePurgeProfile = async (profile: Profile) => {
-    if (!confirm(`确定彻底删除「${profile.name}」吗？此操作不可恢复。`)) return;
-    await onPurgeProfile(profile.id);
-  };
-
-  const handleCreateGroup = async () => {
-    const name = groupName.trim();
-    if (!name) return;
-    await onCreateGroup(name);
-    setGroupName("");
-  };
-
-  const handleCreateProxyPreset = async () => {
-    setProxyError(null);
-    const name = proxyName.trim();
-    if (!name) {
-      setProxyError("请先填写代理名称");
-      return;
-    }
-
-    const proxy = isDirectProxyMode(proxyMode)
-      ? buildDirectProxyUrl(proxyMode, proxyHostInput, proxyPortInput, proxyUsernameInput, proxyPasswordInput)
-      : proxyValue.trim();
-    if (!proxy) {
-      setProxyError(isDirectProxyMode(proxyMode) ? "请填写主机和端口" : "请粘贴代理链接");
-      return;
-    }
-
-    setProxySaving(true);
-    try {
-      await onCreateProxyPreset({ name, proxy, mode: proxyMode });
-      setProxyName("");
-      setProxyHostInput("");
-      setProxyPortInput("");
-      setProxyUsernameInput("");
-      setProxyPasswordInput("");
-      setProxyValue("");
-    } catch (err) {
-      setProxyError(err instanceof Error ? err.message : "保存代理失败");
-    } finally {
-      setProxySaving(false);
-    }
-  };
-
-  const handleCreateProxyBatch = async () => {
-    setProxyError(null);
-    const items = proxyBatchText
-      .split(/\r?\n/)
-      .reduce<{ name: string; proxy: string; mode: string }[]>((acc, line, index) => {
-        const item = parseProxyBatchLine(line, proxyMode, index + 1);
-        if (item) acc.push(item);
-        return acc;
-      }, []);
-    if (items.length === 0) {
-      setProxyError("没有识别到可保存的代理，请检查格式");
-      return;
-    }
-    setProxySaving(true);
-    try {
-      await onCreateProxyPresets(items);
-      setProxyBatchText("");
-    } catch (err) {
-      setProxyError(err instanceof Error ? err.message : "批量保存代理失败");
-    } finally {
-      setProxySaving(false);
-    }
   };
 
   const handleUpdateManager = async () => {
@@ -1100,350 +918,20 @@ export function EnvironmentManager({
         )}
 
         {section === "groups" && (
-          <section className="flex min-h-0 flex-1 flex-col p-4">
-            <div className="mb-4 rounded-md border border-border bg-white p-4">
-              <div className="grid grid-cols-[minmax(220px,360px)_auto] gap-3">
-                <input
-                  className="input h-11"
-                  value={groupName}
-                  onChange={(event) => setGroupName(event.target.value)}
-                  placeholder="输入分组名称，例如 美国账号"
-                />
-                <button
-                  className="btn-primary px-5"
-                  onClick={() => void handleCreateGroup()}
-                  disabled={!groupName.trim()}
-                >
-                  新建分组
-                </button>
-              </div>
-            </div>
-
-            <div className="overflow-hidden rounded-md border border-border bg-white">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-xs text-slate-500">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-medium">分组名称</th>
-                    <th className="px-4 py-3 text-left font-medium">浏览器数量</th>
-                    <th className="px-4 py-3 text-left font-medium">创建时间</th>
-                    <th className="w-32 px-4 py-3 text-left font-medium">操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td className="border-t border-border px-4 py-3 font-medium">未分组</td>
-                    <td className="border-t border-border px-4 py-3 text-slate-600">
-                      {profiles.filter((profile) => !profile.group_name || profile.group_name === "未分组").length}
-                    </td>
-                    <td className="border-t border-border px-4 py-3 text-slate-400">系统默认</td>
-                    <td className="border-t border-border px-4 py-3 text-slate-400">不可删除</td>
-                  </tr>
-                  {groups.map((group) => (
-                    <tr key={group.id} className="hover:bg-slate-50">
-                      <td className="border-t border-border px-4 py-3 font-medium">{group.name}</td>
-                      <td className="border-t border-border px-4 py-3 text-slate-600">
-                        {profiles.filter((profile) => profile.group_name === group.name).length}
-                      </td>
-                      <td className="border-t border-border px-4 py-3 text-slate-600">{formatDate(group.created_at)}</td>
-                      <td className="border-t border-border px-4 py-3">
-                        <button
-                          className="btn-secondary px-2.5 text-red-600"
-                          onClick={() => void handleDeleteGroup(group)}
-                        >
-                          删除
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
+          <GroupsPanel groups={groups} profiles={profiles} onCreateGroup={onCreateGroup} onDeleteGroup={onDeleteGroup} />
         )}
 
         {section === "proxies" && (
-          <section className="flex min-h-0 flex-1 flex-col p-4">
-            <div className="mb-4 overflow-hidden rounded-md border border-border bg-white">
-              <div className="flex border-b border-border px-5">
-                {[
-                  ["single", "单个添加"],
-                  ["batch", "批量导入"],
-                ].map(([id, label]) => (
-                  <button
-                    key={id}
-                    className={`mr-8 h-12 border-b-2 text-sm font-semibold ${
-                      proxyInputMode === id
-                        ? "border-accent text-accent"
-                        : "border-transparent text-slate-500 hover:text-slate-900"
-                    }`}
-                    onClick={() => {
-                      setProxyInputMode(id as ProxyInputMode);
-                      setProxyError(null);
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-
-              <div className="grid gap-5 p-5 xl:grid-cols-[390px_minmax(0,1fr)]">
-                <div className="rounded-md border border-blue-100 bg-blue-50 p-4 text-sm leading-6 text-slate-700">
-                  <div className="mb-2 font-semibold text-slate-900">支持的代理格式</div>
-                  <div>HTTP / HTTPS / SOCKS5 可分开填写主机、端口、账号、密码。</div>
-                  <div className="mt-3 font-mono text-xs leading-6 text-blue-700">
-                    <div>192.168.0.1:8000</div>
-                    <div>192.168.0.1:8000:user:pass</div>
-                    <div>socks5://user:pass@192.168.0.1:8000</div>
-                    <div>http://[2001:db8::1]:8000</div>
-                    <div>vless://... / vmess://... / trojan://... / ss://...</div>
-                  </div>
-                  <div className="mt-3 text-xs text-slate-500">
-                    同名代理会更新原记录；保存后可在创建/编辑浏览器时直接选择。
-                  </div>
-                </div>
-
-                <div>
-                  <div className="mb-4 grid gap-3 lg:grid-cols-[minmax(180px,260px)_180px_minmax(180px,1fr)]">
-                    <div>
-                      <label className="label">代理名称</label>
-                      <input
-                        className="input h-11"
-                        value={proxyName}
-                        onChange={(event) => setProxyName(event.target.value)}
-                        placeholder="例如 美国 SOCKS5"
-                        disabled={proxyInputMode === "batch"}
-                      />
-                    </div>
-                    <div>
-                      <label className="label">代理类型</label>
-                      <select
-                        className="input h-11"
-                        value={proxyMode}
-                        onChange={(event) => {
-                          setProxyMode(event.target.value as ProxyMode);
-                          setProxyError(null);
-                        }}
-                      >
-                        <option value="socks5">SOCKS5</option>
-                        <option value="http">HTTP</option>
-                        <option value="https">HTTPS</option>
-                        <option value="vless">VLESS</option>
-                        <option value="vmess">VMESS</option>
-                        <option value="trojan">TROJAN</option>
-                        <option value="ss">Shadowsocks</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="label">检测方式</label>
-                      <div className="flex h-11 items-center rounded-md border border-slate-300 bg-slate-50 px-3 text-sm text-slate-500">
-                        浏览器启动时自动检测出口 IP / 地区
-                      </div>
-                    </div>
-                  </div>
-
-                  {proxyInputMode === "single" && isDirectProxyMode(proxyMode) && (
-                    <div className="space-y-4">
-                      <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_140px]">
-                        <div>
-                          <label className="label">主机</label>
-                          <input
-                            className="input h-11"
-                            value={proxyHostInput}
-                            onChange={(event) => setProxyHostInput(event.target.value)}
-                            placeholder="192.168.100.1 或 proxy.example.com"
-                          />
-                        </div>
-                        <div>
-                          <label className="label">端口</label>
-                          <input
-                            className="input h-11 no-spin"
-                            value={proxyPortInput}
-                            onChange={(event) => setProxyPortInput(event.target.value)}
-                            placeholder="1090"
-                          />
-                        </div>
-                      </div>
-                      <div className="grid gap-3 lg:grid-cols-2">
-                        <div>
-                          <label className="label">代理账号</label>
-                          <input
-                            className="input h-11"
-                            value={proxyUsernameInput}
-                            onChange={(event) => setProxyUsernameInput(event.target.value)}
-                            placeholder="没有账号就留空"
-                          />
-                        </div>
-                        <div>
-                          <label className="label">代理密码</label>
-                          <input
-                            className="input h-11"
-                            type="password"
-                            value={proxyPasswordInput}
-                            onChange={(event) => setProxyPasswordInput(event.target.value)}
-                            placeholder="没有密码就留空"
-                          />
-                        </div>
-                      </div>
-                      <div className="rounded-md bg-slate-50 px-3 py-2 font-mono text-xs text-slate-500">
-                        {buildDirectProxyUrl(proxyMode, proxyHostInput, proxyPortInput, proxyUsernameInput, proxyPasswordInput) || "代理地址会自动拼接显示在这里"}
-                      </div>
-                    </div>
-                  )}
-
-                  {proxyInputMode === "single" && LINK_PROXY_MODES.includes(proxyMode) && (
-                    <div>
-                      <label className="label">代理链接</label>
-                      <textarea
-                        className="input min-h-32 resize-y font-mono text-xs"
-                        value={proxyValue}
-                        onChange={(event) => setProxyValue(event.target.value)}
-                        placeholder="粘贴 vless://、vmess://、trojan:// 或 ss:// 链接"
-                        spellCheck={false}
-                      />
-                    </div>
-                  )}
-
-                  {proxyInputMode === "batch" && (
-                    <div>
-                      <label className="label">批量代理</label>
-                      <textarea
-                        className="input min-h-48 resize-y font-mono text-xs"
-                        value={proxyBatchText}
-                        onChange={(event) => setProxyBatchText(event.target.value)}
-                        placeholder={"一行一个代理，例如：\n192.168.0.1:8000\n192.168.0.1:8000:user:pass\nsocks5://user:pass@192.168.0.1:8000\nvless://..."}
-                        spellCheck={false}
-                      />
-                      <div className="mt-2 text-xs text-slate-500">
-                        裸 host:port 格式会按上方选择的代理类型保存；完整链接会按链接自己的协议保存。
-                      </div>
-                    </div>
-                  )}
-
-                  {proxyError && (
-                    <div className="mt-4 flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
-                      <XCircle className="h-4 w-4" />
-                      <span>{proxyError}</span>
-                    </div>
-                  )}
-
-                  <div className="mt-4 flex items-center gap-3">
-                    {proxyInputMode === "single" ? (
-                      <button
-                        className="btn-primary flex h-10 items-center gap-1.5 px-5"
-                        onClick={() => void handleCreateProxyPreset()}
-                        disabled={proxySaving}
-                      >
-                        <Plus className="h-4 w-4" />
-                        <span>{proxySaving ? "保存中..." : "保存代理"}</span>
-                      </button>
-                    ) : (
-                      <button
-                        className="btn-primary flex h-10 items-center gap-1.5 px-5"
-                        onClick={() => void handleCreateProxyBatch()}
-                        disabled={proxySaving}
-                      >
-                        <Plus className="h-4 w-4" />
-                        <span>{proxySaving ? "保存中..." : "批量保存"}</span>
-                      </button>
-                    )}
-                    <div className="flex items-center gap-1.5 text-xs text-emerald-700">
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                      <span>支持带账号密码的 SOCKS5</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="overflow-hidden rounded-md border border-border bg-white">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-xs text-slate-500">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-medium">名称</th>
-                    <th className="px-4 py-3 text-left font-medium">代理模式</th>
-                    <th className="px-4 py-3 text-left font-medium">代理地址</th>
-                    <th className="px-4 py-3 text-left font-medium">创建时间</th>
-                    <th className="w-32 px-4 py-3 text-left font-medium">操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {proxyPresets.length === 0 && (
-                    <tr>
-                      <td colSpan={5} className="px-4 py-12 text-center text-slate-400">
-                        暂无保存代理。可以保存“美国 SOCKS5”“香港 VLESS”这类常用代理。
-                      </td>
-                    </tr>
-                  )}
-                  {proxyPresets.map((preset) => (
-                    <tr key={preset.id} className="hover:bg-slate-50">
-                      <td className="border-t border-border px-4 py-3 font-medium">{preset.name}</td>
-                      <td className="border-t border-border px-4 py-3">
-                        <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium uppercase text-slate-700">
-                          {preset.mode}
-                        </span>
-                      </td>
-                      <td className="max-w-xl truncate border-t border-border px-4 py-3 font-mono text-xs text-slate-600" title={preset.proxy}>
-                        {preset.proxy}
-                      </td>
-                      <td className="border-t border-border px-4 py-3 text-slate-600">{formatDate(preset.created_at)}</td>
-                      <td className="border-t border-border px-4 py-3">
-                        <button
-                          className="btn-secondary px-2.5 text-red-600"
-                          onClick={() => void handleDeleteProxyPreset(preset)}
-                        >
-                          删除
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
+          <ProxyPresetsPanel
+            proxyPresets={proxyPresets}
+            onCreateProxyPreset={onCreateProxyPreset}
+            onCreateProxyPresets={onCreateProxyPresets}
+            onDeleteProxyPreset={onDeleteProxyPreset}
+          />
         )}
 
         {section === "trash" && (
-          <section className="flex min-h-0 flex-1 flex-col p-4">
-            <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-              删除后的浏览器会进入回收站，保留 7 天；可以恢复，也可以彻底删除。
-            </div>
-            <div className="overflow-hidden rounded-md border border-border bg-white">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-xs text-slate-500">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-medium">名称</th>
-                    <th className="px-4 py-3 text-left font-medium">分组</th>
-                    <th className="px-4 py-3 text-left font-medium">删除时间</th>
-                    <th className="w-56 px-4 py-3 text-left font-medium">操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {trashProfiles.length === 0 && (
-                    <tr>
-                      <td colSpan={4} className="px-4 py-12 text-center text-slate-400">回收站为空</td>
-                    </tr>
-                  )}
-                  {trashProfiles.map((profile) => (
-                    <tr key={profile.id} className="hover:bg-slate-50">
-                      <td className="border-t border-border px-4 py-3 font-medium">{profile.name}</td>
-                      <td className="border-t border-border px-4 py-3 text-slate-600">{profile.group_name || "未分组"}</td>
-                      <td className="border-t border-border px-4 py-3 text-slate-600">{formatDate(profile.deleted_at)}</td>
-                      <td className="border-t border-border px-4 py-3">
-                        <div className="flex gap-2">
-                          <button className="btn-secondary px-2.5" onClick={() => void onRestoreProfile(profile.id)}>
-                            恢复
-                          </button>
-                          <button className="btn-danger px-2.5" onClick={() => void handlePurgeProfile(profile)}>
-                            彻底删除
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
+          <TrashPanel trashProfiles={trashProfiles} onRestoreProfile={onRestoreProfile} onPurgeProfile={onPurgeProfile} />
         )}
 
         {section === "backup" && <BackupPanel runningCount={runningCount} onRefresh={onRefresh} />}
