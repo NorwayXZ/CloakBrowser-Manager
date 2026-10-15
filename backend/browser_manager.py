@@ -637,6 +637,9 @@ def _build_system_chrome_command_args(
         _append_chrome_arg_once(chrome_args, "--remote-debugging-port", str(cdp_port))
     _append_chrome_arg_once(chrome_args, "--no-first-run")
     _append_chrome_arg_once(chrome_args, "--no-default-browser-check")
+    # Playwright adds this itself; launches that bypass it must too, or macOS
+    # asks for the login keychain password on every start.
+    _append_chrome_arg_once(chrome_args, "--use-mock-keychain")
 
     if headless:
         _append_chrome_arg_once(chrome_args, "--headless", "new")
@@ -800,6 +803,7 @@ def _launch_cloakbrowser_manual_process(
     _append_chrome_arg_once(extra_args, "--user-data-dir", os.fspath(user_data_dir))
     _append_chrome_arg_once(extra_args, "--no-first-run")
     _append_chrome_arg_once(extra_args, "--no-default-browser-check")
+    _append_chrome_arg_once(extra_args, "--use-mock-keychain")
     if viewport and isinstance(viewport, dict):
         width = viewport.get("width")
         height = viewport.get("height")
@@ -2384,9 +2388,17 @@ class BrowserManager:
                     "height": profile.get("screen_height", 1080) - 133,
                 }
             elif (
-                requested_launch_mode == "manual"
-                and self.runtime.runtime_mode == "native"
+                self.runtime.runtime_mode == "native"
                 and not bool(profile.get("headless", False))
+                and (
+                    requested_launch_mode == "manual"
+                    # Debug mode also starts these browsers as a plain process
+                    # (then attaches CDP), so it needs the same --window-size.
+                    # Playwright-owned launches would read viewport as page
+                    # emulation instead, so they keep their own defaults.
+                    or browser_engine == "system_chrome"
+                    or self.runtime.host_os == "macos"
+                )
             ):
                 # Headed native launches need an explicit outer window size.
                 # Without it, older macOS CloakBrowser builds can report

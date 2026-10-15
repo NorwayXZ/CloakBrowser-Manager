@@ -517,6 +517,7 @@ async def test_system_chrome_native_window_uses_direct_chrome_launch(monkeypatch
     assert "--remote-debugging-address=127.0.0.1" in command
     assert "--no-first-run" in command
     assert "--no-default-browser-check" in command
+    assert "--use-mock-keychain" in command
     assert not any("--remote-debugging-pipe" in arg for arg in command)
     assert not any("AutomationControlled" in arg for arg in command)
 
@@ -610,6 +611,7 @@ def test_cloakbrowser_manual_process_injects_license_env(monkeypatch, tmp_path: 
 
     assert returned is fake_process
     assert popen_calls[0][1]["env"]["CLOAKBROWSER_LICENSE_KEY"] == "test-license"
+    assert "--use-mock-keychain" in popen_calls[0][0]
 
 
 def test_macos_window_normalizer_targets_launched_process(monkeypatch):
@@ -1334,3 +1336,46 @@ async def test_direct_launch_uses_exit_geo_when_timezone_and_locale_are_empty(
     assert options["locale"] == "zh-HK"
     assert running.effective_timezone == "Asia/Hong_Kong"
     assert running.effective_locale == "zh-HK"
+
+
+async def _debug_launch_options(monkeypatch, tmp_path: Path, runtime: RuntimeConfig, launcher_name: str) -> dict:
+    """Run a debug launch whose launcher records its options and then fails."""
+    from backend import browser_manager as module
+
+    seen: list[dict] = []
+
+    async def recording_launcher(**kwargs):
+        seen.append(kwargs)
+        raise RuntimeError("stop after recording options")
+
+    monkeypatch.setattr(module, launcher_name, recording_launcher)
+    monkeypatch.setattr(module, "CDP_START_ATTEMPTS", 1)
+    manager = BrowserManager(runtime)
+    with pytest.raises(Exception):
+        await manager.launch(_launch_profile(tmp_path), launch_mode="debug")
+    assert seen
+    return seen[0]
+
+
+@pytest.mark.asyncio
+async def test_macos_debug_launch_sets_window_size(monkeypatch, tmp_path: Path):
+    # Without it the window opened maximized: a 2560px content area inside a
+    # spoofed 1920px screen, which the fingerprint self-check flagged.
+    options = await _debug_launch_options(
+        monkeypatch,
+        tmp_path,
+        RuntimeConfig("macos", "native", "native-window", tmp_path),
+        "_launch_cloakbrowser_persistent_context_async",
+    )
+    assert options["viewport"] == {"width": 1920, "height": 1080}
+
+
+@pytest.mark.asyncio
+async def test_windows_playwright_debug_launch_keeps_default_viewport(monkeypatch, tmp_path: Path):
+    options = await _debug_launch_options(
+        monkeypatch,
+        tmp_path,
+        RuntimeConfig("windows", "native", "native-window", tmp_path),
+        "launch_persistent_context_async",
+    )
+    assert "viewport" not in options
