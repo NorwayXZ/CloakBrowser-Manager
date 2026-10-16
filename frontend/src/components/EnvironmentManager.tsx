@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   Clock3,
   Copy,
+  Cpu,
   Database,
   Download,
   Edit3,
@@ -30,6 +31,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, type BrowserUpdateResult, type LaunchMode, type ManagerUpdateResult, type Profile, type ProfileGroup, type ProxyPreset } from "../lib/api";
 import { BackupPanel } from "./BackupPanel";
 import { GroupsPanel } from "./GroupsPanel";
+import { KernelPanel } from "./KernelPanel";
 import { ProxyPresetsPanel } from "./ProxyPresetsPanel";
 import { TrashPanel } from "./TrashPanel";
 import { formatDate } from "../lib/format";
@@ -64,7 +66,7 @@ interface EnvironmentManagerProps {
   onLogout: () => void;
 }
 
-type ManagerSection = "profiles" | "groups" | "proxies" | "backup" | "trash";
+type ManagerSection = "profiles" | "groups" | "proxies" | "kernel" | "backup" | "trash";
 type UpdateNotice = {
   tone: "success" | "info" | "error";
   text: string;
@@ -76,6 +78,7 @@ const navItems: { id: ManagerSection; label: string; icon: typeof LayoutGrid }[]
   { id: "profiles", label: "环境管理", icon: LayoutGrid },
   { id: "groups", label: "分组管理", icon: Folder },
   { id: "proxies", label: "代理管理", icon: Globe2 },
+  { id: "kernel", label: "浏览器内核", icon: Cpu },
   { id: "backup", label: "数据备份", icon: Database },
   { id: "trash", label: "回收站", icon: Archive },
 ];
@@ -242,6 +245,7 @@ export function EnvironmentManager({
     profiles: "环境管理",
     groups: "分组管理",
     proxies: "代理管理",
+    kernel: "浏览器内核",
     backup: "数据备份",
     trash: "回收站",
   }[section];
@@ -249,6 +253,7 @@ export function EnvironmentManager({
     profiles: `总数 ${profiles.length} · 已打开 ${runningCount}`,
     groups: `共 ${groups.length} 个分组`,
     proxies: `共 ${proxyPresets.length} 个保存代理`,
+    kernel: "查看、更新和清理 CloakBrowser 内核",
     backup: "完整备份 Cookie 与登录状态，或只导出配置",
     trash: `共 ${trashProfiles.length} 个待清理浏览器 · 7 天后自动清理`,
   }[section];
@@ -934,6 +939,7 @@ export function EnvironmentManager({
           <TrashPanel trashProfiles={trashProfiles} onRestoreProfile={onRestoreProfile} onPurgeProfile={onPurgeProfile} />
         )}
 
+        {section === "kernel" && <KernelPanel runningCount={runningCount} />}
         {section === "backup" && <BackupPanel runningCount={runningCount} onRefresh={onRefresh} />}
       </main>
     </div>

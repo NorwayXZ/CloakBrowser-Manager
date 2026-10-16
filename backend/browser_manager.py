@@ -23,6 +23,12 @@ from urllib.parse import unquote, urlparse
 
 from cloakbrowser import launch_persistent_context_async
 
+from .fingerprint_options import (
+    apply_noise_preference,
+    build_fingerprint_option_args,
+    unsupported_option_labels,
+    webrtc_ip_arg,
+)
 from .fingerprint_report import DEFAULT_NETWORK_PROBE_URL, analyze_fingerprint, run_fingerprint_probe
 from .cloak_runtime import get_effective_chromium_version
 from .proxy_geo import fetch_proxy_geo
@@ -2129,6 +2135,18 @@ class BrowserManager:
                         "message": f"自定义 UA 是 Chrome {ua_major.group(1)}，当前 CloakBrowser 内核是 {binary_major}；请清空 UA 跟随内核。",
                     })
 
+        if engine == "cloakbrowser":
+            try:
+                kernel_version = get_effective_chromium_version()
+            except (ImportError, AttributeError):
+                kernel_version = None
+            too_new = unsupported_option_labels(profile, kernel_version)
+            if too_new:
+                issues.append({
+                    "severity": "warning", "code": "fingerprint_option_needs_newer_kernel",
+                    "message": f"当前内核 {kernel_version} 不支持：{'、'.join(too_new)}；这些选项会被忽略，可到「内核」页更新。",
+                })
+
         vendor = str(profile.get("gpu_vendor") or "")
         renderer = str(profile.get("gpu_renderer") or "")
         if platform == "macos" and (
@@ -2357,6 +2375,13 @@ class BrowserManager:
                     extra_args.append(f"--fingerprint-timezone={resolved_timezone}")
                 if resolved_locale and not any(arg.startswith("--accept-lang") for arg in user_launch_args):
                     extra_args.append(f"--accept-lang={_accept_language_value(resolved_locale)}")
+                webrtc_arg = webrtc_ip_arg(
+                    profile,
+                    (proxy_geo or {}).get("ip"),
+                    proxied=bool(browser_proxy),
+                )
+                if webrtc_arg and not any(arg.startswith("--fingerprint-webrtc-ip") for arg in user_launch_args):
+                    extra_args.append(webrtc_arg)
                 if SESSION_RESTORE_ARG not in extra_args:
                     extra_args.append(SESSION_RESTORE_ARG)
             extra_args += user_launch_args
@@ -2928,6 +2953,13 @@ class BrowserManager:
 
     def _build_fingerprint_args(self, profile: dict[str, Any]) -> list[str]:
         """Build extra Chromium args from profile fingerprint settings."""
+        return apply_noise_preference(
+            [*self._build_persona_args(profile), *build_fingerprint_option_args(profile)],
+            profile,
+        )
+
+    def _build_persona_args(self, profile: dict[str, Any]) -> list[str]:
+        """Seed, platform and device-hardware switches for the persona."""
         args: list[str] = []
         if self.runtime.viewer_mode == "vnc":
             args.append("--use-angle=swiftshader")

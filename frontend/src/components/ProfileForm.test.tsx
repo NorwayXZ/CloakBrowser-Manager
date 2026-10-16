@@ -50,3 +50,33 @@ describe("ProfileForm proxy mode", () => {
     expect(onSave.mock.calls[0][0].proxy).toBeNull();
   });
 });
+
+describe("ProfileForm extra fingerprint options", () => {
+  it("saves brand, WebRTC and cookie options with the profile", async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<ProfileForm profile={null} hostOS="windows" onSave={onSave} onCancel={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText("例如 Amazon Seller #1"), { target: { value: "Edge profile" } });
+    fireEvent.change(screen.getByDisplayValue("Chrome（默认）"), { target: { value: "Edge" } });
+    fireEvent.change(screen.getByDisplayValue("跟随代理出口 IP（推荐）"), { target: { value: "custom" } });
+    fireEvent.change(screen.getByPlaceholderText("例如 203.0.113.9"), { target: { value: "203.0.113.9" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: /跨电脑 Cookie/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Windows 语音列表/ }));
+    fireEvent.click(screen.getByRole("button", { name: "创建" }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
+    expect(onSave.mock.calls[0][0].fingerprint_options).toEqual({
+      brand: "Edge",
+      webrtc_ip: "203.0.113.9",
+      portable_cookies: true,
+      speech_voices: false,
+    });
+  });
+
+  it("keeps transparent proxy off until a proxy is set", () => {
+    render(<ProfileForm profile={null} hostOS="macos" onSave={vi.fn()} onCancel={vi.fn()} />);
+
+    expect((screen.getByRole("checkbox", { name: /透明代理/ }) as HTMLInputElement).disabled).toBe(true);
+    expect(screen.queryByRole("checkbox", { name: /Windows 语音列表/ })).toBeNull();
+  });
+});

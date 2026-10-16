@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ipaddress
+import re
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -10,6 +12,56 @@ from .runtime import HostOS, RuntimeMode, ViewerMode
 
 BrowserEngine = Literal["auto", "system_chrome", "cloakbrowser"]
 LaunchMode = Literal["manual", "debug"]
+BrowserBrand = Literal["Chrome", "Edge", "Opera", "Vivaldi"]
+
+_DOTTED_VERSION_RE = re.compile(r"^\d+(?:\.\d+){0,3}$")
+
+
+class FingerprintOptions(BaseModel):
+    """CloakBrowser binary switches beyond the core device persona.
+
+    Every field defaults to "let the binary decide", so an empty object keeps
+    the kernel's own seed-derived values.
+    """
+
+    brand: BrowserBrand | None = None
+    brand_version: str | None = None
+    platform_version: str | None = None
+    # None = replace WebRTC candidates with the proxy exit IP when proxied.
+    webrtc_ip: str | None = None
+    noise: bool | None = None
+    speech_voices: bool = True
+    storage_quota_mb: int | None = Field(default=None, ge=100, le=10_000_000)
+    taskbar_height: int | None = Field(default=None, ge=0, le=300)
+    windows_font_metrics: bool = False
+    allow_3p_cookies: bool = False
+    transparent_proxy: bool = False
+    portable_cookies: bool = False
+
+    @field_validator("brand_version", "platform_version", mode="before")
+    @classmethod
+    def _dotted_version(cls, v: object) -> str | None:
+        if v is None:
+            return None
+        text = str(v).strip()
+        if not text:
+            return None
+        if not _DOTTED_VERSION_RE.fullmatch(text):
+            raise ValueError("版本号只能是数字和点，例如 154.0.8037.57 或 15.0.0")
+        return text
+
+    @field_validator("webrtc_ip", mode="before")
+    @classmethod
+    def _ip_address(cls, v: object) -> str | None:
+        if v is None:
+            return None
+        text = str(v).strip()
+        if not text or text.lower() == "auto":
+            return None
+        try:
+            return str(ipaddress.ip_address(text))
+        except ValueError as exc:
+            raise ValueError("WebRTC IP 必须是有效的 IPv4 或 IPv6 地址") from exc
 
 
 class ProfileCreate(BaseModel):
@@ -40,6 +92,7 @@ class ProfileCreate(BaseModel):
     cookies_json: str | None = None
     startup_urls: list[str] = Field(default_factory=list)
     launch_args: list[str] = Field(default_factory=list)
+    fingerprint_options: FingerprintOptions = Field(default_factory=FingerprintOptions)
     notes: str | None = None
     tags: list[TagCreate] | None = None
 
@@ -72,6 +125,7 @@ class ProfileUpdate(BaseModel):
     cookies_json: str | None = Field(default=None)
     startup_urls: list[str] | None = None
     launch_args: list[str] | None = None
+    fingerprint_options: FingerprintOptions | None = None
     notes: str | None = Field(default=None)
     tags: list[TagCreate] | None = None
 
@@ -121,6 +175,7 @@ class ProfileResponse(BaseModel):
 
     color_scheme: str | None = None
     launch_args: list[str] = []
+    fingerprint_options: FingerprintOptions = Field(default_factory=FingerprintOptions)
     notes: str | None = None
     user_data_dir: str
     created_at: str
@@ -281,3 +336,45 @@ class AuthAccountUpdate(BaseModel):
     current_password: str
     username: str | None = Field(default=None, min_length=3, max_length=64)
     new_password: str | None = Field(default=None, min_length=8, max_length=256)
+
+
+class KernelLicenseResponse(BaseModel):
+    tier: Literal["none", "free", "paid", "invalid", "unknown"]
+    plan: str | None = None
+    expires: str | None = None
+    can_pin: bool = False
+
+
+class KernelSettingsModel(BaseModel):
+    auto_update: bool = True
+    release_channel: Literal["stable", "preview"] = "stable"
+    pinned_version: str | None = None
+
+
+class InstalledKernelResponse(BaseModel):
+    name: str
+    version: str
+    pro: bool
+    size_bytes: int
+    in_use: bool
+
+
+class KernelOverviewResponse(BaseModel):
+    wrapper_version: str | None = None
+    platform: str | None = None
+    cache_dir: str
+    license: KernelLicenseResponse
+    settings: KernelSettingsModel
+    version: str | None = None
+    installed: bool = False
+    pinned: bool = False
+    bundled_version: str | None = None
+    installed_kernels: list[InstalledKernelResponse] = []
+    running_count: int = 0
+
+
+class KernelCheckResponse(BaseModel):
+    current_version: str | None = None
+    latest_version: str
+    update_available: bool
+    pinned: bool = False

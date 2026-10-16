@@ -274,6 +274,7 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
     startup_urls: profile.startup_urls,
     color_scheme: profile.color_scheme,
     launch_args: profile.launch_args,
+    fingerprint_options: profile.fingerprint_options ?? {},
     notes: profile.notes,
     tags: profile.tags,
   }), []);

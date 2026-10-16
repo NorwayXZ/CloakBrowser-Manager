@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import dataclasses
 import hashlib
 import hmac
 import html
@@ -32,9 +33,10 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from . import backup as backups
 from . import database as db
+from . import kernel
 from . import secrets_crypto
 from .browser_manager import BrowserLaunchError, BrowserManager, _normalize_proxy, _validate_proxy
-from .cloak_runtime import get_effective_chromium_version, inspect_cloak_runtime
+from .cloak_runtime import get_effective_chromium_version
 from .fingerprint_report import DEFAULT_NETWORK_PROBE_URL, DIAGNOSTIC_SCRIPT
 from .proxy_bridge import HttpProxyBridge
 from .proxy_geo import fetch_proxy_geo
@@ -45,6 +47,9 @@ from .xray_runtime import is_xray_link, start_xray_proxy
 from .models import (
     AuthAccountUpdate,
     BrowserUpdateResponse,
+    KernelCheckResponse,
+    KernelOverviewResponse,
+    KernelSettingsModel,
     ClipboardRequest,
     GroupCreate,
     GroupResponse,
@@ -360,6 +365,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 async def lifespan(app: FastAPI):
     browser_mgr.vnc.validate_available()
     db.init_db()
+    if kernel.has_saved_settings(db.get_setting):
+        kernel.apply_settings(kernel.read_settings(db.get_setting))
     try:
         backups.snapshot_database(db.DATA_DIR)
     except Exception:
@@ -1111,37 +1118,81 @@ async def update_manager():
         raise HTTPException(status_code=500, detail=f"升级失败：{exc}") from exc
 
 
+def _kernel_settings() -> kernel.KernelSettings:
+    return kernel.read_settings(db.get_setting)
+
+
+def _kernel_overview_response() -> KernelOverviewResponse:
+    info = kernel.overview(_kernel_settings())
+    return KernelOverviewResponse(
+        **{
+            **dataclasses.asdict(info),
+            "license": {**dataclasses.asdict(info.license), "can_pin": info.license.can_pin},
+        },
+        running_count=len(browser_mgr.running),
+    )
+
+
+@app.get("/api/kernel", response_model=KernelOverviewResponse)
+async def get_kernel_overview():
+    try:
+        return await asyncio.to_thread(_kernel_overview_response)
+    except Exception as exc:
+        logger.exception("Kernel overview failed")
+        raise HTTPException(status_code=502, detail=f"读取内核信息失败：{exc}") from exc
+
+
+@app.post("/api/kernel/check", response_model=KernelCheckResponse)
+async def check_kernel_update():
+    try:
+        return KernelCheckResponse(**await asyncio.to_thread(kernel.check_latest, _kernel_settings()))
+    except kernel.KernelError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Kernel update check failed")
+        raise HTTPException(status_code=502, detail=f"检查内核版本失败：{exc}") from exc
+
+
+@app.put("/api/kernel/settings", response_model=KernelOverviewResponse)
+async def update_kernel_settings(body: KernelSettingsModel):
+    try:
+        license_state = await asyncio.to_thread(kernel.resolve_license)
+        pinned = kernel.validate_pin(body.pinned_version, license_state)
+    except kernel.KernelError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    settings = kernel.KernelSettings(
+        auto_update=body.auto_update,
+        release_channel=body.release_channel,
+        pinned_version=pinned,
+    )
+    db.set_setting(kernel.SETTING_AUTO_UPDATE, "true" if settings.auto_update else "false")
+    db.set_setting(kernel.SETTING_RELEASE_CHANNEL, settings.release_channel)
+    if settings.pinned_version:
+        db.set_setting(kernel.SETTING_PINNED_VERSION, settings.pinned_version)
+    else:
+        db.delete_setting(kernel.SETTING_PINNED_VERSION)
+    kernel.apply_settings(settings)
+    return await asyncio.to_thread(_kernel_overview_response)
+
+
+@app.delete("/api/kernel/versions/{name}")
+async def delete_kernel_version(name: str):
+    if browser_mgr.running:
+        raise HTTPException(status_code=409, detail="请先关闭所有运行中的浏览器，再删除旧内核。")
+    try:
+        freed = await asyncio.to_thread(kernel.delete_kernel, name)
+    except kernel.KernelError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "freed_bytes": freed}
+
+
+@app.post("/api/kernel/update", response_model=BrowserUpdateResponse)
 @app.post("/api/browser/update", response_model=BrowserUpdateResponse)
 async def update_browser_binary():
-    """Check/download the official CloakBrowser binary for this platform."""
+    """Check/download the CloakBrowser binary this license launches."""
     try:
-        import cloakbrowser
-
-        before = get_effective_chromium_version()
-        latest = await asyncio.to_thread(cloakbrowser.check_for_update)
-        runtime = await asyncio.to_thread(inspect_cloak_runtime, ensure_binary=True)
-        after = runtime.effective_version
-        if not runtime.binary_verified:
-            actual = runtime.binary_version or os.fspath(runtime.binary_path or "未知路径")
-            raise RuntimeError(f"下载后的内核文件未通过版本核对：期望 {after}，实际 {actual}")
-        updated = bool(latest or after != before)
-        installed = runtime.binary_version or after
-        if updated:
-            message = f"CloakBrowser 内核已更新并验证为 {installed}；关闭运行中的浏览器后重新启动画像。"
-        else:
-            message = f"当前平台内核 {installed} 已完成文件和版本核对；官方渠道没有发现更高版本。"
-        return BrowserUpdateResponse(
-            ok=True,
-            updated=updated,
-            wrapper_version=runtime.wrapper_version,
-            current_version=before,
-            available_version=after,
-            installed_version=installed,
-            platform=runtime.platform,
-            binary_verified=runtime.binary_verified,
-            restart_required=updated,
-            message=message,
-        )
+        result = await asyncio.to_thread(kernel.update, _kernel_settings())
+        return BrowserUpdateResponse(ok=True, **result)
     except Exception as exc:
         logger.exception("CloakBrowser binary update failed")
         raise HTTPException(status_code=502, detail=f"浏览器内核检查失败：{exc}") from exc

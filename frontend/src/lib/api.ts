@@ -7,6 +7,23 @@ export type RuntimeMode = "native" | "docker";
 export type ViewerMode = "native-window" | "vnc";
 export type BrowserEngine = "auto" | "system_chrome" | "cloakbrowser";
 export type LaunchMode = "manual" | "debug";
+export type BrowserBrand = "Chrome" | "Edge" | "Opera" | "Vivaldi";
+
+/** CloakBrowser switches beyond the core persona; empty means "kernel decides". */
+export interface FingerprintOptions {
+  brand?: BrowserBrand | null;
+  brand_version?: string | null;
+  platform_version?: string | null;
+  webrtc_ip?: string | null;
+  noise?: boolean | null;
+  speech_voices?: boolean;
+  storage_quota_mb?: number | null;
+  taskbar_height?: number | null;
+  windows_font_metrics?: boolean;
+  allow_3p_cookies?: boolean;
+  transparent_proxy?: boolean;
+  portable_cookies?: boolean;
+}
 
 export interface Profile {
   id: string;
@@ -37,6 +54,7 @@ export interface Profile {
   startup_urls: string[];
   color_scheme: string | null;
   launch_args: string[];
+  fingerprint_options?: FingerprintOptions;
   notes: string | null;
   user_data_dir: string;
   created_at: string;
@@ -83,6 +101,7 @@ export interface ProfileCreateData {
   startup_urls?: string[];
   color_scheme?: string | null;
   launch_args?: string[];
+  fingerprint_options?: FingerprintOptions;
   notes?: string | null;
   tags?: { tag: string; color: string | null }[];
 }
@@ -131,6 +150,43 @@ export interface BrowserUpdateResult {
   binary_verified: boolean;
   restart_required: boolean;
   message: string;
+}
+
+export type KernelLicenseTier = "none" | "free" | "paid" | "invalid" | "unknown";
+
+export interface KernelSettings {
+  auto_update: boolean;
+  release_channel: "stable" | "preview";
+  pinned_version: string | null;
+}
+
+export interface InstalledKernel {
+  name: string;
+  version: string;
+  pro: boolean;
+  size_bytes: number;
+  in_use: boolean;
+}
+
+export interface KernelOverview {
+  wrapper_version: string | null;
+  platform: string | null;
+  cache_dir: string;
+  license: { tier: KernelLicenseTier; plan: string | null; expires: string | null; can_pin: boolean };
+  settings: KernelSettings;
+  version: string | null;
+  installed: boolean;
+  pinned: boolean;
+  bundled_version: string | null;
+  installed_kernels: InstalledKernel[];
+  running_count: number;
+}
+
+export interface KernelCheckResult {
+  current_version: string | null;
+  latest_version: string;
+  update_available: boolean;
+  pinned: boolean;
 }
 
 export interface PreflightIssue {
@@ -418,6 +474,23 @@ export const api = {
 
   updateBrowser: () =>
     request<BrowserUpdateResult>("/api/browser/update", { method: "POST" }),
+
+  getKernel: () => request<KernelOverview>("/api/kernel"),
+
+  checkKernel: () => request<KernelCheckResult>("/api/kernel/check", { method: "POST" }),
+
+  updateKernel: () => request<BrowserUpdateResult>("/api/kernel/update", { method: "POST" }),
+
+  saveKernelSettings: (settings: KernelSettings) =>
+    request<KernelOverview>("/api/kernel/settings", {
+      method: "PUT",
+      body: JSON.stringify(settings),
+    }),
+
+  deleteKernel: (name: string) =>
+    request<{ ok: boolean; freed_bytes: number }>(`/api/kernel/versions/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    }),
 
   getPreflight: (id: string, launchMode: LaunchMode = "manual") =>
     request<PreflightResult>(`/api/profiles/${id}/preflight?launch_mode=${launchMode}`),

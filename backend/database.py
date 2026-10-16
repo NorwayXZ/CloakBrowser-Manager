@@ -23,7 +23,8 @@ CONFIGURATION_PROFILE_FIELDS = (
     "name", "browser_engine", "device_profile", "fingerprint_seed", "proxy", "timezone", "locale", "platform",
     "user_agent", "screen_width", "screen_height", "gpu_vendor", "gpu_renderer", "hardware_concurrency",
     "device_memory", "humanize", "human_preset", "headless", "geoip", "clipboard_sync", "auto_launch",
-    "color_scheme", "group_name", "account_platform", "cookies_json", "startup_urls", "launch_args", "notes", "tags",
+    "color_scheme", "group_name", "account_platform", "cookies_json", "startup_urls", "launch_args",
+    "fingerprint_options", "notes", "tags",
 )
 
 
@@ -72,6 +73,7 @@ def init_db():
                 cookies_json TEXT,
                 startup_urls TEXT DEFAULT '[]',
                 launch_args TEXT DEFAULT '[]',
+                fingerprint_options_json TEXT,
                 last_opened_at TEXT,
                 proxy_geo_json TEXT,
                 deleted_at TEXT,
@@ -160,6 +162,9 @@ def init_db():
         if "last_exit_reason" not in cols:
             conn.execute("ALTER TABLE profiles ADD COLUMN last_exit_reason TEXT")
             conn.commit()
+        if "fingerprint_options_json" not in cols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN fingerprint_options_json TEXT")
+            conn.commit()
 
         # Older releases stored Retina panel pixels instead of the logical CSS
         # screen dimensions exposed by Chromium. Upgrade only known legacy
@@ -214,6 +219,10 @@ def _load_json_list(raw: str | None) -> list[Any]:
     except (TypeError, json.JSONDecodeError):
         return []
     return data if isinstance(data, list) else []
+
+
+def _dump_json_dict(value: dict[str, Any] | None) -> str | None:
+    return json.dumps(value) if value else None
 
 
 def _load_json_dict(raw: str | None) -> dict[str, Any] | None:
@@ -349,9 +358,9 @@ def create_profile(
                 user_agent, screen_width, screen_height, gpu_vendor, gpu_renderer,
                 hardware_concurrency, device_memory, humanize, human_preset, headless, geoip,
                 clipboard_sync, auto_launch, color_scheme, group_name, account_platform,
-                cookies_json, startup_urls, launch_args, notes,
+                cookies_json, startup_urls, launch_args, fingerprint_options_json, notes,
                 user_data_dir, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 profile_id, name,
                 fields.get("browser_engine", "auto"),
@@ -380,6 +389,7 @@ def create_profile(
                 encrypt_value(fields.get("cookies_json")),
                 json.dumps(fields.get("startup_urls") or []),
                 json.dumps(fields.get("launch_args") or []),
+                _dump_json_dict(fields.get("fingerprint_options")),
                 fields.get("notes"),
                 user_data_dir, now, now,
             ),
@@ -403,6 +413,7 @@ def get_profile(profile_id: str) -> dict[str, Any] | None:
         profile["startup_urls"] = _load_json_list(profile.get("startup_urls"))
         profile["launch_args"] = _load_json_list(profile.get("launch_args"))
         profile["proxy_geo"] = _load_json_dict(profile.get("proxy_geo_json"))
+        profile["fingerprint_options"] = _load_json_dict(profile.get("fingerprint_options_json")) or {}
         profile["proxy"] = decrypt_value(profile.get("proxy"))
         profile["cookies_json"] = decrypt_value(profile.get("cookies_json"))
         tags = conn.execute(
@@ -418,6 +429,7 @@ def _hydrate_profile(row: sqlite3.Row) -> dict[str, Any]:
     profile["startup_urls"] = _load_json_list(profile.get("startup_urls"))
     profile["launch_args"] = _load_json_list(profile.get("launch_args"))
     profile["proxy_geo"] = _load_json_dict(profile.get("proxy_geo_json"))
+    profile["fingerprint_options"] = _load_json_dict(profile.get("fingerprint_options_json")) or {}
     profile["proxy"] = decrypt_value(profile.get("proxy"))
     profile["cookies_json"] = decrypt_value(profile.get("cookies_json"))
     with get_db() as conn:
@@ -460,6 +472,8 @@ def update_profile(profile_id: str, **fields: Any) -> dict[str, Any] | None:
         fields["startup_urls"] = json.dumps(fields["startup_urls"] or [])
     if "launch_args" in fields:
         fields["launch_args"] = json.dumps(fields["launch_args"] or [])
+    if "fingerprint_options" in fields:
+        fields["fingerprint_options_json"] = _dump_json_dict(fields.pop("fingerprint_options"))
     if fields.get("fingerprint_seed") is None:
         fields.pop("fingerprint_seed", None)
 
@@ -472,7 +486,7 @@ def update_profile(profile_id: str, **fields: Any) -> dict[str, Any] | None:
         "user_agent", "screen_width", "screen_height", "gpu_vendor", "gpu_renderer",
         "hardware_concurrency", "device_memory", "humanize", "human_preset", "headless", "geoip",
         "clipboard_sync", "auto_launch", "color_scheme", "group_name", "account_platform", "cookies_json",
-        "startup_urls", "launch_args", "notes",
+        "startup_urls", "launch_args", "fingerprint_options_json", "notes",
     ):
         if col in fields:
             value = fields[col]

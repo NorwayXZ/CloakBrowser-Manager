@@ -2,6 +2,7 @@ import { ArrowLeft, ClipboardCheck, Globe, Loader2, MousePointer2, Plus, Refresh
 import { useEffect, useState, type ReactNode } from "react";
 import {
   api,
+  type FingerprintOptions,
   type HostOS,
   type Profile,
   type ProfileCreateData,
@@ -202,6 +203,48 @@ function SectionIntro({ children }: { children: ReactNode }) {
   );
 }
 
+const WINDOWS_PLATFORM_VERSIONS: [string, string][] = [
+  ["10.0.0", "Windows 10"],
+  ["15.0.0", "Windows 11 22H2 / 23H2"],
+  ["19.0.0", "Windows 11 24H2 及以上"],
+];
+
+const MAC_PLATFORM_VERSIONS: [string, string][] = [
+  ["14.7.0", "macOS 14 Sonoma"],
+  ["15.6.0", "macOS 15 Sequoia"],
+  ["26.0.0", "macOS 26 Tahoe"],
+];
+
+function OptionCheckbox({
+  checked,
+  onChange,
+  title,
+  note,
+  disabled = false,
+}: {
+  checked: boolean;
+  onChange: (value: boolean) => void;
+  title: string;
+  note: string;
+  disabled?: boolean;
+}) {
+  return (
+    <label className={`flex items-start gap-3 text-sm ${disabled ? "text-slate-400" : "text-slate-800"}`}>
+      <input
+        type="checkbox"
+        className="mt-0.5"
+        checked={checked && !disabled}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <span>
+        <span className="font-medium">{title}</span>
+        <span className="mt-0.5 block text-xs leading-5 text-slate-500">{note}</span>
+      </span>
+    </label>
+  );
+}
+
 function platformLabel(platform: DevicePlatform): string {
   return platform === "windows" ? "Windows" : "macOS";
 }
@@ -221,6 +264,7 @@ function createDefaultForm(hostOS?: HostOS | null): ProfileCreateData {
     cookies_json: null,
     startup_urls: [],
     launch_args: [],
+    fingerprint_options: {},
     tags: [],
   }, getDeviceProfile(getDefaultDeviceProfileId(hostOS)));
 }
@@ -384,6 +428,7 @@ export function ProfileForm({
         startup_urls: profile.startup_urls ?? [],
         color_scheme: profile.color_scheme,
         launch_args: profile.launch_args ?? [],
+        fingerprint_options: profile.fingerprint_options ?? {},
         notes: profile.notes,
         tags: profile.tags ?? [],
       };
@@ -418,6 +463,11 @@ export function ProfileForm({
 
   const set = <K extends keyof ProfileCreateData>(key: K, value: ProfileCreateData[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const fingerprintOptions: FingerprintOptions = form.fingerprint_options ?? {};
+  const setOption = <K extends keyof FingerprintOptions>(key: K, value: FingerprintOptions[K]) => {
+    setForm((prev) => ({ ...prev, fingerprint_options: { ...(prev.fingerprint_options ?? {}), [key]: value } }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -1187,6 +1237,167 @@ export function ProfileForm({
                     <div className="mt-1 text-xs text-slate-500">这是 WebGL 元数据里最显眼的硬件信息，必须和当前系统画像保持一致。</div>
                   </div>
                 </div>
+              </section>
+            )}
+
+            {currentEngine === "cloakbrowser" ? (
+              <section className="rounded-md border border-border bg-white p-5">
+                <div className="mb-2 text-sm font-semibold text-slate-900">更多指纹</div>
+                <SectionIntro>
+                  这些是 CloakBrowser 内核自带的额外伪装项，全部留默认时由内核按稳定种子自动生成，已经是一套一致的指纹；只在明确知道需要时才改。
+                </SectionIntro>
+                <div className="grid max-w-3xl grid-cols-[120px_minmax(0,1fr)] items-start gap-x-5 gap-y-4">
+                  <label className="pt-2 text-right text-sm font-medium text-slate-600">浏览器品牌</label>
+                  <div>
+                    <div className="flex max-w-xl gap-2">
+                      <select
+                        className="input w-44"
+                        value={fingerprintOptions.brand ?? ""}
+                        onChange={(e) => setOption("brand", (e.target.value || null) as FingerprintOptions["brand"])}
+                      >
+                        <option value="">Chrome（默认）</option>
+                        <option value="Edge">Microsoft Edge</option>
+                        <option value="Opera">Opera</option>
+                        <option value="Vivaldi">Vivaldi</option>
+                      </select>
+                      <input
+                        className="input flex-1"
+                        value={fingerprintOptions.brand_version ?? ""}
+                        onChange={(e) => setOption("brand_version", e.target.value || null)}
+                        placeholder="品牌版本号，留空跟随内核"
+                      />
+                    </div>
+                    <FieldNote>改的是 User-Agent 和 Client Hints 里的浏览器名称与版本，内核本身不变。</FieldNote>
+                  </div>
+
+                  <label className="pt-2 text-right text-sm font-medium text-slate-600">系统版本</label>
+                  <div>
+                    <input
+                      className="input max-w-sm"
+                      list="platform-version-options"
+                      value={fingerprintOptions.platform_version ?? ""}
+                      onChange={(e) => setOption("platform_version", e.target.value.trim() || null)}
+                      placeholder="留空由内核决定"
+                    />
+                    <datalist id="platform-version-options">
+                      {(form.platform === "macos" ? MAC_PLATFORM_VERSIONS : WINDOWS_PLATFORM_VERSIONS).map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </datalist>
+                    <FieldNote>
+                      {form.platform === "macos"
+                        ? "Client Hints 里的 macOS 版本，例如 15.6.0 表示 macOS 15。"
+                        : "Client Hints 里的 Windows 版本：10.0.0 是 Windows 10，13.0.0 以上是 Windows 11。"}
+                    </FieldNote>
+                  </div>
+
+                  <label className="pt-2 text-right text-sm font-medium text-slate-600">WebRTC</label>
+                  <div>
+                    <div className="flex max-w-xl gap-2">
+                      <select
+                        className="input w-56"
+                        value={fingerprintOptions.webrtc_ip == null ? "auto" : "custom"}
+                        onChange={(e) => setOption("webrtc_ip", e.target.value === "custom" ? "" : null)}
+                      >
+                        <option value="auto">跟随代理出口 IP（推荐）</option>
+                        <option value="custom">指定 IP</option>
+                      </select>
+                      {fingerprintOptions.webrtc_ip != null && (
+                        <input
+                          className="input flex-1"
+                          value={fingerprintOptions.webrtc_ip}
+                          onChange={(e) => setOption("webrtc_ip", e.target.value)}
+                          placeholder="例如 203.0.113.9"
+                        />
+                      )}
+                    </div>
+                    <FieldNote>网页通过 WebRTC 看到的公网 IP。用代理时自动换成代理出口 IP，防止泄露真实 IP；直连时保持真实。</FieldNote>
+                  </div>
+
+                  <label className="pt-2 text-right text-sm font-medium text-slate-600">指纹噪声</label>
+                  <div>
+                    <select
+                      className="input max-w-sm"
+                      value={fingerprintOptions.noise == null ? "" : fingerprintOptions.noise ? "on" : "off"}
+                      onChange={(e) => setOption("noise", e.target.value === "" ? null : e.target.value === "on")}
+                    >
+                      <option value="">自动（推荐）</option>
+                      <option value="on">开启</option>
+                      <option value="off">关闭</option>
+                    </select>
+                    <FieldNote>噪声让每个画像的 Canvas、WebGL、音频输出各不相同。少数风控能识别噪声，被拦时可以试试关闭；macOS 画像默认关闭。</FieldNote>
+                  </div>
+
+                  <label className="pt-2 text-right text-sm font-medium text-slate-600">存储配额</label>
+                  <div>
+                    <input
+                      className="input max-w-sm no-spin"
+                      type="number"
+                      min={100}
+                      value={fingerprintOptions.storage_quota_mb ?? ""}
+                      onChange={(e) => setOption("storage_quota_mb", e.target.value ? Number(e.target.value) : null)}
+                      placeholder="按种子自动（MB）"
+                    />
+                    <FieldNote>navigator.storage.estimate() 报告的磁盘配额，单位 MB。真实电脑通常是几十 GB 以上。</FieldNote>
+                  </div>
+
+                  <label className="pt-2 text-right text-sm font-medium text-slate-600">任务栏高度</label>
+                  <div>
+                    <input
+                      className="input max-w-sm no-spin"
+                      type="number"
+                      min={0}
+                      max={300}
+                      value={fingerprintOptions.taskbar_height ?? ""}
+                      onChange={(e) => setOption("taskbar_height", e.target.value ? Number(e.target.value) : null)}
+                      placeholder={form.platform === "macos" ? "默认 95" : "默认 48"}
+                    />
+                    <FieldNote>决定 screen.availHeight 比屏幕高度少多少像素，一般不用改。</FieldNote>
+                  </div>
+
+                  <label className="pt-0.5 text-right text-sm font-medium text-slate-600">兼容选项</label>
+                  <div className="space-y-3">
+                    {form.platform === "windows" && (
+                      <OptionCheckbox
+                        checked={fingerprintOptions.speech_voices ?? true}
+                        onChange={(value) => setOption("speech_voices", value)}
+                        title="Windows 语音列表"
+                        note="让 speechSynthesis 报告和真实 Windows Chrome 一样的语音。某个网站因此异常时再关闭。"
+                      />
+                    )}
+                    <OptionCheckbox
+                      checked={fingerprintOptions.allow_3p_cookies ?? false}
+                      onChange={(value) => setOption("allow_3p_cookies", value)}
+                      title="允许第三方 Cookie"
+                      note="只在 reCAPTCHA、单点登录或支付验证一直转圈完成不了时打开。"
+                    />
+                    <OptionCheckbox
+                      checked={fingerprintOptions.transparent_proxy ?? false}
+                      onChange={(value) => setOption("transparent_proxy", value)}
+                      disabled={!form.proxy}
+                      title="透明代理"
+                      note={form.proxy ? "更隐蔽的代理连接方式，用于换了好几个代理都被网站识别的情况。" : "需要先设置代理。"}
+                    />
+                    <OptionCheckbox
+                      checked={fingerprintOptions.portable_cookies ?? false}
+                      onChange={(value) => setOption("portable_cookies", value)}
+                      title="跨电脑 Cookie"
+                      note="用和电脑无关的密钥加密 Cookie，把画像搬到另一台电脑（例如从 Mac 到 Windows）后登录还在。只对开启之后保存的 Cookie 有效，新画像建议一开始就打开。"
+                    />
+                    {form.platform === "windows" && hostOS === "linux" && (
+                      <OptionCheckbox
+                        checked={fingerprintOptions.windows_font_metrics ?? false}
+                        onChange={(value) => setOption("windows_font_metrics", value)}
+                        title="Windows 字体度量"
+                        note="Linux 上伪装 Windows 时对齐字体尺寸，需要先装好 Windows 字体。"
+                      />
+                    )}
+                  </div>
+                </div>
+              </section>
+            ) : (
+              <section className="rounded-md border border-border bg-white px-5 py-4 text-xs leading-5 text-slate-500">
+                「稳定原生」使用电脑上的 Google Chrome 和真实硬件，不支持浏览器品牌、WebRTC IP 等额外伪装项；需要时把浏览器切换为「伪装画像」。
               </section>
             )}
 
