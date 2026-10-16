@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import os
 import sys
+import tempfile
 import types
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
+# Backend modules resolve their data directory at import time. Point it at a
+# throwaway folder first so no test can reach the user's real profiles.db —
+# code paths such as BrowserManager.stop() write through the module default.
+os.environ["CLOAKBROWSER_MANAGER_DATA_DIR"] = tempfile.mkdtemp(prefix="cbm-test-data-")
 
 # ---------------------------------------------------------------------------
 # Mock cloakbrowser BEFORE any backend module is imported.
