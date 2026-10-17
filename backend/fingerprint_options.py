@@ -18,6 +18,7 @@ from .models import FingerprintOptions
 logger = logging.getLogger(__name__)
 
 NOISE_OFF_ARG = "--fingerprint-noise=false"
+GEOLOCATION_ACCURACY_METERS = 1000
 
 # Oldest Chromium major that understands each switch. Older kernels ignore
 # unknown switches, so these only drive preflight warnings.
@@ -34,11 +35,18 @@ def parse_fingerprint_options(profile: dict[str, Any]) -> FingerprintOptions:
     raw = profile.get("fingerprint_options")
     if isinstance(raw, FingerprintOptions):
         return raw
+    data = dict(raw) if isinstance(raw, dict) else {}
     try:
-        return FingerprintOptions.model_validate(raw or {})
+        return FingerprintOptions.model_validate(data)
     except ValidationError as exc:
-        logger.warning("Ignoring invalid fingerprint options for %s: %s", profile.get("id"), exc)
-        return FingerprintOptions()
+        # Drop only the fields that no longer validate (e.g. a removed option
+        # value) so one stale setting never discards the rest or breaks listing.
+        bad = {str(error["loc"][0]) for error in exc.errors() if error.get("loc")}
+        logger.warning("Ignoring invalid fingerprint options %s for %s", sorted(bad), profile.get("id"))
+        try:
+            return FingerprintOptions.model_validate({k: v for k, v in data.items() if k not in bad})
+        except ValidationError:
+            return FingerprintOptions()
 
 
 def build_fingerprint_option_args(profile: dict[str, Any]) -> list[str]:
@@ -82,8 +90,32 @@ def apply_noise_preference(args: list[str], profile: dict[str, Any]) -> list[str
 def webrtc_ip_arg(profile: dict[str, Any], exit_ip: str | None, *, proxied: bool) -> str | None:
     """WebRTC ICE candidate IP: the fixed one, else the proxy exit IP."""
     options = parse_fingerprint_options(profile)
-    ip = options.webrtc_ip or (exit_ip if proxied else None)
+    ip = options.webrtc_ip if options.webrtc == "custom" else (exit_ip if proxied else None)
     return f"--fingerprint-webrtc-ip={ip}" if ip else None
+
+
+def geolocation_plan(
+    profile: dict[str, Any],
+    geo: dict[str, Any] | None,
+    *,
+    can_override: bool,
+) -> tuple[str, dict[str, float] | None]:
+    """How a launch answers navigator.geolocation: ("override", coords), "block" or "real".
+
+    Only CDP launches can report fake coordinates; everywhere else an
+    IP-based choice blocks the permission so the real location never leaks.
+    """
+    mode = parse_fingerprint_options(profile).geolocation
+    if mode == "real":
+        return "real", None
+    geo = geo or {}
+    if mode == "ip" and can_override and geo.get("latitude") is not None and geo.get("longitude") is not None:
+        return "override", {
+            "latitude": float(geo["latitude"]),
+            "longitude": float(geo["longitude"]),
+            "accuracy": GEOLOCATION_ACCURACY_METERS,
+        }
+    return "block", None
 
 
 def _major(version: str | None) -> int | None:

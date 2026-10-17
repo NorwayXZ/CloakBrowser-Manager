@@ -33,6 +33,8 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from . import backup as backups
 from . import database as db
+from .fingerprint_options import parse_fingerprint_options
+from .cookie_formats import CookieFormatError, merge_cookies, normalize_cookie_text, parse_cookie_text
 from . import kernel
 from . import secrets_crypto
 from .browser_manager import BrowserLaunchError, BrowserManager, _normalize_proxy, _validate_proxy
@@ -47,6 +49,8 @@ from .xray_runtime import is_xray_link, start_xray_proxy
 from .models import (
     AuthAccountUpdate,
     BrowserUpdateResponse,
+    CookieMergeRequest,
+    CookieMergeResponse,
     KernelCheckResponse,
     KernelOverviewResponse,
     KernelSettingsModel,
@@ -500,6 +504,7 @@ def _profile_response(profile: dict) -> ProfileResponse:
         status["proxy_geo"] = stored_geo
     payload = {**profile, **status}
     payload["tags"] = [TagResponse(**tag) for tag in profile.get("tags", [])]
+    payload["fingerprint_options"] = parse_fingerprint_options(profile)
     return ProfileResponse(**payload)
 
 
@@ -513,9 +518,19 @@ async def list_deleted_profiles():
     return [_profile_response(profile) for profile in db.list_deleted_profiles()]
 
 
+def _normalize_profile_cookies(data: dict) -> None:
+    if "cookies_json" not in data:
+        return
+    try:
+        data["cookies_json"] = normalize_cookie_text(data["cookies_json"])
+    except CookieFormatError as exc:
+        raise HTTPException(status_code=422, detail=f"Cookie：{exc}") from exc
+
+
 @app.post("/api/profiles", response_model=ProfileResponse, status_code=201)
 async def create_profile(req: ProfileCreate):
     data = req.model_dump()
+    _normalize_profile_cookies(data)
     tags = data.pop("tags", None)
     if tags:
         data["tags"] = [t.model_dump() if hasattr(t, "model_dump") else t for t in tags]
@@ -536,6 +551,7 @@ async def get_profile(profile_id: str):
 async def update_profile(profile_id: str, req: ProfileUpdate):
     # Only pass fields that were explicitly set
     data = req.model_dump(exclude_unset=True)
+    _normalize_profile_cookies(data)
     tags = data.pop("tags", None)
     if tags is not None:
         data["tags"] = [t.model_dump() if hasattr(t, "model_dump") else t for t in tags]
@@ -595,6 +611,25 @@ async def purge_profile(profile_id: str):
         except ValueError:
             logger.error("Refusing to purge %s: invalid path", user_data_dir)
     return {"ok": True}
+
+
+@app.post("/api/cookies/merge", response_model=CookieMergeResponse)
+async def merge_profile_cookies(req: CookieMergeRequest):
+    """Convert pasted cookies to JSON and merge them into a profile's existing list."""
+    try:
+        fmt, incoming = parse_cookie_text(req.text, req.domain)
+        _, existing = parse_cookie_text(req.existing)
+    except CookieFormatError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if fmt == "empty" or not incoming:
+        raise HTTPException(status_code=422, detail="没有读到任何 Cookie")
+    merged = merge_cookies(existing, incoming)
+    return CookieMergeResponse(
+        cookies_json=json.dumps(merged, ensure_ascii=False, indent=2),
+        format=fmt,
+        added=len(incoming),
+        total=len(merged),
+    )
 
 
 @app.get("/api/groups", response_model=list[GroupResponse])

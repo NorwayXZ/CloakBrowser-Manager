@@ -8,13 +8,17 @@ export type ViewerMode = "native-window" | "vnc";
 export type BrowserEngine = "auto" | "system_chrome" | "cloakbrowser";
 export type LaunchMode = "manual" | "debug";
 export type BrowserBrand = "Chrome" | "Edge" | "Opera" | "Vivaldi";
+export type WebRTCMode = "proxy" | "custom";
+export type GeolocationMode = "ip" | "block" | "real";
 
 /** CloakBrowser switches beyond the core persona; empty means "kernel decides". */
 export interface FingerprintOptions {
   brand?: BrowserBrand | null;
   brand_version?: string | null;
   platform_version?: string | null;
+  webrtc?: WebRTCMode;
   webrtc_ip?: string | null;
+  geolocation?: GeolocationMode;
   noise?: boolean | null;
   speech_voices?: boolean;
   storage_quota_mb?: number | null;
@@ -187,6 +191,13 @@ export interface KernelCheckResult {
   latest_version: string;
   update_available: boolean;
   pinned: boolean;
+}
+
+export interface CookieMergeResult {
+  cookies_json: string;
+  format: "json" | "netscape" | "header";
+  added: number;
+  total: number;
 }
 
 export interface PreflightIssue {
@@ -474,6 +485,12 @@ export const api = {
 
   updateBrowser: () =>
     request<BrowserUpdateResult>("/api/browser/update", { method: "POST" }),
+
+  mergeCookies: (text: string, existing: string | null, domain: string | null) =>
+    request<CookieMergeResult>("/api/cookies/merge", {
+      method: "POST",
+      body: JSON.stringify({ text, existing, domain }),
+    }),
 
   getKernel: () => request<KernelOverview>("/api/kernel"),
 

@@ -2,6 +2,7 @@ import { ArrowLeft, ClipboardCheck, Globe, Loader2, MousePointer2, Plus, Refresh
 import { useEffect, useState, type ReactNode } from "react";
 import {
   api,
+  type CookieMergeResult,
   type FingerprintOptions,
   type HostOS,
   type Profile,
@@ -215,6 +216,58 @@ const MAC_PLATFORM_VERSIONS: [string, string][] = [
   ["26.0.0", "macOS 26 Tahoe"],
 ];
 
+const FORM_SECTIONS: [string, string][] = [
+  ["basic", "基础设置"],
+  ["proxy", "代理信息"],
+  ["fingerprint", "指纹配置"],
+  ["more-fingerprint", "更多指纹"],
+  ["advanced", "高级设置"],
+];
+
+interface CookieMergeState {
+  text: string;
+  domain: string;
+  busy: boolean;
+  notice: { tone: "success" | "error"; text: string } | null;
+}
+
+const COOKIE_FORMAT_LABELS: Record<CookieMergeResult["format"], string> = {
+  json: "JSON",
+  netscape: "Netscape",
+  header: "Name=Value",
+};
+
+function Segmented<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: [T, string][];
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} className="inline-flex rounded-md border border-border bg-slate-50 p-0.5">
+      {options.map(([option, text]) => (
+        <button
+          key={option}
+          type="button"
+          role="radio"
+          aria-checked={value === option}
+          onClick={() => onChange(option)}
+          className={`rounded px-3 py-1.5 text-sm ${
+            value === option ? "bg-white font-medium text-accent shadow-sm" : "text-slate-600 hover:text-slate-900"
+          }`}
+        >
+          {text}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function OptionCheckbox({
   checked,
   onChange,
@@ -395,6 +448,7 @@ export function ProfileForm({
   const [launchArgsOpen, setLaunchArgsOpen] = useState(false);
   const [startupUrlsText, setStartupUrlsText] = useState("");
   const [draftProfileId, setDraftProfileId] = useState<string | null>(null);
+  const [cookieMerge, setCookieMerge] = useState<CookieMergeState | null>(null);
 
   useEffect(() => {
     if (profile) {
@@ -463,6 +517,37 @@ export function ProfileForm({
 
   const set = <K extends keyof ProfileCreateData>(key: K, value: ProfileCreateData[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const defaultCookieDomain = (() => {
+    const firstUrl = (form.startup_urls ?? [])[0];
+    if (!firstUrl) return "";
+    try {
+      return new URL(firstUrl.includes("://") ? firstUrl : `https://${firstUrl}`).hostname.replace(/^www\./, "");
+    } catch {
+      return "";
+    }
+  })();
+
+  const handleMergeCookies = async () => {
+    if (!cookieMerge) return;
+    setCookieMerge({ ...cookieMerge, busy: true, notice: null });
+    try {
+      const result = await api.mergeCookies(cookieMerge.text, form.cookies_json ?? null, cookieMerge.domain.trim() || null);
+      set("cookies_json", result.cookies_json);
+      setCookieMerge({
+        text: "",
+        domain: cookieMerge.domain,
+        busy: false,
+        notice: { tone: "success", text: `已合并 ${result.added} 条（${COOKIE_FORMAT_LABELS[result.format]}），现在共 ${result.total} 条` },
+      });
+    } catch (err) {
+      setCookieMerge({
+        ...cookieMerge,
+        busy: false,
+        notice: { tone: "error", text: err instanceof Error ? err.message : "合并失败" },
+      });
+    }
   };
 
   const fingerprintOptions: FingerprintOptions = form.fingerprint_options ?? {};
@@ -657,6 +742,27 @@ export function ProfileForm({
     ? (proxyParts.raw ? proxyParts.raw.split("://", 1)[0]?.toUpperCase() ?? "Xray" : "Xray 链接")
     : proxyParts.scheme.toUpperCase();
 
+  const exitPlace = [proxyTest?.city, proxyTest?.country].filter(Boolean).join(" · ");
+  const geolocationMode = fingerprintOptions.geolocation ?? "ip";
+  const webrtcMode = fingerprintOptions.webrtc ?? "proxy";
+  const cloakOnlyRows: [string, string][] = currentEngine === "cloakbrowser"
+    ? [
+        ["浏览器品牌", fingerprintOptions.brand
+          ? `${fingerprintOptions.brand}${fingerprintOptions.brand_version ? ` ${fingerprintOptions.brand_version}` : ""}`
+          : "Chrome（跟随内核）"],
+        ["WebRTC", webrtcMode === "custom"
+          ? `指定 ${fingerprintOptions.webrtc_ip || "（未填）"}`
+          : form.proxy ? `出口 IP${proxyTest?.ip ? ` ${proxyTest.ip}` : ""}` : "真实（直连）"],
+        ["地理位置", geolocationMode === "block"
+          ? "禁止"
+          : geolocationMode === "real"
+          ? "真实"
+          : `基于 IP${exitPlace ? `（${exitPlace}）` : ""}`],
+        ["指纹噪声", fingerprintOptions.noise == null ? "自动" : fingerprintOptions.noise ? "开启" : "关闭"],
+        ["跨电脑 Cookie", fingerprintOptions.portable_cookies ? "开启" : "关闭"],
+      ]
+    : [];
+
   const summaryRows = [
     ["浏览器", currentEngine === "system_chrome" ? "Google Chrome 原生" : "CloakBrowser / Chromium"],
     ["系统", platformLabel(allowedPlatform)],
@@ -664,6 +770,7 @@ export function ProfileForm({
     ["账号平台", form.account_platform || "未设置"],
     ["User-Agent", form.user_agent || "跟随真实浏览器"],
     ["代理", form.proxy ? `${proxyLabel} · 已配置` : "直连 · 本地网络"],
+    ...(proxyTest?.ip ? [["出口 IP", exitPlace ? `${proxyTest.ip}（${exitPlace}）` : proxyTest.ip]] : []),
     ["启动页面", (form.startup_urls ?? []).length > 0 ? `${form.startup_urls?.length} 个网址` : "默认自检页"],
     ["时区", effectiveTimezonePreview],
     ["语言", effectiveLocalePreview],
@@ -672,6 +779,7 @@ export function ProfileForm({
     ["WebGL 图像", currentEngine === "system_chrome" ? "真实" : "按画像"],
     ["WebGL 元数据", summaryGpu],
     ["CPU", summaryCpu],
+    ...cloakOnlyRows,
     ["资料夹", isEdit ? "独立保存" : "创建后生成"],
   ];
 
@@ -729,9 +837,21 @@ export function ProfileForm({
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="grid min-h-full grid-cols-[minmax(0,1fr)_360px] gap-6 px-6 py-6">
           <div className="space-y-6">
+            <nav aria-label="表单分区" className="sticky top-0 z-10 -mx-1 flex gap-1 rounded-md border border-border bg-white/95 p-1 shadow-sm backdrop-blur">
+              {FORM_SECTIONS.map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className="rounded px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50 hover:text-accent"
+                  onClick={() => document.getElementById(`form-${id}`)?.scrollIntoView?.({ behavior: "smooth", block: "start" })}
+                >
+                  {label}
+                </button>
+              ))}
+            </nav>
             {(
               <>
-                <section className="rounded-md border border-border bg-white p-5">
+                <section id="form-basic" className="scroll-mt-16 rounded-md border border-border bg-white p-5">
                   <div className="mb-2 text-sm font-semibold text-slate-900">基础设置</div>
                   <SectionIntro>
                     这里保存这个浏览器的身份信息。名称、分组、账号平台用于管理列表；浏览器模式、当前系统画像、User-Agent、Cookie 和启动页面会影响实际启动后的浏览器表现。
@@ -850,13 +970,56 @@ export function ProfileForm({
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">Cookie</label>
                     <div>
                       <textarea
-                        className="input min-h-28 max-w-3xl resize-y text-xs"
+                        className="input min-h-28 max-w-3xl resize-y font-mono text-xs"
                         value={form.cookies_json ?? ""}
                         onChange={(e) => set("cookies_json", e.target.value || null)}
-                        placeholder='粘贴 Cookie JSON，例如 [{"name":"sid","value":"...","domain":".example.com","path":"/"}]'
+                        placeholder={"支持 JSON、Netscape（cookies.txt）格式，保存时自动转成 JSON。\nName=Value 格式要指定网站，请用下面的「合并 Cookie」。"}
                         spellCheck={false}
                       />
-                      <FieldNote>Cookie 会随配置保存；日常无 CDP 启动通过当前画像专用的本地扩展导入一次，调试启动通过浏览器上下文导入。之后由同一用户数据目录持续保存登录状态。</FieldNote>
+                      <div className="mt-2 flex max-w-3xl items-center justify-between gap-3">
+                        <FieldNote>Cookie 会随配置保存；普通启动通过画像专用的本地扩展导入一次，调试启动通过浏览器上下文导入，之后由同一用户数据目录保存登录状态。</FieldNote>
+                        <button
+                          type="button"
+                          className="btn-secondary flex shrink-0 items-center gap-1 px-2.5 text-xs"
+                          onClick={() => setCookieMerge((prev) => (prev ? null : { text: "", domain: defaultCookieDomain, busy: false, notice: null }))}
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          <span>合并 Cookie</span>
+                        </button>
+                      </div>
+                      {cookieMerge && (
+                        <div className="mt-2 max-w-3xl space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+                          <textarea
+                            className="input min-h-24 w-full resize-y font-mono text-xs"
+                            value={cookieMerge.text}
+                            onChange={(e) => setCookieMerge({ ...cookieMerge, text: e.target.value, notice: null })}
+                            placeholder={"粘贴要加进来的 Cookie：JSON、Netscape 或 Name=Value（如 sid=abc; lang=zh）"}
+                            spellCheck={false}
+                          />
+                          <div className="flex flex-wrap items-center gap-2">
+                            <input
+                              className="input w-64 text-xs"
+                              value={cookieMerge.domain}
+                              onChange={(e) => setCookieMerge({ ...cookieMerge, domain: e.target.value })}
+                              placeholder="网站域名（Name=Value 格式必填）"
+                            />
+                            <button
+                              type="button"
+                              className="btn-primary px-3 text-xs disabled:opacity-60"
+                              disabled={cookieMerge.busy || !cookieMerge.text.trim()}
+                              onClick={() => void handleMergeCookies()}
+                            >
+                              {cookieMerge.busy ? "合并中..." : "合并"}
+                            </button>
+                            {cookieMerge.notice && (
+                              <span className={`text-xs ${cookieMerge.notice.tone === "error" ? "text-red-600" : "text-emerald-700"}`}>
+                                {cookieMerge.notice.text}
+                              </span>
+                            )}
+                          </div>
+                          <FieldNote>同一网站、路径和名称的 Cookie 会被新的替换，其余保留。</FieldNote>
+                        </div>
+                      )}
                     </div>
 
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">备注</label>
@@ -875,7 +1038,7 @@ export function ProfileForm({
             )}
 
             {(
-              <section className="rounded-md border border-border bg-white p-5">
+              <section id="form-proxy" className="scroll-mt-16 rounded-md border border-border bg-white p-5">
                 <div className="mb-2 text-sm font-semibold text-slate-900">代理信息</div>
                 <SectionIntro>
                   直连会使用当前电脑的本地网络，不启动代理或 Xray。普通 HTTP/HTTPS/SOCKS5 填主机端口；VLESS、VMess、Trojan、Shadowsocks 使用 Xray 链接。
@@ -1088,7 +1251,7 @@ export function ProfileForm({
             )}
 
             {(
-              <section className="rounded-md border border-border bg-white p-5">
+              <section id="form-fingerprint" className="scroll-mt-16 rounded-md border border-border bg-white p-5">
                 <div className="mb-2 text-sm font-semibold text-slate-900">指纹配置</div>
                 <div className="mb-5 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-800">
                   设备画像决定当前系统下的屏幕、CPU、GPU 这些看得见的参数；稳定种子只决定同一画像里的 Canvas / Audio 等稳定细节。改完需要保存并重新启动浏览器才会影响实际打开的浏览器。
@@ -1241,7 +1404,7 @@ export function ProfileForm({
             )}
 
             {currentEngine === "cloakbrowser" ? (
-              <section className="rounded-md border border-border bg-white p-5">
+              <section id="form-more-fingerprint" className="scroll-mt-16 rounded-md border border-border bg-white p-5">
                 <div className="mb-2 text-sm font-semibold text-slate-900">更多指纹</div>
                 <SectionIntro>
                   这些是 CloakBrowser 内核自带的额外伪装项，全部留默认时由内核按稳定种子自动生成，已经是一套一致的指纹；只在明确知道需要时才改。
@@ -1291,67 +1454,104 @@ export function ProfileForm({
                     </FieldNote>
                   </div>
 
-                  <label className="pt-2 text-right text-sm font-medium text-slate-600">WebRTC</label>
+                  <label className="pt-1.5 text-right text-sm font-medium text-slate-600">地理位置</label>
                   <div>
-                    <div className="flex max-w-xl gap-2">
-                      <select
-                        className="input w-56"
-                        value={fingerprintOptions.webrtc_ip == null ? "auto" : "custom"}
-                        onChange={(e) => setOption("webrtc_ip", e.target.value === "custom" ? "" : null)}
-                      >
-                        <option value="auto">跟随代理出口 IP（推荐）</option>
-                        <option value="custom">指定 IP</option>
-                      </select>
-                      {fingerprintOptions.webrtc_ip != null && (
-                        <input
-                          className="input flex-1"
-                          value={fingerprintOptions.webrtc_ip}
-                          onChange={(e) => setOption("webrtc_ip", e.target.value)}
-                          placeholder="例如 203.0.113.9"
-                        />
-                      )}
-                    </div>
-                    <FieldNote>网页通过 WebRTC 看到的公网 IP。用代理时自动换成代理出口 IP，防止泄露真实 IP；直连时保持真实。</FieldNote>
+                    <Segmented
+                      label="地理位置"
+                      value={fingerprintOptions.geolocation ?? "ip"}
+                      options={[["ip", "基于 IP"], ["block", "禁止"], ["real", "真实"]]}
+                      onChange={(value) => setOption("geolocation", value)}
+                    />
+                    <FieldNote>
+                      {(fingerprintOptions.geolocation ?? "ip") === "ip"
+                        ? "网页请求定位时，调试启动返回出口 IP 所在城市的坐标；普通启动改不了坐标，会直接拒绝定位，不暴露真实位置。"
+                        : (fingerprintOptions.geolocation ?? "ip") === "block"
+                        ? "所有网站请求定位都直接拒绝。"
+                        : "和普通 Chrome 一样，网站请求时由你决定是否给出电脑的真实位置。用代理时不建议。"}
+                    </FieldNote>
                   </div>
 
-                  <label className="pt-2 text-right text-sm font-medium text-slate-600">指纹噪声</label>
+                  <label className="pt-1.5 text-right text-sm font-medium text-slate-600">WebRTC</label>
                   <div>
-                    <select
-                      className="input max-w-sm"
-                      value={fingerprintOptions.noise == null ? "" : fingerprintOptions.noise ? "on" : "off"}
-                      onChange={(e) => setOption("noise", e.target.value === "" ? null : e.target.value === "on")}
-                    >
-                      <option value="">自动（推荐）</option>
-                      <option value="on">开启</option>
-                      <option value="off">关闭</option>
-                    </select>
+                    <Segmented
+                      label="WebRTC"
+                      value={fingerprintOptions.webrtc ?? "proxy"}
+                      options={[["proxy", "跟随出口 IP"], ["custom", "指定 IP"]]}
+                      onChange={(value) => setForm((prev) => ({
+                        ...prev,
+                        fingerprint_options: {
+                          ...(prev.fingerprint_options ?? {}),
+                          webrtc: value,
+                          webrtc_ip: value === "custom" ? prev.fingerprint_options?.webrtc_ip ?? "" : null,
+                        },
+                      }))}
+                    />
+                    {fingerprintOptions.webrtc === "custom" && (
+                      <input
+                        className="input mt-2 max-w-sm"
+                        value={fingerprintOptions.webrtc_ip ?? ""}
+                        onChange={(e) => setOption("webrtc_ip", e.target.value)}
+                        placeholder="例如 203.0.113.9"
+                      />
+                    )}
+                    <FieldNote>
+                      {fingerprintOptions.webrtc === "custom"
+                        ? "网页通过 WebRTC 看到的公网 IP 固定为这里填的地址。"
+                        : "用代理时网页通过 WebRTC 看到的是代理出口 IP，防止泄露真实 IP；直连时保持真实。"}
+                    </FieldNote>
+                  </div>
+
+                  <label className="pt-1.5 text-right text-sm font-medium text-slate-600">指纹噪声</label>
+                  <div>
+                    <Segmented
+                      label="指纹噪声"
+                      value={fingerprintOptions.noise == null ? "auto" : fingerprintOptions.noise ? "on" : "off"}
+                      options={[["auto", "自动"], ["on", "开启"], ["off", "关闭"]]}
+                      onChange={(value) => setOption("noise", value === "auto" ? null : value === "on")}
+                    />
                     <FieldNote>噪声让每个画像的 Canvas、WebGL、音频输出各不相同。少数风控能识别噪声，被拦时可以试试关闭；macOS 画像默认关闭。</FieldNote>
                   </div>
 
-                  <label className="pt-2 text-right text-sm font-medium text-slate-600">存储配额</label>
+                  <label className="pt-1.5 text-right text-sm font-medium text-slate-600">存储配额</label>
                   <div>
-                    <input
-                      className="input max-w-sm no-spin"
-                      type="number"
-                      min={100}
-                      value={fingerprintOptions.storage_quota_mb ?? ""}
-                      onChange={(e) => setOption("storage_quota_mb", e.target.value ? Number(e.target.value) : null)}
-                      placeholder="按种子自动（MB）"
+                    <Segmented
+                      label="存储配额"
+                      value={fingerprintOptions.storage_quota_mb == null ? "auto" : "custom"}
+                      options={[["auto", "按种子自动"], ["custom", "自定义"]]}
+                      onChange={(value) => setOption("storage_quota_mb", value === "auto" ? null : 60000)}
                     />
+                    {fingerprintOptions.storage_quota_mb != null && (
+                      <input
+                        className="input mt-2 max-w-sm no-spin"
+                        type="number"
+                        min={100}
+                        value={fingerprintOptions.storage_quota_mb}
+                        onChange={(e) => setOption("storage_quota_mb", e.target.value ? Number(e.target.value) : null)}
+                        placeholder="单位 MB"
+                      />
+                    )}
                     <FieldNote>navigator.storage.estimate() 报告的磁盘配额，单位 MB。真实电脑通常是几十 GB 以上。</FieldNote>
                   </div>
 
-                  <label className="pt-2 text-right text-sm font-medium text-slate-600">任务栏高度</label>
+                  <label className="pt-1.5 text-right text-sm font-medium text-slate-600">任务栏高度</label>
                   <div>
-                    <input
-                      className="input max-w-sm no-spin"
-                      type="number"
-                      min={0}
-                      max={300}
-                      value={fingerprintOptions.taskbar_height ?? ""}
-                      onChange={(e) => setOption("taskbar_height", e.target.value ? Number(e.target.value) : null)}
-                      placeholder={form.platform === "macos" ? "默认 95" : "默认 48"}
+                    <Segmented
+                      label="任务栏高度"
+                      value={fingerprintOptions.taskbar_height == null ? "auto" : "custom"}
+                      options={[["auto", form.platform === "macos" ? "系统默认（95）" : "系统默认（48）"], ["custom", "自定义"]]}
+                      onChange={(value) => setOption("taskbar_height", value === "auto" ? null : form.platform === "macos" ? 95 : 48)}
                     />
+                    {fingerprintOptions.taskbar_height != null && (
+                      <input
+                        className="input mt-2 max-w-sm no-spin"
+                        type="number"
+                        min={0}
+                        max={300}
+                        value={fingerprintOptions.taskbar_height}
+                        onChange={(e) => setOption("taskbar_height", e.target.value ? Number(e.target.value) : null)}
+                        placeholder="单位像素"
+                      />
+                    )}
                     <FieldNote>决定 screen.availHeight 比屏幕高度少多少像素，一般不用改。</FieldNote>
                   </div>
 
@@ -1396,13 +1596,13 @@ export function ProfileForm({
                 </div>
               </section>
             ) : (
-              <section className="rounded-md border border-border bg-white px-5 py-4 text-xs leading-5 text-slate-500">
+              <section id="form-more-fingerprint" className="scroll-mt-16 rounded-md border border-border bg-white px-5 py-4 text-xs leading-5 text-slate-500">
                 「稳定原生」使用电脑上的 Google Chrome 和真实硬件，不支持浏览器品牌、WebRTC IP 等额外伪装项；需要时把浏览器切换为「伪装画像」。
               </section>
             )}
 
             {(
-              <section className="rounded-md border border-border bg-white p-5">
+              <section id="form-advanced" className="scroll-mt-16 rounded-md border border-border bg-white p-5">
                 <div className="mb-2 text-sm font-semibold text-slate-900">高级设置</div>
                 <SectionIntro>
                   默认已经按日常本地使用调好：真人操作辅助和 VNC 剪贴板同步会自动开启；启动参数属于工程级选项，不清楚用途就保持为空。

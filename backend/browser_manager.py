@@ -26,6 +26,7 @@ from cloakbrowser import launch_persistent_context_async
 from .fingerprint_options import (
     apply_noise_preference,
     build_fingerprint_option_args,
+    geolocation_plan,
     unsupported_option_labels,
     webrtc_ip_arg,
 )
@@ -152,6 +153,38 @@ def _sync_profile_locale(user_data_dir: Path, locale: str | None) -> None:
     else:
         local_state["intl"] = {"app_locale": locale}
     _write_json_file(local_state_path, local_state)
+
+
+GEOLOCATION_BLOCK_MARKER = ".cloakbrowser-manager-geolocation-blocked"
+
+
+def _sync_geolocation_permission(user_data_dir: Path, *, block: bool) -> None:
+    """Block navigator.geolocation by default, or undo a block the Manager set.
+
+    A marker file records that the Manager owns the setting, so a block the
+    user chose inside Chrome is never lifted here.
+    """
+    marker = user_data_dir / GEOLOCATION_BLOCK_MARKER
+    if not block and not marker.exists():
+        return
+    default_dir = user_data_dir / "Default"
+    default_dir.mkdir(parents=True, exist_ok=True)
+    prefs_path = default_dir / "Preferences"
+    prefs = _read_json_file(prefs_path)
+    profile_prefs = prefs.get("profile")
+    if not isinstance(profile_prefs, dict):
+        profile_prefs = prefs["profile"] = {}
+    defaults = profile_prefs.get("default_content_setting_values")
+    if not isinstance(defaults, dict):
+        defaults = profile_prefs["default_content_setting_values"] = {}
+    if block:
+        defaults["geolocation"] = 2
+        _write_json_file(prefs_path, prefs)
+        marker.write_text("1")
+    else:
+        defaults.pop("geolocation", None)
+        _write_json_file(prefs_path, prefs)
+        marker.unlink(missing_ok=True)
 
 
 def _sync_webrtc_policy(user_data_dir: Path) -> None:
@@ -2376,6 +2409,12 @@ class BrowserManager:
             _sync_profile_locale(user_data_dir, resolved_locale)
             if browser_engine == "system_chrome" and proxy:
                 _sync_webrtc_policy(user_data_dir)
+            geo_mode, geo_coords = (
+                geolocation_plan(profile, proxy_geo, can_override=requested_launch_mode == "debug")
+                if browser_engine == "cloakbrowser"
+                else ("real", None)
+            )
+            _sync_geolocation_permission(user_data_dir, block=geo_mode == "block")
 
             if browser_engine == "system_chrome":
                 extra_args = list(SYSTEM_CHROME_BASE_ARGS)
@@ -2586,6 +2625,11 @@ class BrowserManager:
                             await page.evaluate(script)
                         except Exception as exc:
                             logger.debug("Init script failed on existing page: %s", exc)
+                if geo_coords:
+                    try:
+                        await context.set_geolocation(geo_coords)
+                    except Exception as exc:
+                        logger.warning("Geolocation override failed for %s: %s", profile_id, exc)
                 profile_cookies = _parse_profile_cookies(profile.get("cookies_json"))
                 if profile_cookies:
                     try:

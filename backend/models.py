@@ -6,13 +6,15 @@ import ipaddress
 import re
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .runtime import HostOS, RuntimeMode, ViewerMode
 
 BrowserEngine = Literal["auto", "system_chrome", "cloakbrowser"]
 LaunchMode = Literal["manual", "debug"]
 BrowserBrand = Literal["Chrome", "Edge", "Opera", "Vivaldi"]
+GeolocationMode = Literal["ip", "block", "real"]
+WebRTCMode = Literal["proxy", "custom"]
 
 _DOTTED_VERSION_RE = re.compile(r"^\d+(?:\.\d+){0,3}$")
 
@@ -27,8 +29,15 @@ class FingerprintOptions(BaseModel):
     brand: BrowserBrand | None = None
     brand_version: str | None = None
     platform_version: str | None = None
-    # None = replace WebRTC candidates with the proxy exit IP when proxied.
+    # proxy: candidates carry the proxy exit IP; custom: they carry webrtc_ip.
+    # There is no "disable": the CloakBrowser kernel ignores Chromium's WebRTC
+    # IP-handling policy (switch and pref), and omitting the IP could expose
+    # the real one behind a proxy.
+    webrtc: WebRTCMode = "proxy"
     webrtc_ip: str | None = None
+    # ip: debug launches report the exit IP's coordinates; launches without
+    # CDP cannot override them and block the permission instead.
+    geolocation: GeolocationMode = "ip"
     noise: bool | None = None
     speech_voices: bool = True
     storage_quota_mb: int | None = Field(default=None, ge=100, le=10_000_000)
@@ -37,6 +46,22 @@ class FingerprintOptions(BaseModel):
     allow_3p_cookies: bool = False
     transparent_proxy: bool = False
     portable_cookies: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_webrtc_ip(cls, data: object) -> object:
+        # Before the webrtc mode existed, a stored webrtc_ip meant "custom".
+        if isinstance(data, dict) and "webrtc" not in data and data.get("webrtc_ip"):
+            return {**data, "webrtc": "custom"}
+        return data
+
+    @model_validator(mode="after")
+    def _custom_webrtc_needs_ip(self) -> "FingerprintOptions":
+        if self.webrtc == "custom" and not self.webrtc_ip:
+            raise ValueError("WebRTC 选了「指定 IP」，请填写 IP 地址")
+        if self.webrtc != "custom":
+            self.webrtc_ip = None
+        return self
 
     @field_validator("brand_version", "platform_version", mode="before")
     @classmethod
@@ -378,3 +403,16 @@ class KernelCheckResponse(BaseModel):
     latest_version: str
     update_available: bool
     pinned: bool = False
+
+
+class CookieMergeRequest(BaseModel):
+    text: str
+    domain: str | None = None
+    existing: str | None = None
+
+
+class CookieMergeResponse(BaseModel):
+    cookies_json: str
+    format: Literal["json", "netscape", "header"]
+    added: int
+    total: int

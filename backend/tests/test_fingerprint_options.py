@@ -232,3 +232,112 @@ def test_preflight_warns_when_kernel_is_too_old(monkeypatch: pytest.MonkeyPatch,
 
     codes = [issue["code"] for issue in report["issues"]]
     assert "fingerprint_option_needs_newer_kernel" in codes
+
+
+# ── WebRTC modes and geolocation ─────────────────────────────────────────────
+
+
+def test_webrtc_has_no_disable_mode(app_client: TestClient):
+    # The kernel ignores Chromium's WebRTC policy, so "block" would be a no-op
+    # that also dropped the exit-IP replacement.
+    resp = app_client.post("/api/profiles", json={"name": "Block", "fingerprint_options": {"webrtc": "block"}})
+    assert resp.status_code == 422
+
+
+def test_legacy_webrtc_ip_still_means_a_fixed_ip():
+    profile = {"fingerprint_options": {"webrtc_ip": "203.0.113.9"}}
+    assert webrtc_ip_arg(profile, "198.51.100.1", proxied=True) == "--fingerprint-webrtc-ip=203.0.113.9"
+
+
+def test_custom_webrtc_without_ip_is_rejected(app_client: TestClient):
+    resp = app_client.post("/api/profiles", json={"name": "No IP", "fingerprint_options": {"webrtc": "custom"}})
+    assert resp.status_code == 422
+
+
+GEO = {"ip": "198.51.100.7", "latitude": 25.05, "longitude": 121.53}
+
+
+def test_geolocation_follows_exit_ip_only_when_cdp_can_override():
+    from backend.fingerprint_options import geolocation_plan
+
+    assert geolocation_plan({}, GEO, can_override=True) == (
+        "override", {"latitude": 25.05, "longitude": 121.53, "accuracy": 1000},
+    )
+    assert geolocation_plan({}, GEO, can_override=False) == ("block", None)
+    assert geolocation_plan({}, {"ip": "198.51.100.7"}, can_override=True) == ("block", None)
+    assert geolocation_plan({"fingerprint_options": {"geolocation": "block"}}, GEO, can_override=True) == ("block", None)
+    assert geolocation_plan({"fingerprint_options": {"geolocation": "real"}}, GEO, can_override=False) == ("real", None)
+
+
+def test_geolocation_block_is_written_and_lifted_only_by_the_manager(tmp_path: Path):
+    import json as _json
+
+    from backend.browser_manager import GEOLOCATION_BLOCK_MARKER, _sync_geolocation_permission
+
+    prefs_path = tmp_path / "Default" / "Preferences"
+    _sync_geolocation_permission(tmp_path, block=False)
+    assert not prefs_path.exists()
+
+    _sync_geolocation_permission(tmp_path, block=True)
+    prefs = _json.loads(prefs_path.read_text())
+    assert prefs["profile"]["default_content_setting_values"]["geolocation"] == 2
+    assert (tmp_path / GEOLOCATION_BLOCK_MARKER).exists()
+
+    _sync_geolocation_permission(tmp_path, block=False)
+    prefs = _json.loads(prefs_path.read_text())
+    assert "geolocation" not in prefs["profile"]["default_content_setting_values"]
+    assert not (tmp_path / GEOLOCATION_BLOCK_MARKER).exists()
+
+    # A block the user set in Chrome (no marker) is left alone.
+    prefs["profile"]["default_content_setting_values"]["geolocation"] = 2
+    prefs_path.write_text(_json.dumps(prefs))
+    _sync_geolocation_permission(tmp_path, block=False)
+    assert _json.loads(prefs_path.read_text())["profile"]["default_content_setting_values"]["geolocation"] == 2
+
+
+@pytest.mark.asyncio
+async def test_debug_launch_reports_exit_ip_coordinates(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    context = MagicMock()
+    context.pages = []
+    context.add_init_script = AsyncMock()
+    context.set_geolocation = AsyncMock()
+    launch = AsyncMock(return_value=context)
+    monkeypatch.setattr(module, "launch_persistent_context_async", launch)
+    monkeypatch.setattr(module, "fetch_proxy_geo", AsyncMock(return_value=GEO))
+    manager = BrowserManager(RuntimeConfig("windows", "native", "native-window", tmp_path))
+    manager._wait_for_cdp = AsyncMock()
+
+    await manager.launch(_profile(tmp_path), launch_mode="debug")
+
+    context.set_geolocation.assert_awaited_once_with({"latitude": 25.05, "longitude": 121.53, "accuracy": 1000})
+    assert not (tmp_path / "profile" / module.GEOLOCATION_BLOCK_MARKER).exists()
+
+
+@pytest.mark.asyncio
+async def test_manual_launch_blocks_geolocation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    import json as _json
+
+    manager = BrowserManager(RuntimeConfig("windows", "native", "native-window", tmp_path))
+    monkeypatch.setattr(module, "fetch_proxy_geo", AsyncMock(return_value=GEO))
+    monkeypatch.setattr(module, "_launch_cloakbrowser_manual_process", MagicMock(return_value=MagicMock()))
+    monkeypatch.setattr(manager, "_watch_process", AsyncMock())
+
+    await manager.launch(_profile(tmp_path), launch_mode="manual")
+
+    prefs = _json.loads((tmp_path / "profile" / "Default" / "Preferences").read_text())
+    assert prefs["profile"]["default_content_setting_values"]["geolocation"] == 2
+
+
+def test_a_stale_stored_option_does_not_break_the_profile_list(app_client: TestClient):
+    created = app_client.post("/api/profiles", json={"name": "Stale", "fingerprint_options": {"brand": "Edge"}})
+    profile_id = created.json()["id"]
+    # Simulate a value an older build stored that the model no longer accepts.
+    db.update_profile(profile_id, fingerprint_options={"brand": "Edge", "webrtc": "block", "portable_cookies": True})
+
+    listed = app_client.get("/api/profiles")
+
+    assert listed.status_code == 200
+    options = listed.json()[0]["fingerprint_options"]
+    assert options["webrtc"] == "proxy"
+    assert options["brand"] == "Edge"
+    assert options["portable_cookies"] is True

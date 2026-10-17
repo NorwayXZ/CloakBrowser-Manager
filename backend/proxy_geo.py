@@ -46,6 +46,23 @@ def suggested_locale(country_code: str | None) -> str | None:
     return COUNTRY_LOCALE_DEFAULTS.get(str(country_code or "").upper())
 
 
+def _coordinate(value: Any, limit: float) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if -limit <= number <= limit else None
+
+
+def _with_coordinates(data: dict[str, Any], latitude: Any, longitude: Any) -> dict[str, Any]:
+    lat = _coordinate(latitude, 90)
+    lon = _coordinate(longitude, 180)
+    if lat is not None and lon is not None:
+        data["latitude"] = lat
+        data["longitude"] = lon
+    return data
+
+
 def _with_locale(data: dict[str, Any]) -> dict[str, Any]:
     data["suggested_locale"] = suggested_locale(data.get("country_code"))
     return data
@@ -55,14 +72,14 @@ async def _fetch_ip_api(client: httpx.AsyncClient) -> dict[str, Any]:
     resp = await client.get(
         "http://ip-api.com/json/",
         params={
-            "fields": "status,message,query,country,countryCode,regionName,city,timezone,isp,org,as",
+            "fields": "status,message,query,country,countryCode,regionName,city,lat,lon,timezone,isp,org,as",
         },
     )
     resp.raise_for_status()
     data = resp.json()
     if data.get("status") != "success":
         raise ProxyGeoError(str(data.get("message") or "ip-api lookup failed"))
-    return _with_locale({
+    return _with_locale(_with_coordinates({
         "ip": data.get("query"),
         "country": data.get("country"),
         "country_code": data.get("countryCode"),
@@ -72,7 +89,7 @@ async def _fetch_ip_api(client: httpx.AsyncClient) -> dict[str, Any]:
         "org": data.get("org") or data.get("isp"),
         "asn": str(data.get("as")) if data.get("as") is not None else None,
         "source": "ip-api.com",
-    })
+    }, data.get("lat"), data.get("lon")))
 
 
 async def _fetch_ipwho(client: httpx.AsyncClient) -> dict[str, Any]:
@@ -85,7 +102,7 @@ async def _fetch_ipwho(client: httpx.AsyncClient) -> dict[str, Any]:
     if isinstance(timezone, dict):
         timezone = timezone.get("id")
     connection = data.get("connection") if isinstance(data.get("connection"), dict) else {}
-    return _with_locale({
+    return _with_locale(_with_coordinates({
         "ip": data.get("ip"),
         "country": data.get("country"),
         "country_code": data.get("country_code"),
@@ -95,14 +112,14 @@ async def _fetch_ipwho(client: httpx.AsyncClient) -> dict[str, Any]:
         "org": connection.get("org") or connection.get("isp"),
         "asn": str(connection.get("asn")) if connection.get("asn") is not None else None,
         "source": "ipwho.is",
-    })
+    }, data.get("latitude"), data.get("longitude")))
 
 
 async def _fetch_ipapi(client: httpx.AsyncClient) -> dict[str, Any]:
     resp = await client.get("https://ipapi.co/json/")
     resp.raise_for_status()
     data = resp.json()
-    return _with_locale({
+    return _with_locale(_with_coordinates({
         "ip": data.get("ip"),
         "country": data.get("country_name"),
         "country_code": data.get("country_code"),
@@ -112,14 +129,15 @@ async def _fetch_ipapi(client: httpx.AsyncClient) -> dict[str, Any]:
         "org": data.get("org"),
         "asn": str(data.get("asn")) if data.get("asn") is not None else None,
         "source": "ipapi.co",
-    })
+    }, data.get("latitude"), data.get("longitude")))
 
 
 async def _fetch_ipinfo(client: httpx.AsyncClient) -> dict[str, Any]:
     resp = await client.get("https://ipinfo.io/json")
     resp.raise_for_status()
     data = resp.json()
-    return _with_locale({
+    latitude, _, longitude = str(data.get("loc") or "").partition(",")
+    return _with_locale(_with_coordinates({
         "ip": data.get("ip"),
         "country": data.get("country"),
         "country_code": data.get("country"),
@@ -129,7 +147,7 @@ async def _fetch_ipinfo(client: httpx.AsyncClient) -> dict[str, Any]:
         "org": data.get("org"),
         "asn": str(data.get("org")) if data.get("org") is not None else None,
         "source": "ipinfo.io",
-    })
+    }, latitude, longitude))
 
 
 async def _fetch_ipwhois_app(client: httpx.AsyncClient) -> dict[str, Any]:
@@ -138,7 +156,7 @@ async def _fetch_ipwhois_app(client: httpx.AsyncClient) -> dict[str, Any]:
     data = resp.json()
     if data.get("success") is False:
         raise ProxyGeoError(str(data.get("message") or "ipwhois.app lookup failed"))
-    return _with_locale({
+    return _with_locale(_with_coordinates({
         "ip": data.get("ip"),
         "country": data.get("country"),
         "country_code": data.get("country_code"),
@@ -148,7 +166,7 @@ async def _fetch_ipwhois_app(client: httpx.AsyncClient) -> dict[str, Any]:
         "org": data.get("org") or data.get("isp"),
         "asn": str(data.get("asn")) if data.get("asn") is not None else None,
         "source": "ipwhois.app",
-    })
+    }, data.get("latitude"), data.get("longitude")))
 
 
 def _choose_geo_result(results: list[dict[str, Any]]) -> dict[str, Any]:
