@@ -3,17 +3,23 @@ from __future__ import annotations
 import json
 import plistlib
 import socket
+import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+
+import pytest
 
 from backend.desktop_app import (
     app_version,
     asset_keyword,
     check_for_app_update,
+    existing_manager_action,
     find_chrome,
+    handle_existing_manager,
     is_newer,
     launch_agent_path,
+    listening_pid,
     log_dir,
     login_item_enabled,
     manager_is_running,
@@ -22,6 +28,7 @@ from backend.desktop_app import (
     panel_url,
     port_is_free,
     set_login_item,
+    stop_existing_manager,
     windows_chrome_candidates,
     windows_login_command,
 )
@@ -171,3 +178,111 @@ def test_log_dir_on_windows(tmp_path: Path):
 def test_windows_login_command_quotes_path():
     exe = Path("C:/Users/me/AppData/Local/Programs/CloakBrowser Manager/CloakBrowser Manager.exe")
     assert windows_login_command(exe) == f'"{exe}" --background'
+
+
+# ── An older Manager already on the port ─────────────────────────────────────
+
+def _runner(outputs: dict[str, str], calls: list[list[str]] | None = None):
+    def run(cmd, **_kwargs):
+        if calls is not None:
+            calls.append(list(cmd))
+        return subprocess.CompletedProcess(cmd, 0, stdout=outputs.get(cmd[0], ""), stderr="")
+    return run
+
+
+@pytest.mark.parametrize(("status", "own", "expected"), [
+    ({"app_version": "0.4.3", "running_count": 0}, "0.4.3", "reuse"),
+    ({"running_count": 0}, None, "reuse"),
+    ({"running_count": 0}, "0.4.3", "replace"),
+    ({"app_version": "0.4.2", "running_count": 0}, "0.4.3", "replace"),
+    ({"app_version": "0.4.2", "running_count": 2}, "0.4.3", "busy"),
+])
+def test_existing_manager_action(status, own, expected):
+    assert existing_manager_action(status, own) == expected
+
+
+def test_listening_pid_reads_lsof_and_netstat():
+    assert listening_pid(8080, system="Darwin", runner=_runner({"lsof": "37195\n"})) == 37195
+    assert listening_pid(8080, system="Darwin", runner=_runner({"lsof": ""})) is None
+    netstat = (
+        "  TCP    0.0.0.0:135            0.0.0.0:0              LISTENING       1012\n"
+        "  TCP    127.0.0.1:18080        0.0.0.0:0              LISTENING       77\n"
+        "  TCP    127.0.0.1:8080         0.0.0.0:0              LISTENING       4242\n"
+    )
+    assert listening_pid(8080, system="Windows", runner=_runner({"netstat": netstat})) == 4242
+
+
+def test_stop_sends_sigterm_to_the_old_manager_on_macos():
+    import signal
+
+    killed = []
+    free = iter([False, True])
+    stopped = stop_existing_manager(
+        8080,
+        system="Darwin",
+        runner=_runner({"lsof": "37195\n", "ps": "/Applications/CloakBrowser Manager.app/Contents/MacOS/CloakBrowser Manager"}),
+        kill=lambda pid, sig: killed.append((pid, sig)),
+        port_free=lambda _port: next(free),
+        sleep=lambda _s: None,
+    )
+    assert stopped is True
+    assert killed == [(37195, signal.SIGTERM)]
+
+
+def test_stop_leaves_other_programs_alone():
+    killed = []
+    stopped = stop_existing_manager(
+        8080,
+        system="Darwin",
+        runner=_runner({"lsof": "500\n", "ps": "/usr/local/bin/nginx"}),
+        kill=lambda pid, sig: killed.append(pid),
+        port_free=lambda _port: False,
+        sleep=lambda _s: None,
+    )
+    assert stopped is False
+    assert killed == []
+
+
+def test_stop_asks_windows_politely_before_forcing():
+    calls: list[list[str]] = []
+    # Busy through the polite wait (4 polls + final check), free soon after /F.
+    free = iter([False] * 6 + [True])
+    stopped = stop_existing_manager(
+        8080,
+        system="Windows",
+        runner=_runner({
+            "netstat": "  TCP    127.0.0.1:8080   0.0.0.0:0   LISTENING   4242\n",
+            "tasklist": '"CloakBrowser Manager.exe","4242","Console","1","80,000 K"',
+        }, calls),
+        port_free=lambda _port: next(free),
+        sleep=lambda _s: None,
+        timeout=6,
+    )
+    taskkills = [c for c in calls if c[0] == "taskkill"]
+    assert stopped is True
+    assert taskkills == [["taskkill", "/PID", "4242"], ["taskkill", "/PID", "4242", "/F"]]
+
+
+def test_handle_existing_manager_outcomes():
+    url = "http://127.0.0.1:8080"
+    none = handle_existing_manager(url, 8080, "0.4.3", status_reader=lambda _u: None)
+    assert none == ("none", None)
+
+    same = {"app_version": "0.4.3", "running_count": 1, "profiles_total": 5, "runtime_mode": "native"}
+    assert handle_existing_manager(url, 8080, "0.4.3", status_reader=lambda _u: same)[0] == "reuse"
+
+    old = {"running_count": 0, "profiles_total": 5, "runtime_mode": "native"}
+    stops = []
+    outcome = handle_existing_manager(url, 8080, "0.4.3", status_reader=lambda _u: old,
+                                      stopper=lambda port: stops.append(port) or True)
+    assert outcome == ("replaced", None)
+    assert stops == [8080]
+
+    failed, message = handle_existing_manager(url, 8080, "0.4.3", status_reader=lambda _u: old,
+                                              stopper=lambda _p: False)
+    assert failed == "failed" and "没能自动退出" in message
+
+    busy_status = {**old, "app_version": "0.4.2", "running_count": 2}
+    busy, message = handle_existing_manager(url, 8080, "0.4.3", status_reader=lambda _u: busy_status,
+                                            stopper=lambda _p: pytest.fail("must not stop a Manager with open browsers"))
+    assert busy == "busy" and "0.4.2" in message and "关闭这些浏览器" in message

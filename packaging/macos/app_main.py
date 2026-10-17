@@ -34,6 +34,7 @@ from backend.desktop_app import (  # noqa: E402
     app_version,
     check_for_app_update,
     current_app_path,
+    handle_existing_manager,
     log_dir,
     login_item_enabled,
     manager_is_running,
@@ -271,12 +272,18 @@ def main() -> int:
     url = panel_url()
     port = server_port()
 
-    if manager_is_running(url):
-        # A Manager started from the source checkout (./bin/cloak) is already up.
+    outcome, message = handle_existing_manager(url, port, app_version())
+    if outcome == "reuse":
+        # The same release, or a Manager started from the source checkout.
         logger.info("Manager already running at %s; opening panel", url)
         if not background:
             open_panel(url)
         return 0
+    if outcome in {"busy", "failed"}:
+        logger.warning("Another Manager release is running at %s: %s", url, outcome)
+        return _alert_and_exit(f"{APP_NAME} 无法启动", message or "")
+    if outcome == "replaced":
+        logger.info("Stopped an older Manager at %s; starting %s", url, app_version())
     if not port_is_free(port):
         return _alert_and_exit(
             f"{APP_NAME} 无法启动",

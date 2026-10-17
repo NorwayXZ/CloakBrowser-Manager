@@ -34,6 +34,7 @@ from backend.desktop_app import (  # noqa: E402
     app_version,
     bundle_root,
     check_for_app_update,
+    handle_existing_manager,
     log_dir,
     manager_is_running,
     open_panel,
@@ -101,11 +102,18 @@ def main() -> int:
     port = server_port()
     version = app_version()
 
-    if manager_is_running(url):
+    outcome, message = handle_existing_manager(url, port, version)
+    if outcome == "reuse":
         logger.info("Manager already running at %s; opening panel", url)
         if not background:
             open_panel(url)
         return 0
+    if outcome in {"busy", "failed"}:
+        logger.warning("Another Manager release is running at %s: %s", url, outcome)
+        _message_box(message or "", f"{APP_NAME} 无法启动", MB_OK | MB_ICONWARNING)
+        return 1
+    if outcome == "replaced":
+        logger.info("Stopped an older Manager at %s; starting %s", url, version)
     if not port_is_free(port):
         _message_box(
             f"端口 {port} 已被其他程序占用。请先关闭占用该端口的程序后再打开。",

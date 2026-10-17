@@ -212,14 +212,163 @@ def log_dir(home: Path | None = None, system: str | None = None) -> Path:
     return (home or Path.home()) / "Library" / "Logs" / "CloakBrowser Manager"
 
 
-def manager_is_running(url: str, timeout: float = 0.5) -> bool:
-    """Return true only when the port is serving this Manager's status API."""
+def manager_status(url: str, timeout: float = 0.5) -> dict | None:
+    """The status payload when the port is serving this Manager, else None."""
     try:
         with urllib.request.urlopen(f"{url}/api/status", timeout=timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except (OSError, ValueError):
+        return None
+    if isinstance(payload, dict) and all(key in payload for key in STATUS_KEYS):
+        return payload
+    return None
+
+
+def manager_is_running(url: str, timeout: float = 0.5) -> bool:
+    """Return true only when the port is serving this Manager's status API."""
+    return manager_status(url, timeout) is not None
+
+
+def existing_manager_action(status: Mapping[str, object], own_version: str | None) -> str:
+    """What a freshly opened app does about a Manager already on its port.
+
+    "reuse" when it is the same release (or this is a source build that has no
+    version), "replace" when it is another release with no browser open, and
+    "busy" when another release still has browsers open. Releases before
+    0.4.2 do not report app_version, so they always count as another release.
+    """
+    if not own_version or status.get("app_version") == own_version:
+        return "reuse"
+    running = status.get("running_count")
+    return "busy" if isinstance(running, int) and running > 0 else "replace"
+
+
+Runner = Callable[..., "subprocess.CompletedProcess[str]"]
+
+
+def listening_pid(port: int, *, system: str | None = None, runner: Runner = subprocess.run) -> int | None:
+    """PID of the process listening on 127.0.0.1:port, if the OS tools can tell."""
+    system = system or platform.system()
+    try:
+        if system == "Windows":
+            output = runner(["netstat", "-ano", "-p", "TCP"], capture_output=True, text=True, timeout=10).stdout
+            for line in output.splitlines():
+                parts = line.split()
+                if (
+                    len(parts) >= 5
+                    and parts[3].upper() == "LISTENING"
+                    and parts[1].rsplit(":", 1)[-1] == str(port)
+                    and parts[1].rsplit(":", 1)[0] in {"127.0.0.1", "0.0.0.0"}
+                ):
+                    return int(parts[4])
+            return None
+        output = runner(
+            ["lsof", "-nP", "-t", f"-iTCP:{port}", "-sTCP:LISTEN"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout
+        first = output.split()
+        return int(first[0]) if first else None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def process_command(pid: int, *, system: str | None = None, runner: Runner = subprocess.run) -> str:
+    """Executable name or path of a process, or "" when it cannot be read."""
+    system = system or platform.system()
+    try:
+        if system == "Windows":
+            return runner(
+                ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                capture_output=True, text=True, timeout=10,
+            ).stdout.strip()
+        return runner(["ps", "-o", "comm=", "-p", str(pid)], capture_output=True, text=True, timeout=10).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def stop_existing_manager(
+    port: int,
+    *,
+    system: str | None = None,
+    runner: Runner = subprocess.run,
+    kill: Callable[[int, int], None] = os.kill,
+    port_free: Callable[[int], bool] | None = None,
+    sleep: Callable[[float], None] | None = None,
+    timeout: float = 15.0,
+) -> bool:
+    """Ask the Manager listening on port to quit; True once the port is free.
+
+    Only a process whose executable is CloakBrowser Manager is touched. On
+    macOS it gets SIGTERM; on Windows taskkill without /F first, then a forced
+    stop (the caller has already checked that no browser is open).
+    """
+    import signal
+    import time
+
+    system = system or platform.system()
+    port_free = port_free or port_is_free
+    sleep = sleep or time.sleep
+    pid = listening_pid(port, system=system, runner=runner)
+    if pid is None or pid == os.getpid():
         return False
-    return isinstance(payload, dict) and all(key in payload for key in STATUS_KEYS)
+    if "CloakBrowser" not in process_command(pid, system=system, runner=runner):
+        return False
+
+    def wait_for_port(seconds: float) -> bool:
+        waited = 0.0
+        while waited < seconds:
+            if port_free(port):
+                return True
+            sleep(0.5)
+            waited += 0.5
+        return port_free(port)
+
+    try:
+        if system == "Windows":
+            runner(["taskkill", "/PID", str(pid)], capture_output=True, text=True, timeout=10)
+            if wait_for_port(timeout / 3):
+                return True
+            runner(["taskkill", "/PID", str(pid), "/F"], capture_output=True, text=True, timeout=10)
+        else:
+            kill(pid, signal.SIGTERM)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return wait_for_port(timeout)
+
+
+def handle_existing_manager(
+    url: str,
+    port: int,
+    own_version: str | None,
+    *,
+    status_reader: Callable[[str], dict | None] = manager_status,
+    stopper: Callable[[int], bool] = stop_existing_manager,
+) -> tuple[str, str | None]:
+    """Decide what the launcher does about a Manager already on its port.
+
+    Returns (outcome, message): "none" (nothing running), "reuse" (same
+    release, open its panel), "replaced" (another release was stopped, start
+    this one), or "busy"/"failed" with a message for the user.
+    """
+    status = status_reader(url)
+    if status is None:
+        return "none", None
+    action = existing_manager_action(status, own_version)
+    if action == "reuse":
+        return "reuse", None
+    found = status.get("app_version")
+    other = f"{found} 版" if found else "旧版"
+    if action == "busy":
+        return "busy", (
+            f"{other} CloakBrowser Manager 还在运行，并且有浏览器开着。"
+            f"请先关闭这些浏览器，再从菜单栏/托盘退出旧版，然后重新打开 {own_version}。"
+        )
+    if stopper(port):
+        return "replaced", None
+    return "failed", (
+        f"{other} CloakBrowser Manager 还在运行，没能自动退出它。"
+        f"请从菜单栏/托盘或活动监视器/任务管理器退出旧版，然后重新打开 {own_version}。"
+    )
 
 
 def port_is_free(port: int) -> bool:
