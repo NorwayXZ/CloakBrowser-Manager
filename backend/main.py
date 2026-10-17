@@ -39,6 +39,7 @@ from . import kernel
 from . import secrets_crypto
 from .browser_manager import BrowserLaunchError, BrowserManager, _normalize_proxy, _validate_proxy
 from .cloak_runtime import get_effective_chromium_version
+from .desktop_app import app_version as desktop_app_version
 from .fingerprint_report import DEFAULT_NETWORK_PROBE_URL, DIAGNOSTIC_SCRIPT
 from .proxy_bridge import HttpProxyBridge
 from .proxy_geo import fetch_proxy_geo
@@ -1136,6 +1137,7 @@ async def get_system_status():
     profiles = db.list_profiles()
     return StatusResponse(
         running_count=len(browser_mgr.running),
+        app_version=desktop_app_version(),
         binary_version=get_effective_chromium_version(),
         profiles_total=len(profiles),
         host_os=browser_mgr.runtime.host_os,
@@ -1768,4 +1770,6 @@ if FRONTEND_DIR.exists():
                 raise HTTPException(status_code=404, detail="Not found")
             if file_path.exists() and file_path.is_file():
                 return FileResponse(file_path)
-        return FileResponse(FRONTEND_DIR / "index.html")
+        # The page must be revalidated: a stale cached index.html keeps loading
+        # the previous release's bundle after the app is upgraded.
+        return FileResponse(FRONTEND_DIR / "index.html", headers={"Cache-Control": "no-cache"})

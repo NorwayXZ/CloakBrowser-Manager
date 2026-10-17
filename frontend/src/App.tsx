@@ -151,6 +151,7 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
   const [trashProfiles, setTrashProfiles] = useState<Profile[]>([]);
   const [managerError, setManagerError] = useState<string | null>(null);
   const [hostOS, setHostOS] = useState<HostOS>(() => detectClientHostOS());
+  const [versions, setVersions] = useState<{ app: string | null; kernel: string | null } | null>(null);
   const [pendingLaunch, setPendingLaunch] = useState<{ entries: PreflightEntry[]; mode: LaunchMode } | null>(null);
 
   const selected = profiles.find((p) => p.id === selectedId) ?? null;
@@ -169,6 +170,7 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
 
     if (statusResult.status === "fulfilled") {
       setHostOS(statusResult.value.host_os);
+      setVersions({ app: statusResult.value.app_version ?? null, kernel: statusResult.value.binary_version || null });
     }
     setGroups(groupsResult.status === "fulfilled" ? groupsResult.value : []);
     setProxyPresets(proxyPresetsResult.status === "fulfilled" ? proxyPresetsResult.value : []);
@@ -410,6 +412,7 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
           error={error || managerError}
           authRequired={authRequired}
           authUsername={authUsername}
+          versions={versions}
           onNew={handleNew}
           onEdit={handleEdit}
           onDuplicate={handleDuplicate}

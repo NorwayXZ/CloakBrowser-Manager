@@ -913,3 +913,21 @@ def test_restoring_an_older_database_keeps_profile_creation_working(app_client: 
 
     assert resp.status_code == 201
     assert resp.json()["fingerprint_options"]["brand"] == "Edge"
+
+
+def test_status_reports_the_app_version(app_client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(main, "desktop_app_version", lambda: "0.4.2")
+    monkeypatch.setattr(main, "get_effective_chromium_version", lambda: "154.0.8037.57.1")
+
+    body = app_client.get("/api/status").json()
+
+    assert body["app_version"] == "0.4.2"
+    assert body["binary_version"] == "154.0.8037.57.1"
+
+
+@pytest.mark.skipif(not main.FRONTEND_DIR.exists(), reason="frontend is not built")
+def test_panel_page_is_always_revalidated(app_client: TestClient):
+    resp = app_client.get("/")
+
+    assert resp.status_code == 200
+    assert resp.headers["cache-control"] == "no-cache"

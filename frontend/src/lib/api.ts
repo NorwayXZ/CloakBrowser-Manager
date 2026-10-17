@@ -124,6 +124,8 @@ export interface LaunchResult {
 
 export interface SystemStatus {
   running_count: number;
+  /** Packaged app version; null when running from a source checkout. */
+  app_version?: string | null;
   binary_version: string;
   profiles_total: number;
   host_os: HostOS;

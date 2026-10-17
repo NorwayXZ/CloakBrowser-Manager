@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from .cloak_runtime import inspect_cloak_runtime
+from .cloak_runtime import _version_core, inspect_cloak_runtime
 
 KERNEL_DIR_RE = re.compile(r"^chromium-(\d+(?:\.\d+){3,4})(-pro)?$")
 
@@ -250,7 +250,8 @@ def update(settings: KernelSettings) -> dict[str, Any]:
     if not runtime.binary_verified:
         actual = runtime.binary_version or os.fspath(runtime.binary_path or "未知路径")
         raise KernelError(f"下载后的内核文件未通过版本核对：期望 {runtime.effective_version}，实际 {actual}")
-    updated = bool(latest) or after != before
+    # Pro cache folders carry a "-pro" suffix the launch version lacks.
+    updated = bool(latest) or _version_core(after) != _version_core(before)
     if settings.pinned_version:
         message = f"已锁定内核 {after}，不会自动换到新版本；要更新请先在内核页解除锁定。"
     elif updated:

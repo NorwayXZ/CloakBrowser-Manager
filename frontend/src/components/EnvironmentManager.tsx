@@ -45,6 +45,7 @@ interface EnvironmentManagerProps {
   error: string | null;
   authRequired: boolean;
   authUsername: string | null;
+  versions?: { app: string | null; kernel: string | null } | null;
   onNew: () => void;
   onEdit: (id: string) => void;
   onDuplicate: (profile: Profile) => Promise<void>;
@@ -155,6 +156,7 @@ export function EnvironmentManager({
   error,
   authRequired,
   authUsername,
+  versions = null,
   onNew,
   onEdit,
   onDuplicate,
@@ -460,6 +462,12 @@ export function EnvironmentManager({
               </div>
             )}
           </div>
+          {versions && (
+            <div className="mt-3 space-y-0.5 px-1 text-xs text-slate-400" aria-label="版本信息">
+              <div>Manager {versions.app ? `v${versions.app}` : "源码版"}</div>
+              <div className="truncate" title={versions.kernel ?? undefined}>内核 {versions.kernel ?? "未下载"}</div>
+            </div>
+          )}
         </div>
       </aside>
 
@@ -525,6 +533,8 @@ export function EnvironmentManager({
                 <div className="font-semibold">
                   {updateNotice.tone === "error"
                     ? "升级失败"
+                    : updateNotice.result?.download_url
+                    ? `发现新版本${updateNotice.result.after ? ` ${updateNotice.result.after}` : ""}，请下载安装`
                     : updateNotice.result?.restart_required || updateNotice.browser?.restart_required
                     ? "升级完成，需要重启"
                     : "升级检查完成"}

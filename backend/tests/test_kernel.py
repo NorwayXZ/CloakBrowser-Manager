@@ -286,3 +286,26 @@ def test_delete_waits_for_browsers_to_close(app_client: TestClient, wrapper, mon
 
     assert resp.status_code == 409
     assert (wrapper.cache / "chromium-145.0.7632.109.2").exists()
+
+
+def test_same_pro_build_is_not_reported_as_an_update(
+    app_client: TestClient, wrapper, monkeypatch: pytest.MonkeyPatch,
+):
+    wrapper.license = FREE_KEY
+    wrapper.effective = {"version": "154.0.8037.57.1"}
+    monkeypatch.setattr(kernel, "inspect_cloak_runtime", lambda *, ensure_binary: CloakRuntimeInfo(
+        wrapper_version="0.6.2",
+        configured_version="146.0.7680.177.5",
+        effective_version="154.0.8037.57.1",
+        platform="darwin-arm64",
+        binary_path=Path("/cache/chromium-154.0.8037.57.1-pro/Chromium"),
+        binary_version="154.0.8037.57.1-pro",
+        binary_verified=True,
+    ))
+
+    resp = app_client.post("/api/kernel/update")
+
+    assert resp.status_code == 200
+    assert resp.json()["updated"] is False
+    assert resp.json()["restart_required"] is False
+    assert "已是最新" in resp.json()["message"]

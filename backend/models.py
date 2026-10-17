@@ -237,6 +237,7 @@ class LaunchRequest(BaseModel):
 
 class StatusResponse(BaseModel):
     running_count: int
+    app_version: str | None = None  # None when running from a source checkout
     binary_version: str
     profiles_total: int
     host_os: HostOS
