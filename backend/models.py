@@ -417,3 +417,20 @@ class CookieMergeResponse(BaseModel):
     format: Literal["json", "netscape", "header"]
     added: int
     total: int
+
+
+class AutoBackupSettingsModel(BaseModel):
+    enabled: bool = True
+    interval_days: int = Field(default=7, ge=1, le=90)
+    keep: int = Field(default=4, ge=1, le=52)
+    # None or "" = keep backups only inside the data directory.
+    copy_dir: str | None = None
+
+
+class AutoBackupStatusResponse(AutoBackupSettingsModel):
+    default_copy_dir: str
+    last_at: str | None = None
+    next_due_at: str | None = None
+    last_error: str | None = None
+    last_copy: str | None = None
+    waiting_for_browsers: bool = False

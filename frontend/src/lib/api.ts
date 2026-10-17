@@ -334,8 +334,26 @@ export interface ExternalNetworkProbe {
 export interface BackupItem {
   name: string;
   kind: "full" | "auto";
+  /** Who made a full backup: by hand, on the weekly schedule, or before an update. */
+  origin?: "manual" | "auto" | "pre-update" | "snapshot";
   size: number;
   created_at: string;
+}
+
+export interface AutoBackupSettings {
+  enabled: boolean;
+  interval_days: number;
+  keep: number;
+  copy_dir: string | null;
+}
+
+export interface AutoBackupStatus extends AutoBackupSettings {
+  default_copy_dir: string;
+  last_at: string | null;
+  next_due_at: string | null;
+  last_error: string | null;
+  last_copy: string | null;
+  waiting_for_browsers: boolean;
 }
 
 export interface BackupListResult {
@@ -523,6 +541,17 @@ export const api = {
     }),
 
   listBackups: () => request<BackupListResult>("/api/backups"),
+
+  getAutoBackup: () => request<AutoBackupStatus>("/api/backups/auto"),
+
+  saveAutoBackup: (settings: AutoBackupSettings) =>
+    request<AutoBackupStatus>("/api/backups/auto", { method: "PUT", body: JSON.stringify(settings) }),
+
+  runAutoBackup: () =>
+    request<{ ok: boolean; name: string; copy: string | null; copy_error: string | null; status: AutoBackupStatus }>(
+      "/api/backups/auto/run",
+      { method: "POST" },
+    ),
 
   createBackup: () => request<BackupItem>("/api/backups", { method: "POST" }),
 

@@ -19,6 +19,7 @@ import secrets
 import subprocess
 import shutil
 import time
+from datetime import datetime
 from contextlib import asynccontextmanager
 from http.cookies import SimpleCookie
 from pathlib import Path
@@ -31,6 +32,7 @@ from fastapi.staticfiles import StaticFiles
 import starlette.requests
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from . import auto_backup
 from . import backup as backups
 from . import database as db
 from .fingerprint_options import parse_fingerprint_options
@@ -49,6 +51,8 @@ from .updater import UpdateError, update_from_git
 from .xray_runtime import is_xray_link, start_xray_proxy
 from .models import (
     AuthAccountUpdate,
+    AutoBackupSettingsModel,
+    AutoBackupStatusResponse,
     BrowserUpdateResponse,
     CookieMergeRequest,
     CookieMergeResponse,
@@ -379,9 +383,12 @@ async def lifespan(app: FastAPI):
     _ensure_auth_bootstrap()
     await browser_mgr.cleanup_stale()
     browser_mgr._auto_launch_task = asyncio.create_task(browser_mgr.auto_launch_all())
+    auto_backup_task = asyncio.create_task(_auto_backup_loop())
     logger.info("CloakBrowser Manager started")
     yield
     logger.info("Shutting down — stopping all browsers...")
+    auto_backup_task.cancel()
+    await asyncio.gather(auto_backup_task, return_exceptions=True)
     if browser_mgr._auto_launch_task and not browser_mgr._auto_launch_task.done():
         browser_mgr._auto_launch_task.cancel()
         await asyncio.gather(browser_mgr._auto_launch_task, return_exceptions=True)
@@ -716,6 +723,103 @@ def _require_no_running_browsers(action: str) -> None:
 
 def _backup_http_error(exc: backups.BackupError) -> HTTPException:
     return HTTPException(status_code=400, detail=str(exc))
+
+
+AUTO_BACKUP_FIRST_CHECK_SECONDS = 120
+AUTO_BACKUP_CHECK_SECONDS = 30 * 60
+_auto_backup_waiting = False
+
+
+def _browsers_busy() -> bool:
+    return bool(browser_mgr.running or browser_mgr._launching)
+
+
+def _run_auto_backup(*, force: bool) -> dict | None:
+    """One scheduled (or forced) automatic backup; None when nothing was due."""
+    global _auto_backup_waiting
+    settings = auto_backup.read_settings(db.get_setting)
+    last_at = db.get_setting(auto_backup.SETTING_LAST_AT)
+    if not force and not auto_backup.is_due(settings, last_at):
+        _auto_backup_waiting = False
+        return None
+    if _browsers_busy():
+        # Chrome keeps cookies open while running; wait for a quiet moment.
+        _auto_backup_waiting = True
+        return None
+    _auto_backup_waiting = False
+    try:
+        result = auto_backup.run_backup(db.DATA_DIR, settings, app_version=desktop_app_version())
+    except Exception as exc:
+        db.set_setting(auto_backup.SETTING_LAST_ERROR, f"自动备份失败：{exc}")
+        raise
+    db.set_setting(auto_backup.SETTING_LAST_AT, datetime.now().astimezone().isoformat(timespec="seconds"))
+    db.set_setting(auto_backup.SETTING_LAST_COPY, str(result.copy) if result.copy else "")
+    if result.copy_error:
+        db.set_setting(auto_backup.SETTING_LAST_ERROR, result.copy_error)
+    else:
+        db.delete_setting(auto_backup.SETTING_LAST_ERROR)
+    return {"name": result.path.name, "copy": str(result.copy) if result.copy else None, "copy_error": result.copy_error}
+
+
+async def _auto_backup_loop() -> None:
+    await asyncio.sleep(AUTO_BACKUP_FIRST_CHECK_SECONDS)
+    while True:
+        try:
+            result = await asyncio.to_thread(_run_auto_backup, force=False)
+            if result:
+                logger.info("Automatic backup saved: %s (copy: %s)", result["name"], result["copy"])
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Automatic backup failed")
+        await asyncio.sleep(AUTO_BACKUP_CHECK_SECONDS)
+
+
+def _auto_backup_status() -> AutoBackupStatusResponse:
+    settings = auto_backup.read_settings(db.get_setting)
+    last_at = db.get_setting(auto_backup.SETTING_LAST_AT)
+    due = auto_backup.next_due(settings, last_at)
+    return AutoBackupStatusResponse(
+        enabled=settings.enabled,
+        interval_days=settings.interval_days,
+        keep=settings.keep,
+        copy_dir=settings.copy_dir,
+        default_copy_dir=str(auto_backup.default_copy_dir()),
+        last_at=last_at,
+        next_due_at=due.isoformat(timespec="seconds") if due else None,
+        last_error=db.get_setting(auto_backup.SETTING_LAST_ERROR),
+        last_copy=db.get_setting(auto_backup.SETTING_LAST_COPY) or None,
+        waiting_for_browsers=_auto_backup_waiting and _browsers_busy(),
+    )
+
+
+@app.get("/api/backups/auto", response_model=AutoBackupStatusResponse)
+async def get_auto_backup():
+    return _auto_backup_status()
+
+
+@app.put("/api/backups/auto", response_model=AutoBackupStatusResponse)
+async def update_auto_backup(body: AutoBackupSettingsModel):
+    copy_dir = (body.copy_dir or "").strip()
+    if copy_dir and not Path(copy_dir).expanduser().is_absolute():
+        raise HTTPException(status_code=422, detail="备份复制目录要填完整路径，例如 /Users/你的用户名/备份")
+    auto_backup.save_settings(db.set_setting, auto_backup.AutoBackupSettings(
+        enabled=body.enabled,
+        interval_days=body.interval_days,
+        keep=body.keep,
+        copy_dir=copy_dir or None,
+    ))
+    return _auto_backup_status()
+
+
+@app.post("/api/backups/auto/run")
+async def run_auto_backup_now():
+    _require_no_running_browsers("自动备份")
+    try:
+        result = await asyncio.to_thread(_run_auto_backup, force=True)
+    except backups.BackupError as exc:
+        raise _backup_http_error(exc) from exc
+    return {"ok": True, **(result or {}), "status": _auto_backup_status().model_dump()}
 
 
 @app.get("/api/backups")

@@ -35,7 +35,10 @@ KEY_NAME = ".secret_key"
 PROFILES_DIR = "profiles"
 AUTO_SNAPSHOTS_KEPT = 10
 
-FULL_BACKUP_RE = re.compile(r"^CloakBrowser-backup-\d{8}-\d{6}(-\d+)?\.zip$")
+# Optional origin tag after the prefix: automatic backups and the backup taken
+# right before a one-click update are pruned separately from manual ones.
+FULL_BACKUP_RE = re.compile(r"^CloakBrowser-backup-(?:(auto|pre-update)-)?\d{8}-\d{6}(-\d+)?\.zip$")
+BACKUP_ORIGINS = ("auto", "pre-update")
 AUTO_SNAPSHOT_RE = re.compile(r"^profiles-\d{8}-\d{6}(-\d+)?\.db$")
 
 # Directory names inside a Chrome user data dir that are pure caches.
@@ -146,15 +149,39 @@ def _profile_ids(db_path: Path) -> list[str]:
         conn.close()
 
 
-def create_full_backup(data_dir: Path, app_version: str | None = None) -> Path:
+def backup_origin(name: str) -> str:
+    """"manual", "auto" or "pre-update" for a full backup file name."""
+    match = FULL_BACKUP_RE.match(name)
+    return (match.group(1) if match else None) or "manual"
+
+
+def prune_backups(directory: Path, origin: str, keep: int) -> list[Path]:
+    """Delete all but the newest ``keep`` backups of one origin; others are untouched."""
+    if origin not in BACKUP_ORIGINS or not directory.is_dir():
+        return []
+    matching = sorted(
+        (p for p in directory.iterdir() if p.is_file() and backup_origin(p.name) == origin and FULL_BACKUP_RE.match(p.name)),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    removed = matching[max(keep, 1):]
+    for old in removed:
+        old.unlink(missing_ok=True)
+    return removed
+
+
+def create_full_backup(data_dir: Path, app_version: str | None = None, origin: str | None = None) -> Path:
     """Write a full backup zip into ``backups/full`` and return its path."""
+    if origin is not None and origin not in BACKUP_ORIGINS:
+        raise ValueError(f"unknown backup origin: {origin}")
     db_path = data_dir / DB_NAME
     if not db_path.is_file():
         raise BackupError("还没有画像数据库，暂时没有可以备份的数据。")
 
     target_dir = full_backups_dir(data_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
-    target = _unique_path(target_dir, f"CloakBrowser-backup-{_timestamp()}", ".zip")
+    tag = f"{origin}-" if origin else ""
+    target = _unique_path(target_dir, f"CloakBrowser-backup-{tag}{_timestamp()}", ".zip")
     partial = target.with_suffix(".zip.partial")
 
     with tempfile.TemporaryDirectory(prefix="cbm-backup-") as tmp:
@@ -359,6 +386,7 @@ def describe(item: BackupFile) -> dict:
     return {
         "name": item.name,
         "kind": item.kind,
+        "origin": backup_origin(item.name) if item.kind == "full" else "snapshot",
         "size": item.size,
         "created_at": datetime.fromtimestamp(item.created_at).astimezone().isoformat(timespec="seconds"),
     }

@@ -15,6 +15,8 @@ import pytest
 # throwaway folder first so no test can reach the user's real profiles.db —
 # code paths such as BrowserManager.stop() write through the module default.
 os.environ["CLOAKBROWSER_MANAGER_DATA_DIR"] = tempfile.mkdtemp(prefix="cbm-test-data-")
+# Automatic backups copy to ~/CloakBrowser Manager Backups by default; never in tests.
+os.environ["CLOAKBROWSER_MANAGER_BACKUP_COPY_DIR"] = tempfile.mkdtemp(prefix="cbm-test-backup-copy-")
 
 # ---------------------------------------------------------------------------
 # Mock cloakbrowser BEFORE any backend module is imported.

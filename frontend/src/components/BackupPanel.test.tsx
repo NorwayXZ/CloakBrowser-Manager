@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../lib/api";
 import { BackupPanel, formatBytes } from "./BackupPanel";
 
@@ -17,6 +17,14 @@ const autoSnapshot = {
 };
 
 afterEach(() => vi.restoreAllMocks());
+
+beforeEach(() => {
+  vi.spyOn(api, "getAutoBackup").mockResolvedValue({
+    enabled: true, interval_days: 7, keep: 4, copy_dir: "/Users/me/CloakBrowser Manager Backups",
+    default_copy_dir: "/Users/me/CloakBrowser Manager Backups", last_at: null, next_due_at: null,
+    last_error: null, last_copy: null, waiting_for_browsers: false,
+  });
+});
 
 describe("BackupPanel", () => {
   it("lists full backups and automatic snapshots", async () => {
@@ -71,5 +79,21 @@ describe("BackupPanel", () => {
     expect(formatBytes(512)).toBe("512 B");
     expect(formatBytes(2048)).toBe("2.0 KB");
     expect(formatBytes(3 * 1024 * 1024 * 1024)).toBe("3.00 GB");
+  });
+});
+
+describe("BackupPanel labels", () => {
+  it("names automatic and pre-update backups", async () => {
+    vi.spyOn(api, "listBackups").mockResolvedValue({
+      backups: [
+        { ...fullBackup, name: "CloakBrowser-backup-auto-20261017-120000.zip", origin: "auto" },
+        { ...fullBackup, name: "CloakBrowser-backup-pre-update-20261017-110000.zip", origin: "pre-update" },
+      ],
+      location: "/data/backups",
+    });
+    render(<BackupPanel runningCount={0} onRefresh={vi.fn()} />);
+
+    expect(await screen.findByText("自动完整备份", { selector: "td span" })).toBeTruthy();
+    expect(screen.getByText("更新前备份", { selector: "td span" })).toBeTruthy();
   });
 });

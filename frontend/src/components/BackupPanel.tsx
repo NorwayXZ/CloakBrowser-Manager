@@ -1,6 +1,7 @@
 import { Archive, Download, FolderOpen, History, RefreshCw, RotateCcw, Trash2, Upload } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type BackupItem } from "../lib/api";
+import { AutoBackupSection } from "./AutoBackupSection";
 
 interface BackupPanelProps {
   runningCount: number;
@@ -18,6 +19,13 @@ export function formatBytes(size: number): string {
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
   if (size < 1024 * 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`;
   return `${(size / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+function backupLabel(item: BackupItem): string {
+  if (item.kind !== "full") return "自动快照";
+  if (item.origin === "auto") return "自动完整备份";
+  if (item.origin === "pre-update") return "更新前备份";
+  return "完整备份";
 }
 
 function formatTime(value: string): string {
@@ -214,6 +222,8 @@ export function BackupPanel({ runningCount, onRefresh }: BackupPanelProps) {
         )}
       </div>
 
+      <AutoBackupSection runningCount={runningCount} onBackedUp={loadBackups} />
+
       {notice && (
         <div
           className={`max-w-4xl whitespace-pre-line break-all rounded-md border px-4 py-3 text-sm ${notice.tone === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-800"}`}
@@ -247,7 +257,7 @@ export function BackupPanel({ runningCount, onRefresh }: BackupPanelProps) {
                       ) : (
                         <History className="h-4 w-4 text-slate-400" />
                       )}
-                      <span className="font-medium text-slate-800">{item.kind === "full" ? "完整备份" : "自动快照"}</span>
+                      <span className="font-medium text-slate-800">{backupLabel(item)}</span>
                     </div>
                     <div className="mt-0.5 text-xs text-slate-400">{item.name}</div>
                   </td>
