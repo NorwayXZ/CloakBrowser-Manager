@@ -202,6 +202,29 @@ export interface CookieMergeResult {
   total: number;
 }
 
+export type AppUpdatePhase = "idle" | "checking" | "downloading" | "backing_up" | "preparing" | "restarting" | "failed";
+
+export interface AppUpdateResult {
+  ok: boolean;
+  from: string | null;
+  to: string;
+  running: string;
+  reason: string | null;
+  finished_at: string;
+}
+
+export interface AppUpdateState {
+  phase: AppUpdatePhase;
+  label?: string;
+  target?: string;
+  done?: number;
+  total?: number;
+  error?: string;
+  supported?: boolean;
+  current_version?: string | null;
+  last_result?: AppUpdateResult | null;
+}
+
 export interface PreflightIssue {
   severity: "error" | "warning" | "info";
   code: string;
@@ -511,6 +534,12 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ text, existing, domain }),
     }),
+
+  getAppUpdate: () => request<AppUpdateState>("/api/app/update"),
+
+  startAppUpdate: () => request<AppUpdateState>("/api/app/update", { method: "POST" }),
+
+  dismissAppUpdateResult: () => request<{ ok: boolean }>("/api/app/update/result", { method: "DELETE" }),
 
   getKernel: () => request<KernelOverview>("/api/kernel"),
 

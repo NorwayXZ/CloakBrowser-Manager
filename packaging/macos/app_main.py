@@ -41,6 +41,8 @@ from backend.desktop_app import (  # noqa: E402
     open_panel,
     panel_url,
     port_is_free,
+    register_exit_hook,
+    request_update_from_panel,
     set_login_item,
 )
 from backend.runtime import resolve_runtime, server_port  # noqa: E402
@@ -95,6 +97,8 @@ def _run_cocoa_app(url: str, server, server_thread: threading.Thread, *, backgro
 
     app = NSApplication.sharedApplication()
     state = {"shutdown_done": False, "shutting_down": False}
+    # One-click update quits through the normal path (browsers, then server).
+    register_exit_hook(lambda: AppHelper.callAfter(app.terminate_, None))
     version = app_version()
     app_path = current_app_path()
 
@@ -129,10 +133,10 @@ def _run_cocoa_app(url: str, server, server_thread: threading.Thread, *, backgro
         if info.get("newer"):
             alert.setMessageText_(f"发现新版本 {info['latest']}")
             alert.setInformativeText_(
-                f"当前版本 {version or '未知'}。下载后打开 DMG，把新 App 拖到「应用程序」覆盖旧版即可，"
-                "画像、Cookie 等数据不受影响。"
+                f"当前版本 {version or '未知'}。点「立即更新」会先完整备份，下载校验后自动替换并重启，"
+                "画像、Cookie 等数据不受影响。请先关闭所有浏览器。"
             )
-            alert.addButtonWithTitle_("下载新版本")
+            alert.addButtonWithTitle_("立即更新")
             alert.addButtonWithTitle_("以后再说")
         elif not manual:
             return
@@ -146,7 +150,14 @@ def _run_cocoa_app(url: str, server, server_thread: threading.Thread, *, backgro
             alert.addButtonWithTitle_("好")
         app.activateIgnoringOtherApps_(True)
         if alert.runModal() == NSAlertFirstButtonReturn and info.get("newer"):
-            subprocess.run(["open", info["download_url"]], check=False)
+            threading.Thread(target=start_update, daemon=True).start()
+
+    def start_update() -> None:
+        ok, message = request_update_from_panel(url)
+        if ok:
+            open_panel(url)
+        else:
+            AppHelper.callAfter(show_alert, "暂时不能更新", message)
 
     def check_updates(manual: bool) -> None:
         if not manual:

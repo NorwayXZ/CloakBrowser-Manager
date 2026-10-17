@@ -40,6 +40,8 @@ from backend.desktop_app import (  # noqa: E402
     open_panel,
     panel_url,
     port_is_free,
+    register_exit_hook,
+    request_update_from_panel,
     set_windows_login_item,
     windows_login_item_enabled,
 )
@@ -170,12 +172,17 @@ def main() -> int:
         if info["newer"]:
             answer = _message_box(
                 f"发现新版本 {info['latest']}（当前 {version}）。\n\n"
-                "下载后运行新的安装程序即可覆盖升级，画像、Cookie 等数据不受影响。\n\n现在下载吗？",
+                "现在自动更新吗？会先完整备份，下载校验后自动安装并重启，画像、Cookie 等数据不受影响。"
+                "请先关闭所有浏览器。",
                 "发现新版本",
                 MB_YESNO | MB_ICONINFORMATION,
             )
             if answer == IDYES:
-                os.startfile(info["download_url"])  # type: ignore[attr-defined]
+                ok, message = request_update_from_panel(url)
+                if ok:
+                    open_panel(url)
+                else:
+                    _message_box(message, "暂时不能更新", MB_OK | MB_ICONWARNING)
         elif manual:
             _message_box(f"当前版本 {version or '未知'} 已是最新。", "检查更新")
 
@@ -207,6 +214,9 @@ def main() -> int:
         pystray.MenuItem("退出（关闭所有浏览器）", quit_app),
     )
     icon = pystray.Icon("cloakbrowser-manager", _tray_image(), APP_NAME, menu)
+    # One-click update quits through the normal path; quit_app joins the server
+    # thread, so it must not run on that thread (the request handler's).
+    register_exit_hook(lambda: threading.Thread(target=quit_app, args=(icon,), daemon=True).start())
     icon.run(setup=wait_until_ready)
     return 0
 

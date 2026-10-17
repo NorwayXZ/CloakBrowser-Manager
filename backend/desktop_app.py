@@ -431,3 +431,49 @@ def open_panel(
         subprocess.Popen(command, close_fds=True)  # Chrome may keep running
     else:
         subprocess.run(command, check=False)
+
+
+# ── Quitting the app on request (one-click update) ───────────────────────────
+
+_exit_hook: Callable[[], None] | None = None
+
+
+def register_exit_hook(hook: Callable[[], None]) -> None:
+    """The launcher's normal quit path (stops browsers, then the server)."""
+    global _exit_hook
+    _exit_hook = hook
+
+
+def can_request_exit() -> bool:
+    return _exit_hook is not None
+
+
+def request_app_exit(delay: float = 1.5) -> bool:
+    """Quit the app shortly, so the HTTP response that asked for it still goes out."""
+    import threading
+
+    hook = _exit_hook
+    if hook is None:
+        return False
+    timer = threading.Timer(delay, hook)
+    timer.daemon = True
+    timer.start()
+    return True
+
+
+def request_update_from_panel(url: str, timeout: float = 10) -> tuple[bool, str]:
+    """Ask the running Manager to start the one-click update (used by the menus)."""
+    request = urllib.request.Request(f"{url}/api/app/update", data=b"{}", method="POST",
+                                     headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            response.read()
+        return True, "已开始更新：下载、备份后应用会自动重启。"
+    except urllib.error.HTTPError as exc:
+        try:
+            detail = json.loads(exc.read().decode("utf-8")).get("detail")
+        except (ValueError, OSError):
+            detail = None
+        return False, str(detail or f"更新请求失败（{exc.code}）")
+    except OSError as exc:
+        return False, f"连接管理服务失败：{exc}"

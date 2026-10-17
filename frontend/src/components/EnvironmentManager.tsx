@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { api, type BrowserUpdateResult, type LaunchMode, type ManagerUpdateResult, type Profile, type ProfileGroup, type ProxyPreset } from "../lib/api";
+import { AppUpdateStatus } from "./AppUpdateStatus";
 import { BackupPanel } from "./BackupPanel";
 import { GroupsPanel } from "./GroupsPanel";
 import { KernelPanel } from "./KernelPanel";
@@ -505,6 +506,12 @@ export function EnvironmentManager({
           </div>
         </header>
 
+        <AppUpdateStatus
+          available={updateNotice?.result?.download_url ? updateNotice.result.after ?? null : null}
+          downloadUrl={updateNotice?.result?.download_url ?? null}
+          runningCount={runningCount}
+        />
+
         {updateNotice && (
           <div className={`border-b px-5 py-3 ${
             updateNotice.tone === "error"
@@ -548,7 +555,7 @@ export function EnvironmentManager({
                     rel="noreferrer"
                   >
                     <Download className="h-3.5 w-3.5" />
-                    <span>下载新版本</span>
+                    <span>手动下载</span>
                   </a>
                 )}
                 {updateNotice.browser && (

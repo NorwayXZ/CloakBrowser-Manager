@@ -41,11 +41,14 @@ from . import kernel
 from . import secrets_crypto
 from .browser_manager import BrowserLaunchError, BrowserManager, _normalize_proxy, _validate_proxy
 from .cloak_runtime import get_effective_chromium_version
+from . import desktop_app, self_update
 from .desktop_app import app_version as desktop_app_version
+from .update_job import UpdateEnv, UpdateJob, platform_name
 from .fingerprint_report import DEFAULT_NETWORK_PROBE_URL, DIAGNOSTIC_SCRIPT
 from .proxy_bridge import HttpProxyBridge
 from .proxy_geo import fetch_proxy_geo
 from .request_guard import RequestGuardMiddleware
+from .runtime import server_port
 from .rfb import _RFB_MSG_SIZE, _build_server_cut_text, _filter_rfb_client_messages, _parse_kasmvnc_clipboard
 from .updater import UpdateError, update_from_git
 from .xray_runtime import is_xray_link, start_xray_proxy
@@ -374,6 +377,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 async def lifespan(app: FastAPI):
     browser_mgr.vnc.validate_available()
     db.init_db()
+    _settle_last_update()
     if kernel.has_saved_settings(db.get_setting):
         kernel.apply_settings(kernel.read_settings(db.get_setting))
     try:
@@ -723,6 +727,80 @@ def _require_no_running_browsers(action: str) -> None:
 
 def _backup_http_error(exc: backups.BackupError) -> HTTPException:
     return HTTPException(status_code=400, detail=str(exc))
+
+
+# ── One-click app update ─────────────────────────────────────────────────────
+
+SETTING_LAST_UPDATE = "last_update_result"
+update_job = UpdateJob()
+
+
+def _settle_last_update() -> None:
+    """On start, turn a pending update note into a success/failure for the panel."""
+    try:
+        result = self_update.settle_pending(db.DATA_DIR, desktop_app_version())
+    except Exception:
+        logger.exception("Could not read the pending update note")
+        return
+    if result:
+        logger.info("Update to %s %s", result["to"], "succeeded" if result["ok"] else "did not land")
+        db.set_setting(SETTING_LAST_UPDATE, json.dumps(result, ensure_ascii=False))
+
+
+def _self_update_supported() -> bool:
+    return desktop_app.is_frozen() and platform_name() in {"darwin", "win32"} and desktop_app.can_request_exit()
+
+
+def _pre_update_backup() -> None:
+    settings = auto_backup.read_settings(db.get_setting)
+    settings.keep = 3
+    result = auto_backup.run_backup(db.DATA_DIR, settings, origin="pre-update", app_version=desktop_app_version())
+    if result.copy_error:
+        logger.warning("Pre-update backup copy: %s", result.copy_error)
+
+
+@app.get("/api/app/update")
+async def get_app_update():
+    raw = db.get_setting(SETTING_LAST_UPDATE)
+    try:
+        last_result = json.loads(raw) if raw else None
+    except ValueError:
+        last_result = None
+    return {
+        **update_job.snapshot(),
+        "supported": _self_update_supported(),
+        "current_version": desktop_app_version(),
+        "last_result": last_result,
+    }
+
+
+@app.post("/api/app/update")
+async def start_app_update():
+    if not _self_update_supported():
+        raise HTTPException(status_code=409, detail="只有安装包版本支持一键更新；源码版请用 git 拉取更新。")
+    _require_no_running_browsers("一键更新")
+    if browser_mgr._launching:
+        raise HTTPException(status_code=409, detail="有浏览器正在启动，请稍后再更新")
+    env = UpdateEnv(
+        data_dir=db.DATA_DIR,
+        current_version=desktop_app_version(),
+        port=server_port(),
+        platform=platform_name(),
+        keyword=desktop_app.asset_keyword(),
+        fetch_release=desktop_app.fetch_latest_release,
+        backup=_pre_update_backup,
+        request_exit=desktop_app.request_app_exit,
+        running_app=desktop_app.current_app_path(),
+    )
+    if not update_job.start(env):
+        raise HTTPException(status_code=409, detail="已经在更新中")
+    return update_job.snapshot()
+
+
+@app.delete("/api/app/update/result")
+async def dismiss_app_update_result():
+    db.delete_setting(SETTING_LAST_UPDATE)
+    return {"ok": True}
 
 
 AUTO_BACKUP_FIRST_CHECK_SECONDS = 120
