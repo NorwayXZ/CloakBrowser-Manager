@@ -896,3 +896,20 @@ def test_ws_allows_no_origin(app_client: TestClient):
     except Exception as exc:
         assert "4403" not in str(exc)
     main.browser_mgr.running.pop(pid, None)
+
+
+def test_restoring_an_older_database_keeps_profile_creation_working(app_client: TestClient):
+    import sqlite3
+    from contextlib import closing
+
+    from backend import database as db
+
+    # Simulate a backup taken before the fingerprint_options column existed.
+    with closing(sqlite3.connect(db.DB_PATH)) as conn, conn:
+        conn.execute("ALTER TABLE profiles DROP COLUMN fingerprint_options_json")
+
+    main._after_restore({"created_at": "2026-10-14T20:21:13+08:00"})
+    resp = app_client.post("/api/profiles", json={"name": "After restore", "fingerprint_options": {"brand": "Edge"}})
+
+    assert resp.status_code == 201
+    assert resp.json()["fingerprint_options"]["brand"] == "Edge"

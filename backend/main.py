@@ -758,6 +758,9 @@ async def delete_backup(kind: str, name: str):
 
 def _after_restore(result: dict) -> dict:
     secrets_crypto.reset_key_cache()
+    # A backup from an older release lacks newer columns; startup migrations
+    # only run once, so bring the restored database up to date right away.
+    db.init_db()
     profiles = db.list_profiles()
     return {"ok": True, **result, "profiles": len(profiles)}
 
