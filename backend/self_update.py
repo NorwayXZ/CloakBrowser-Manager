@@ -149,7 +149,7 @@ def download_verified(
 
 def macos_install_target(running_app: Path, *, folders: tuple[Path, ...] | None = None) -> Path:
     """Where the app really lives; a quarantined app runs from a read-only copy."""
-    if "/AppTranslocation/" not in str(running_app):
+    if "AppTranslocation" not in running_app.parts:
         return running_app
     for folder in folders or (Path("/Applications"), Path.home() / "Applications"):
         candidate = folder / running_app.name
