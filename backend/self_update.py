@@ -32,6 +32,8 @@ from typing import Callable
 HEALTH_TIMEOUT_SECONDS = 90
 QUIT_TIMEOUT_SECONDS = 120
 CHECKSUMS_NAME = "SHA256SUMS.txt"
+MOUNT_DIR_NAME = "mount"
+PACKAGE_SUFFIXES = (".dmg", ".exe", ".partial")
 PENDING_NAME = "pending.json"
 SCRIPT_LOG_NAME = "update.log"
 
@@ -170,7 +172,7 @@ def macos_stage_app(
     parent = target_app.parent
     if not os.access(parent, os.W_OK):
         raise UpdateError(f"没有权限写入 {parent}，请手动下载安装。")
-    mount = work_dir / "mount"
+    mount = work_dir / MOUNT_DIR_NAME
     mount.mkdir(parents=True, exist_ok=True)
     attach = runner(
         ["hdiutil", "attach", str(dmg), "-nobrowse", "-readonly", "-noautoopen", "-mountpoint", str(mount)],
@@ -283,6 +285,29 @@ def write_pending(data_dir: Path, *, from_version: str | None, to_version: str) 
     }))
 
 
+def clean_after_success(work_dir: Path) -> list[Path]:
+    """Drop the downloaded package and the empty mount point once the update landed.
+
+    The log and scripts stay for reference; the previous app bundle lives next
+    to the installed app and is not touched here.
+    """
+    removed: list[Path] = []
+    if not work_dir.is_dir():
+        return removed
+    for path in work_dir.iterdir():
+        if path.is_file() and path.name.endswith(PACKAGE_SUFFIXES):
+            path.unlink(missing_ok=True)
+            removed.append(path)
+    mount = work_dir / MOUNT_DIR_NAME
+    if mount.is_dir():
+        try:
+            mount.rmdir()  # only succeeds when empty, i.e. nothing is still mounted there
+            removed.append(mount)
+        except OSError:
+            pass
+    return removed
+
+
 def settle_pending(data_dir: Path, running_version: str | None) -> dict | None:
     """After a restart: did the update land? Clears the note and returns the outcome."""
     path = updates_dir(data_dir) / PENDING_NAME
@@ -296,6 +321,11 @@ def settle_pending(data_dir: Path, running_version: str | None) -> dict | None:
     target = pending.get("to")
     if not target or not running_version:
         return None
+    if running_version == target:
+        try:
+            clean_after_success(updates_dir(data_dir))
+        except OSError:
+            pass  # leftovers are harmless; the next update clears the folder anyway
     log = updates_dir(data_dir) / SCRIPT_LOG_NAME
     reason = None
     if running_version != target and log.is_file():

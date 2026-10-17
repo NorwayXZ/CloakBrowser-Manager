@@ -109,6 +109,48 @@ def test_settle_reports_success_and_clears_the_note(tmp_path: Path):
     assert self_update.settle_pending(tmp_path, "0.5.0") is None
 
 
+def _leftovers(tmp_path: Path) -> Path:
+    work = self_update.updates_dir(tmp_path)
+    (work / "mount").mkdir(parents=True)
+    (work / "CloakBrowser-Manager-0.5.1-abc1234-arm64.dmg").write_bytes(b"dmg")
+    (work / "CloakBrowser-Manager-0.5.1-windows-x64-setup.exe.partial").write_bytes(b"part")
+    (work / "swap.sh").write_text("#!/bin/sh\n")
+    (work / self_update.SCRIPT_LOG_NAME).write_text("0.5.1 is running\n")
+    return work
+
+
+def test_successful_update_cleans_the_package_and_empty_mount(tmp_path: Path):
+    work = _leftovers(tmp_path)
+    self_update.write_pending(tmp_path, from_version="0.5.0", to_version="0.5.1")
+
+    assert self_update.settle_pending(tmp_path, "0.5.1")["ok"] is True
+
+    assert sorted(p.name for p in work.iterdir()) == ["swap.sh", self_update.SCRIPT_LOG_NAME]
+
+
+def test_cleanup_leaves_a_mount_point_that_is_still_in_use(tmp_path: Path):
+    work = _leftovers(tmp_path)
+    (work / "mount" / "CloakBrowser Manager.app").mkdir()
+
+    removed = self_update.clean_after_success(work)
+
+    assert (work / "mount" / "CloakBrowser Manager.app").exists()
+    assert {p.name for p in removed} == {
+        "CloakBrowser-Manager-0.5.1-abc1234-arm64.dmg",
+        "CloakBrowser-Manager-0.5.1-windows-x64-setup.exe.partial",
+    }
+
+
+def test_failed_update_keeps_the_package_for_a_retry(tmp_path: Path):
+    work = _leftovers(tmp_path)
+    self_update.write_pending(tmp_path, from_version="0.5.0", to_version="0.5.1")
+
+    assert self_update.settle_pending(tmp_path, "0.5.0")["ok"] is False
+
+    assert (work / "CloakBrowser-Manager-0.5.1-abc1234-arm64.dmg").exists()
+    assert (work / "mount").is_dir()
+
+
 def test_settle_reports_failure_with_the_scripts_last_line(tmp_path: Path):
     self_update.write_pending(tmp_path, from_version="0.4.3", to_version="0.5.0")
     (self_update.updates_dir(tmp_path) / self_update.SCRIPT_LOG_NAME).write_text(
