@@ -692,6 +692,28 @@ def test_manual_profile_accepts_and_returns_passive_fingerprint_report(app_clien
     main.browser_mgr.running.pop(pid, None)
 
 
+def test_profile_start_page_waits_for_the_launch_to_register(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch,
+):
+    create = app_client.post("/api/profiles", json={"name": "Racing start", "proxy": "socks5://192.0.2.10:1080"})
+    pid = create.json()["id"]
+    running = MagicMock(
+        proxy_geo={"ip": "2001:db8::213", "country": "Taiwan", "timezone": "Asia/Taipei", "source": "test"},
+        effective_timezone="Asia/Taipei",
+        effective_locale="zh-TW",
+        browser_engine="cloakbrowser",
+    )
+    waited = AsyncMock(return_value=running)
+    monkeypatch.setattr(main.browser_mgr, "wait_until_running", waited)
+
+    response = app_client.get(f"/profile/{pid}/start", headers={"X-Forwarded-For": "127.0.0.1"})
+
+    waited.assert_awaited_once_with(pid)
+    assert "2001:db8::213" in response.text
+    assert "运行中" in response.text
+    assert "未获取" not in response.text
+
+
 def test_profile_start_page_embeds_automatic_passive_check(app_client: TestClient):
     create = app_client.post("/api/profiles", json={"name": "Start report"})
     pid = create.json()["id"]

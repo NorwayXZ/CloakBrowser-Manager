@@ -891,7 +891,7 @@ async def receive_passive_fingerprint_report(
     profile = db.get_profile(profile_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
-    if profile_id not in browser_mgr.running:
+    if await browser_mgr.wait_until_running(profile_id) is None:
         raise HTTPException(status_code=409, detail="Profile is not running")
     try:
         return browser_mgr.record_fingerprint_report(profile, raw, collection="passive")
@@ -907,7 +907,7 @@ async def profile_start_page(profile_id: str, request: Request):
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
 
-    running = browser_mgr.running.get(profile_id)
+    running = await browser_mgr.wait_until_running(profile_id)
     geo = running.proxy_geo if running and running.proxy_geo else {}
     effective_timezone = (
         running.effective_timezone if running else None

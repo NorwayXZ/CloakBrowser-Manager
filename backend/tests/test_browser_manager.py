@@ -162,6 +162,37 @@ def test_chrome_proxy_dns_policy_keeps_manager_loopback_reachable():
     assert "cloakbrowser.dev" not in resolver
 
 
+def test_chrome_proxy_dns_policy_hides_the_unsupported_flag_bar():
+    args = _chrome_proxy_args("socks5://192.0.2.10:10911")
+
+    assert "--test-type" in args
+
+
+@pytest.mark.asyncio
+async def test_wait_until_running_waits_for_an_in_flight_launch():
+    manager = BrowserManager(NATIVE_RUNTIME)
+    manager._launching.add("p1")
+    running = MagicMock()
+
+    async def finish_launch():
+        await asyncio.sleep(0.2)
+        manager.running["p1"] = running
+        manager._launching.discard("p1")
+
+    task = asyncio.create_task(finish_launch())
+    assert await manager.wait_until_running("p1", timeout=5) is running
+    await task
+
+
+@pytest.mark.asyncio
+async def test_wait_until_running_gives_up_after_timeout():
+    manager = BrowserManager(NATIVE_RUNTIME)
+    manager._launching.add("p1")
+
+    assert await manager.wait_until_running("p1", timeout=0.2) is None
+    assert await manager.wait_until_running("never-launched") is None
+
+
 def test_chrome_proxy_args_are_empty_for_direct_connection():
     assert _chrome_proxy_args(None) == []
 

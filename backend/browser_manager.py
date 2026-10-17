@@ -566,6 +566,10 @@ def _chrome_proxy_args(
         f"--proxy-server={_format_proxy_endpoint(parsed)}",
         f"--proxy-bypass-list={';'.join(bypass_hosts)}",
         f"--host-resolver-rules={rules}",
+        # Chromium lists --host-resolver-rules as an "unsupported flag" and shows
+        # a warning bar that shrinks innerHeight by ~52px. --test-type hides that
+        # bar only; page-visible properties are identical with and without it.
+        "--test-type",
     ]
 
 
@@ -2208,6 +2212,16 @@ class BrowserManager:
                 "cookie_import": "profile_extension" if profile.get("cookies_json") and mode == "manual" else "browser_storage",
             },
         }
+
+    async def wait_until_running(self, profile_id: str, timeout: float = 10.0) -> RunningProfile | None:
+        """Running entry for a profile, waiting while its launch is still in flight.
+
+        The browser can request its start page before launch() registers it.
+        """
+        deadline = time.monotonic() + timeout
+        while profile_id in self._launching and time.monotonic() < deadline:
+            await asyncio.sleep(0.1)
+        return self.running.get(profile_id)
 
     async def launch(self, profile: dict[str, Any], launch_mode: str = "manual") -> RunningProfile:
         """Launch a browser instance using the configured host runtime."""
