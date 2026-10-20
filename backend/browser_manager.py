@@ -124,40 +124,72 @@ def _locale_fallbacks(locale: str) -> list[str]:
 
 
 LANGUAGES_MARKER = ".cloakbrowser-manager-languages"
+_SETTINGS_LANGUAGE_RE = re.compile(r"^[a-z]{2,3}(?:-[A-Za-z0-9]{2,4})?$")
+
+
+def _languages_written_before(user_data_dir: Path) -> set[str] | None:
+    """Languages the Manager itself wrote at the last launch, if recorded."""
+    try:
+        return set(json.loads((user_data_dir / LANGUAGES_MARKER).read_text(encoding="utf-8")))
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def _web_languages(prefs: dict[str, Any]) -> list[str]:
+    intl = prefs.get("intl")
+    current = intl.get("accept_languages") if isinstance(intl, dict) else None
+    if not isinstance(current, str):
+        return []
+    return [language.strip() for language in current.split(",") if language.strip()]
+
+
+def settings_preferred_language(user_data_dir: Path) -> str | None:
+    """A language the user moved to the top in the browser's settings page.
+
+    The browser itself only applies it to web pages; the Manager makes the
+    whole browser (interface, navigator, Intl) use it from the next launch.
+    """
+    written_before = _languages_written_before(user_data_dir)
+    current = _web_languages(_read_json_file(user_data_dir / "Default" / "Preferences"))
+    if written_before is None or not current or current[0] in written_before:
+        return None
+    return current[0] if _SETTINGS_LANGUAGE_RE.match(current[0]) else None
 
 
 def _profile_languages(
     user_data_dir: Path,
-    current: object,
+    current: list[str],
     locale: str,
+    preferred: str | None,
 ) -> str:
-    """The profile's languages first, then any the user added in the settings page.
+    """The profile's languages, plus any the user added in the settings page.
 
     The marker remembers which languages the Manager wrote last time, so a
     language the user added (say Chinese as a backup) survives restarts while
-    the previous exit IP's languages are replaced.
+    the previous exit IP's languages are replaced. A language the user put
+    first stays first.
     """
     primary = _locale_fallbacks(locale)
-    marker = user_data_dir / LANGUAGES_MARKER
-    try:
-        written_before = set(json.loads(marker.read_text(encoding="utf-8")))
-    except (OSError, ValueError, TypeError):
-        written_before = None
+    written_before = _languages_written_before(user_data_dir)
     added: list[str] = []
-    if written_before is not None and isinstance(current, str):
-        for language in current.split(","):
-            language = language.strip()
-            if language and language not in written_before and language not in primary and language not in added:
+    if written_before is not None:
+        for language in current:
+            if language not in written_before and language not in primary and language not in added:
                 added.append(language)
-    marker.write_text(json.dumps(primary), encoding="utf-8")
+    (user_data_dir / LANGUAGES_MARKER).write_text(json.dumps(primary), encoding="utf-8")
+    if preferred and preferred not in primary:
+        return ",".join([preferred, *primary, *(language for language in added if language != preferred)])
     return ",".join([*primary, *added])
 
 
-def _sync_profile_locale(user_data_dir: Path, locale: str | None) -> None:
+def _sync_profile_locale(user_data_dir: Path, locale: str | None, *, preferred: str | None = None) -> None:
     """Persist Chrome language preferences so renderer processes follow locale.
 
-    Languages go only into Preferences, never as --accept-lang: that switch
-    pins the list, so languages added in the settings page were dropped.
+    ``locale`` is the profile's own language (exit IP or configured);
+    ``preferred`` is a language the user put first in the settings page,
+    which then also drives the interface. Languages go only into
+    Preferences, never as --accept-lang: that switch pins the list, so
+    languages added in the settings page were dropped.
     """
     if not locale or not _locale_fallbacks(locale):
         return
@@ -167,8 +199,7 @@ def _sync_profile_locale(user_data_dir: Path, locale: str | None) -> None:
 
     prefs_path = default_dir / "Preferences"
     prefs = _read_json_file(prefs_path)
-    current = prefs.get("intl", {}).get("accept_languages") if isinstance(prefs.get("intl"), dict) else None
-    languages = _profile_languages(user_data_dir, current, locale)
+    languages = _profile_languages(user_data_dir, _web_languages(prefs), locale, preferred)
     intl = prefs.setdefault("intl", {})
     if isinstance(intl, dict):
         intl["accept_languages"] = languages
@@ -190,9 +221,9 @@ def _sync_profile_locale(user_data_dir: Path, locale: str | None) -> None:
     local_state = _read_json_file(local_state_path)
     state_intl = local_state.setdefault("intl", {})
     if isinstance(state_intl, dict):
-        state_intl["app_locale"] = locale
+        state_intl["app_locale"] = preferred or locale
     else:
-        local_state["intl"] = {"app_locale": locale}
+        local_state["intl"] = {"app_locale": preferred or locale}
     _write_json_file(local_state_path, local_state)
 
 
@@ -2501,7 +2532,14 @@ class BrowserManager:
             fixed_language = parse_fingerprint_options(profile).language
             if fixed_language:
                 resolved_locale = fixed_language
-            _sync_profile_locale(user_data_dir, resolved_locale)
+                _sync_profile_locale(user_data_dir, resolved_locale)
+            else:
+                # A language put first in the browser's settings page becomes
+                # the whole browser's language, interface included.
+                preferred_language = settings_preferred_language(user_data_dir)
+                _sync_profile_locale(user_data_dir, resolved_locale, preferred=preferred_language)
+                if preferred_language and resolved_locale:
+                    resolved_locale = preferred_language
             if browser_engine == "system_chrome" and proxy:
                 _sync_webrtc_policy(user_data_dir)
             geo_mode, geo_coords = (

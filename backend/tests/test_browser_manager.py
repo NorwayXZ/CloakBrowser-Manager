@@ -545,6 +545,39 @@ async def test_fixed_language_overrides_exit_ip_locale(monkeypatch, tmp_path: Pa
     assert prefs["intl"]["accept_languages"] == "zh-CN,zh"
 
 
+@pytest.mark.asyncio
+async def test_language_put_first_in_settings_drives_the_whole_browser(monkeypatch, tmp_path: Path):
+    from backend import browser_manager as module
+
+    async def japan_geo(_proxy):
+        return {"ip": "153.224.77.139", "timezone": "Asia/Tokyo", "suggested_locale": "ja-JP"}
+
+    monkeypatch.setattr(module, "fetch_proxy_geo", japan_geo)
+    manager = BrowserManager(NATIVE_RUNTIME)
+    manual_launch = MagicMock(return_value=MagicMock())
+    monkeypatch.setattr(module, "_launch_cloakbrowser_manual_process", manual_launch)
+    monkeypatch.setattr(manager, "_watch_process", AsyncMock())
+    profile = {**_launch_profile(tmp_path), "geoip": True}
+    user_data_dir = tmp_path / "profile-1"
+
+    await manager.launch(profile)
+    assert manual_launch.call_args.kwargs["locale"] == "ja-JP"
+    manager.running.clear()
+
+    # The user puts Chinese first under Settings > Languages.
+    _set_web_languages(user_data_dir, "zh-CN,ja")
+    running = await manager.launch(profile)
+
+    options = manual_launch.call_args.kwargs
+    assert options["locale"] == "zh-CN"
+    assert options["timezone"] == "Asia/Tokyo"
+    assert "--lang=zh-CN" in options["args"]
+    assert "--fingerprint-locale=zh-CN" in options["args"]
+    assert running.effective_locale == "zh-CN"
+    prefs = json.loads((user_data_dir / "Default" / "Preferences").read_text(encoding="utf-8"))
+    assert prefs["intl"]["accept_languages"] == "zh-CN,ja-JP,ja"
+
+
 @pytest.mark.parametrize(("raw", "expected"), [("zh_cn", "zh-CN"), ("en-us", "en-US"), ("ja", "ja"), ("", None)])
 def test_fixed_language_is_normalized(raw, expected):
     from backend.models import FingerprintOptions
@@ -1285,6 +1318,45 @@ def test_sync_profile_locale_resets_languages_without_a_marker(tmp_path: Path):
 
     prefs = json.loads((tmp_path / "Default" / "Preferences").read_text())
     assert prefs["intl"]["accept_languages"] == "ja-JP,ja"
+
+
+def test_settings_preferred_language_is_a_language_the_user_put_first(tmp_path: Path):
+    from backend.browser_manager import settings_preferred_language
+
+    _sync_profile_locale(tmp_path, "ja-JP")
+    assert settings_preferred_language(tmp_path) is None
+
+    _set_web_languages(tmp_path, "ja,zh-CN")
+    assert settings_preferred_language(tmp_path) is None
+
+    _set_web_languages(tmp_path, "zh-CN,ja")
+    assert settings_preferred_language(tmp_path) == "zh-CN"
+
+
+def test_settings_preferred_language_needs_the_marker(tmp_path: Path):
+    from backend.browser_manager import settings_preferred_language
+
+    _sync_profile_locale(tmp_path, "ja-JP")
+    (tmp_path / ".cloakbrowser-manager-languages").unlink()
+    _set_web_languages(tmp_path, "zh-CN,ja")
+
+    assert settings_preferred_language(tmp_path) is None
+
+
+def test_sync_profile_locale_keeps_the_preferred_language_first(tmp_path: Path):
+    from backend.browser_manager import settings_preferred_language
+
+    _sync_profile_locale(tmp_path, "ja-JP")
+    _set_web_languages(tmp_path, "zh-CN,ja")
+
+    _sync_profile_locale(tmp_path, "ja-JP", preferred="zh-CN")
+
+    prefs = json.loads((tmp_path / "Default" / "Preferences").read_text())
+    assert prefs["intl"]["accept_languages"] == "zh-CN,ja-JP,ja"
+    local_state = json.loads((tmp_path / "Local State").read_text())
+    assert local_state["intl"]["app_locale"] == "zh-CN"
+    # Still the user's choice at the following launch.
+    assert settings_preferred_language(tmp_path) == "zh-CN"
 
 
 def test_sync_profile_locale_keeps_google_translate_once_turned_on(tmp_path: Path):
