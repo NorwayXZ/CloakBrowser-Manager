@@ -225,6 +225,58 @@ export interface AppUpdateState {
   last_result?: AppUpdateResult | null;
 }
 
+export type SiteCheckStatus = "pass" | "warn" | "fail" | "unknown" | "error";
+
+export interface SiteCheckSite {
+  id: string;
+  name: string;
+  url: string;
+  criteria: string;
+}
+
+export interface SiteCheckResult {
+  site: string;
+  name: string;
+  url: string;
+  criteria: string;
+  status: SiteCheckStatus;
+  summary: string;
+  details: string[];
+  screenshot: string | null;
+  seconds: number;
+}
+
+export interface SiteCheckState {
+  phase: "idle" | "launching" | "checking" | "closing" | "done" | "failed";
+  profile_id?: string;
+  profile_name?: string;
+  site?: string | null;
+  index?: number;
+  total?: number;
+  results?: SiteCheckResult[];
+  report_id?: string;
+  overall?: "pass" | "warn" | "fail";
+  error?: string;
+}
+
+export interface SiteCheckReportSummary {
+  id: string;
+  created_at: string | null;
+  overall: "pass" | "warn" | "fail" | null;
+  profile_name: string | null;
+  host_os: string | null;
+  passed: number;
+  total: number;
+}
+
+export interface SiteCheckReport {
+  id: string;
+  created_at: string;
+  overall: "pass" | "warn" | "fail";
+  environment: Record<string, unknown>;
+  results: SiteCheckResult[];
+}
+
 export interface PreflightIssue {
   severity: "error" | "warning" | "info";
   code: string;
@@ -540,6 +592,25 @@ export const api = {
   startAppUpdate: () => request<AppUpdateState>("/api/app/update", { method: "POST" }),
 
   dismissAppUpdateResult: () => request<{ ok: boolean }>("/api/app/update/result", { method: "DELETE" }),
+
+  listSiteCheckSites: () => request<SiteCheckSite[]>("/api/site-checks/sites"),
+
+  startSiteCheck: (profileId: string) =>
+    request<SiteCheckState>(`/api/profiles/${profileId}/site-check`, { method: "POST" }),
+
+  getSiteCheckState: () => request<SiteCheckState>("/api/site-checks/current"),
+
+  listSiteCheckReports: () => request<SiteCheckReportSummary[]>("/api/site-checks"),
+
+  getSiteCheckReport: (id: string) => request<SiteCheckReport>(`/api/site-checks/${encodeURIComponent(id)}`),
+
+  deleteSiteCheckReport: (id: string) =>
+    request<{ ok: boolean }>(`/api/site-checks/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  siteCheckFileUrl: (id: string, name: string) =>
+    `/api/site-checks/${encodeURIComponent(id)}/files/${encodeURIComponent(name)}`,
+
+  siteCheckDownloadUrl: (id: string) => `/api/site-checks/${encodeURIComponent(id)}/download`,
 
   getKernel: () => request<KernelOverview>("/api/kernel"),
 

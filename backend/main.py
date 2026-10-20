@@ -41,7 +41,8 @@ from . import kernel
 from . import secrets_crypto
 from .browser_manager import BrowserLaunchError, BrowserManager, _normalize_proxy, _validate_proxy
 from .cloak_runtime import get_effective_chromium_version
-from . import desktop_app, self_update
+from . import desktop_app, self_update, site_checks
+from .site_check_job import SiteCheckJob, describe_environment
 from .desktop_app import app_version as desktop_app_version
 from .update_job import UpdateEnv, UpdateJob, platform_name
 from .fingerprint_report import DEFAULT_NETWORK_PROBE_URL, DIAGNOSTIC_SCRIPT
@@ -800,6 +801,87 @@ async def start_app_update():
 @app.delete("/api/app/update/result")
 async def dismiss_app_update_result():
     db.delete_setting(SETTING_LAST_UPDATE)
+    return {"ok": True}
+
+
+# ── Fingerprint check against public detection sites ─────────────────────────
+
+site_check_job = SiteCheckJob()
+
+
+def _site_check_environment(profile: dict, running) -> dict:
+    return describe_environment(
+        profile,
+        running,
+        app_version=desktop_app_version(),
+        kernel_version=get_effective_chromium_version(),
+        host_os=browser_mgr.runtime.host_os,
+    )
+
+
+@app.get("/api/site-checks/sites")
+async def list_site_check_sites():
+    return [{"id": s.id, "name": s.name, "url": s.url, "criteria": s.criteria} for s in site_checks.SITES]
+
+
+@app.post("/api/profiles/{profile_id}/site-check")
+async def start_site_check(profile_id: str):
+    profile = db.get_profile(profile_id)
+    if not profile or profile.get("deleted_at"):
+        raise HTTPException(status_code=404, detail="Profile not found")
+    if profile_id in browser_mgr.running or profile_id in browser_mgr._launching:
+        raise HTTPException(status_code=409, detail="请先关闭这个浏览器；检测会用调试模式重新打开它，测完自动关闭。")
+    if site_check_job.busy:
+        raise HTTPException(status_code=409, detail="已经有一个检测在进行，请等它结束。")
+    site_check_job.start(profile, browser_mgr=browser_mgr, data_dir=db.DATA_DIR, environment=_site_check_environment)
+    return site_check_job.snapshot()
+
+
+@app.get("/api/site-checks/current")
+async def current_site_check():
+    return site_check_job.snapshot()
+
+
+@app.get("/api/site-checks")
+async def list_site_check_reports():
+    return await asyncio.to_thread(site_checks.list_reports, db.DATA_DIR)
+
+
+@app.get("/api/site-checks/{report_id}")
+async def get_site_check_report(report_id: str):
+    try:
+        return await asyncio.to_thread(site_checks.load_report, db.DATA_DIR, report_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="找不到这份报告") from exc
+
+
+@app.get("/api/site-checks/{report_id}/files/{name}")
+async def get_site_check_file(report_id: str, name: str):
+    try:
+        return FileResponse(site_checks.report_file(db.DATA_DIR, report_id, name), media_type="image/png")
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="找不到这张截图") from exc
+
+
+@app.get("/api/site-checks/{report_id}/download")
+async def download_site_check_report(report_id: str):
+    import tempfile
+
+    try:
+        site_checks.load_report(db.DATA_DIR, report_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="找不到这份报告") from exc
+    target = Path(tempfile.mkdtemp(prefix="cbm-report-")) / f"fingerprint-check-{report_id}.zip"
+    await asyncio.to_thread(site_checks.zip_report, db.DATA_DIR, report_id, target)
+    return FileResponse(target, media_type="application/zip", filename=target.name)
+
+
+@app.delete("/api/site-checks/{report_id}")
+async def delete_site_check_report(report_id: str):
+    try:
+        await asyncio.to_thread(site_checks.delete_report, db.DATA_DIR, report_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="找不到这份报告") from exc
     return {"ok": True}
 
 
