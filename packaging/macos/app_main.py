@@ -1,8 +1,9 @@
 """Entry point of the packaged macOS app (CloakBrowser Manager.app).
 
-Double-clicking the app starts the Manager server in-process and opens the
-panel in its own window. Clicking the Dock icon reopens the panel; quitting
-the app (Cmd+Q or Dock > Quit) stops every running browser and the server.
+Double-clicking the app starts the Manager server in-process and shows the
+panel in the app's own window (panel_window.py). Clicking the Dock icon brings
+that one window back; closing it only hides it; quitting the app (Cmd+Q or
+Dock > Quit) stops every running browser and the server.
 Profile data stays in ~/Library/Application Support/CloakBrowser Manager,
 shared with source-checkout installs.
 """
@@ -97,6 +98,20 @@ def _run_cocoa_app(url: str, server, server_thread: threading.Thread, *, backgro
 
     app = NSApplication.sharedApplication()
     state = {"shutdown_done": False, "shutting_down": False}
+    try:
+        from panel_window import PanelWindowController
+
+        panel = PanelWindowController.alloc().initWithURL_(url)
+    except Exception:  # WebKit bridge missing: fall back to a Chrome window
+        logger.exception("Panel window unavailable; using the browser instead")
+        panel = None
+
+    def show_panel() -> None:
+        """Main thread only."""
+        if panel is not None:
+            panel.show()
+        else:
+            threading.Thread(target=open_panel, args=(url,), daemon=True).start()
     # One-click update quits through the normal path (browsers, then server).
     register_exit_hook(lambda: AppHelper.callAfter(app.terminate_, None))
     version = app_version()
@@ -123,7 +138,7 @@ def _run_cocoa_app(url: str, server, server_thread: threading.Thread, *, backgro
             if manager_is_running(url):
                 logger.info("Manager ready at %s", url)
                 if not background:
-                    open_panel(url)
+                    AppHelper.callAfter(show_panel)
                 return
             time.sleep(0.2)
         AppHelper.callAfter(fail_and_quit, f"管理服务在 {READY_TIMEOUT_SECONDS} 秒内没有就绪。")
@@ -155,7 +170,7 @@ def _run_cocoa_app(url: str, server, server_thread: threading.Thread, *, backgro
     def start_update() -> None:
         ok, message = request_update_from_panel(url)
         if ok:
-            open_panel(url)
+            AppHelper.callAfter(show_panel)
         else:
             AppHelper.callAfter(show_alert, "暂时不能更新", message)
 
@@ -185,7 +200,7 @@ def _run_cocoa_app(url: str, server, server_thread: threading.Thread, *, backgro
                 threading.Thread(target=check_updates, args=(False,), daemon=True).start()
 
         def applicationShouldHandleReopen_hasVisibleWindows_(self, _app, _flag):
-            threading.Thread(target=open_panel, args=(url,), daemon=True).start()
+            show_panel()
             return True
 
         def applicationDockMenu_(self, _sender):
@@ -207,7 +222,12 @@ def _run_cocoa_app(url: str, server, server_thread: threading.Thread, *, backgro
 
         @objc.IBAction
         def openPanel_(self, _sender):
-            threading.Thread(target=open_panel, args=(url,), daemon=True).start()
+            show_panel()
+
+        @objc.IBAction
+        def reloadPanel_(self, _sender):
+            if panel is not None:
+                panel.reload()
 
         @objc.IBAction
         def openDataDir_(self, _sender):
@@ -260,6 +280,35 @@ def _run_cocoa_app(url: str, server, server_thread: threading.Thread, *, backgro
     add_item(app_menu, f"隐藏 {APP_NAME}", "hide:", "h", target=None)
     add_item(app_menu, f"退出 {APP_NAME}", "terminate:", "q", target=None)
     app_item.setSubmenu_(app_menu)
+
+    def add_submenu(title: str) -> NSMenu:
+        holder = NSMenuItem.alloc().init()
+        main_menu.addItem_(holder)
+        submenu = NSMenu.alloc().initWithTitle_(title)
+        holder.setSubmenu_(submenu)
+        return submenu
+
+    # Text fields in the panel only get copy/paste/undo through these items.
+    edit_menu = add_submenu("编辑")
+    add_item(edit_menu, "撤销", "undo:", "z", target=None)
+    redo = add_item(edit_menu, "重做", "redo:", "Z", target=None)
+    redo.setKeyEquivalentModifierMask_(1 << 20 | 1 << 17)  # Cmd+Shift+Z
+    edit_menu.addItem_(NSMenuItem.separatorItem())
+    add_item(edit_menu, "剪切", "cut:", "x", target=None)
+    add_item(edit_menu, "拷贝", "copy:", "c", target=None)
+    add_item(edit_menu, "粘贴", "paste:", "v", target=None)
+    add_item(edit_menu, "全选", "selectAll:", "a", target=None)
+
+    view_menu = add_submenu("显示")
+    add_item(view_menu, "重新载入面板", "reloadPanel:", "r")
+
+    window_menu = add_submenu("窗口")
+    add_item(window_menu, "最小化", "performMiniaturize:", "m", target=None)
+    add_item(window_menu, "关闭窗口", "performClose:", "w", target=None)
+    window_menu.addItem_(NSMenuItem.separatorItem())
+    add_item(window_menu, "管理面板", "openPanel:", "1")
+    app.setWindowsMenu_(window_menu)
+
     app.setMainMenu_(main_menu)
 
     AppHelper.runEventLoop()

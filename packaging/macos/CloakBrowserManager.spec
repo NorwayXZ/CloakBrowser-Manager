@@ -16,7 +16,7 @@ hiddenimports = (
     collect_submodules("backend", filter=lambda name: ".tests" not in name)
     + collect_submodules("uvicorn")
     + collect_submodules("cloakbrowser")
-    + ["AppKit", "Foundation", "PyObjCTools.AppHelper", "objc"]
+    + ["AppKit", "Foundation", "WebKit", "PyObjCTools.AppHelper", "objc", "panel_window"]
 )
 
 datas = [
