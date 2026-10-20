@@ -36,6 +36,14 @@ def test_extension_is_invisible_to_pages_and_offline(tmp_path: Path):
     assert '"managerOrigin":"http://127.0.0.1:18080"' in worker
 
 
+def test_extension_makes_google_the_default_search(tmp_path: Path):
+    ext = sync_session_keeper_extension(tmp_path, port=18080)
+
+    provider = json.loads((ext / "manifest.json").read_text(encoding="utf-8"))["chrome_settings_overrides"]["search_provider"]
+    assert provider["is_default"] is True
+    assert provider["search_url"].startswith("https://www.google.com/search?q={searchTerms}")
+
+
 def test_window_name_is_one_tidy_line():
     assert window_name_arg("  awsdee@eeaa.xyz \n 日本 ") == "--window-name=awsdee@eeaa.xyz 日本"
     assert window_name_arg("") is None

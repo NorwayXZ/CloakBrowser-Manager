@@ -86,6 +86,20 @@ def test_profile_start_page(app_client: TestClient):
     assert "Whoer" in resp.text
 
 
+def test_profile_start_page_links_every_detection_site_and_cloud(app_client: TestClient):
+    from backend import site_checks
+
+    profile_id = app_client.post("/api/profiles", json={"name": "Links"}).json()["id"]
+
+    page = app_client.get(f"/profile/{profile_id}/start", headers={"X-Forwarded-For": "127.0.0.1"}).text
+
+    for site in site_checks.SITES:
+        assert f'href="{site.url}"' in page
+    for url in ("https://www.alibabacloud.com/", "https://aws.amazon.com/", "https://cloud.google.com/"):
+        assert f'href="{url}"' in page
+    assert 'rel="noreferrer"' in page
+
+
 def test_update_profile(app_client: TestClient):
     create = app_client.post("/api/profiles", json={"name": "Original"})
     pid = create.json()["id"]

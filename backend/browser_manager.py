@@ -2017,7 +2017,12 @@ def _validate_proxy(url: str) -> None:
 
 
 def _init_profile_defaults(user_data_dir: Path) -> None:
-    """Set up bookmarks and DuckDuckGo search on first launch."""
+    """Set up bookmarks on first launch.
+
+    The search engine is not written here: Chromium resets a default search
+    engine changed outside the browser and shows a dialog. The Manager's
+    extension sets Google instead (see session_keeper).
+    """
     default_dir = user_data_dir / "Default"
     default_dir.mkdir(parents=True, exist_ok=True)
 
@@ -2083,26 +2088,6 @@ def _init_profile_defaults(user_data_dir: Path) -> None:
         }
         bookmarks_path.write_text(json.dumps(bookmarks, indent=2))
         logger.info("Created default bookmarks for %s", user_data_dir.name)
-
-    # --- DuckDuckGo as default search engine ---
-    prefs_path = default_dir / "Preferences"
-    if not prefs_path.exists():
-        prefs = {
-            "default_search_provider_data": {
-                "template_url_data": {
-                    "keyword": "duckduckgo.com",
-                    "short_name": "DuckDuckGo",
-                    "url": "https://duckduckgo.com/?q={searchTerms}",
-                    "suggestions_url": "https://duckduckgo.com/ac/?q={searchTerms}&type=list",
-                    "favicon_url": "https://duckduckgo.com/favicon.ico",
-                }
-            },
-            "default_search_provider": {
-                "enabled": True,
-            },
-        }
-        prefs_path.write_text(json.dumps(prefs, indent=2))
-        logger.info("Set DuckDuckGo as default search for %s", user_data_dir.name)
 
 
 CDP_START_ATTEMPTS = 3

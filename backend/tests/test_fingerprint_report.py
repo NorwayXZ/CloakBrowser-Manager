@@ -219,3 +219,42 @@ def test_css_media_screen_match_passes():
     result = _analyze(_raw_screen(mediaMatchesWidth=True, mediaMatchesHeight=True), "macos")
 
     assert not [issue for issue in result["issues"] if issue["signal"] == "screen.media"]
+
+
+def _analyze_network(network: dict, *, proxy_configured: bool = True) -> dict:
+    return analyze_fingerprint(
+        {"main": {"navigator": {}, "network": network}},
+        expected_locale=None,
+        expected_timezone=None,
+        expected_platform=None,
+        expected_screen_width=None,
+        expected_screen_height=None,
+        expected_hardware_concurrency=None,
+        proxy_configured=proxy_configured,
+    )
+
+
+def test_unconfigured_external_probe_costs_no_points():
+    result = _analyze_network({"externalProbe": None})
+
+    issue = next(issue for issue in result["issues"] if issue["signal"] == "network.external_probe")
+    assert issue["severity"] == "info"
+    assert result["warning_count"] == sum(1 for i in result["issues"] if i["severity"] == "warning")
+    assert issue not in [i for i in result["issues"] if i["severity"] == "warning"]
+
+
+MDNS_HOST = "candidate:2711668902 1 udp 2113937151 3d6398f7-c97b-4b1a-b407-53bf63147eb2.local 56412 typ host generation 0"
+IP_HOST = "candidate:1 1 udp 2113937151 192.168.1.20 56412 typ host generation 0"
+SRFLX = "candidate:2 1 udp 1677729535 153.224.77.139 56412 typ srflx raddr 0.0.0.0 rport 0"
+
+
+def test_mdns_host_candidates_are_not_a_leak():
+    result = _analyze_network({"externalProbe": None, "webrtcCandidates": [MDNS_HOST, MDNS_HOST, SRFLX]})
+
+    assert "webrtc.host_candidates" not in {issue["signal"] for issue in result["issues"]}
+
+
+def test_host_candidate_with_a_real_ip_is_reported():
+    result = _analyze_network({"externalProbe": None, "webrtcCandidates": [IP_HOST]})
+
+    assert "webrtc.host_candidates" in {issue["signal"] for issue in result["issues"]}

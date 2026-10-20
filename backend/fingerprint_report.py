@@ -422,6 +422,19 @@ def _add_issue(
     })
 
 
+def _host_candidate_exposes_ip(candidate: object) -> bool:
+    """A WebRTC host candidate that carries a real address.
+
+    Chrome hides local addresses behind random ``<uuid>.local`` mDNS names,
+    exactly like a regular Chrome; only a literal IP would leak anything.
+    """
+    parts = str(candidate).split()
+    if "typ" not in parts or parts[parts.index("typ") + 1:][:1] != ["host"]:
+        return False
+    address = parts[4] if len(parts) > 4 else ""
+    return not address.lower().endswith(".local")
+
+
 def analyze_fingerprint(
     raw: dict[str, Any],
     *,
@@ -909,14 +922,16 @@ def analyze_fingerprint(
     network = main.get("network") if isinstance(main.get("network"), dict) else {}
     external_probe = network.get("externalProbe") if isinstance(network.get("externalProbe"), dict) else None
     if external_probe is None:
+        # No probe URL is configured: an optional check that was not run,
+        # not something wrong with the browser, so it does not cost points.
         _add_issue(
             issues,
-            severity="warning",
+            severity="info",
             signal="network.external_probe",
             scope="main",
             expected="configured external probe",
             actual=None,
-            message="没有收到外部网络探针结果；TLS、出口 IP 和浏览器请求头无法在本地完全验证。",
+            message="未配置外部网络探针（可选），TLS 和请求头没有做外部核对；不影响评分。",
         )
     elif external_probe.get("error"):
         _add_issue(
@@ -965,7 +980,7 @@ def analyze_fingerprint(
                 message="外部探针收到的 Accept-Language 请求头与画像语言不同。",
             )
     candidates = network.get("webrtcCandidates")
-    if proxy_configured and isinstance(candidates, list) and any("typ host" in str(candidate).lower() for candidate in candidates):
+    if proxy_configured and isinstance(candidates, list) and any(_host_candidate_exposes_ip(c) for c in candidates):
         _add_issue(
             issues,
             severity="warning",

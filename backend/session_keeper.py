@@ -109,17 +109,33 @@ chrome.runtime.onInstalled.addListener(() => { void restoreIfNeeded(); });
 """.strip()
 
 
+GOOGLE_SEARCH_PROVIDER = {
+    "name": "Google",
+    "keyword": "google.com",
+    "is_default": True,
+    "encoding": "UTF-8",
+    "search_url": "https://www.google.com/search?q={searchTerms}",
+    "suggest_url": "https://www.google.com/complete/search?client=chrome&q={searchTerms}",
+    "favicon_url": "https://www.google.com/favicon.ico",
+}
+
+
 def sync_session_keeper_extension(user_data_dir: Path, *, port: int) -> Path:
     """Write the tab-keeping extension into the profile folder."""
     extension_dir = user_data_dir / SESSION_KEEPER_DIRNAME
     extension_dir.mkdir(parents=True, exist_ok=True)
     manifest = {
         "manifest_version": 3,
-        "name": "CloakBrowser 标签保持",
-        "version": "1.0.0",
-        "description": "关闭最后一个窗口后，下次打开时恢复之前的标签。",
+        "name": "CloakBrowser Manager",
+        "version": "1.1.0",
+        "description": "关闭最后一个窗口后，下次打开时恢复之前的标签；默认用 Google 搜索。",
         "permissions": ["tabs", "storage"],
         "background": {"service_worker": "service_worker.js"},
+        # This kernel ships without Google and defaults to "No Search".
+        # Writing the default into Preferences is undone by Chromium's
+        # tamper protection (with a "settings were reset" dialog); an
+        # extension override is the supported way.
+        "chrome_settings_overrides": {"search_provider": GOOGLE_SEARCH_PROVIDER},
     }
     config = {"managerOrigin": f"http://127.0.0.1:{port}"}
     worker = WORKER.replace("__CONFIG__", json.dumps(config, separators=(",", ":")))

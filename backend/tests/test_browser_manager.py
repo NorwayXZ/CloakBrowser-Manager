@@ -1108,13 +1108,11 @@ def test_init_creates_bookmarks(tmp_path: Path):
     assert folder_names == {"Detection Tests", "Fingerprint", "Headers & TLS", "reCAPTCHA"}
 
 
-def test_init_creates_preferences(tmp_path: Path):
+def test_init_leaves_the_search_engine_to_the_browser(tmp_path: Path):
     _init_profile_defaults(tmp_path)
     prefs_path = tmp_path / "Default" / "Preferences"
-    assert prefs_path.exists()
-    data = json.loads(prefs_path.read_text())
-    assert "default_search_provider_data" in data
-    assert "DuckDuckGo" in data["default_search_provider_data"]["template_url_data"]["short_name"]
+    data = json.loads(prefs_path.read_text()) if prefs_path.exists() else {}
+    assert "default_search_provider_data" not in data
 
 
 def test_locale_fallbacks_add_base_language():
@@ -1158,7 +1156,7 @@ def test_sync_native_window_placement_preserves_profile_data(tmp_path: Path):
     user_data_dir = tmp_path / "profile"
     prefs_path = user_data_dir / "Default" / "Preferences"
     _init_profile_defaults(user_data_dir)
-    prefs = json.loads(prefs_path.read_text())
+    prefs = {}
     prefs["browser"] = {
         "window_placement": {
             "left": 297,
@@ -1497,7 +1495,7 @@ def test_sync_session_restore_updates_chrome_preferences(tmp_path: Path):
 def test_sync_session_restore_preserves_existing_preferences(tmp_path: Path):
     _init_profile_defaults(tmp_path)
     prefs_path = tmp_path / "Default" / "Preferences"
-    prefs = json.loads(prefs_path.read_text())
+    prefs = {"profile": {"keep": "history"}}
     prefs["session"] = {
         "restore_on_startup": 5,
         "startup_urls": ["https://example.com"],

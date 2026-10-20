@@ -1203,6 +1203,39 @@ async def receive_passive_fingerprint_report(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+# Links at the bottom of a profile's start page: every detection site the
+# fingerprint check uses, plus the cloud consoles the user works in.
+START_PAGE_LINK_GROUPS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
+    (
+        "指纹检测网站",
+        tuple((site.name, site.url) for site in site_checks.SITES)
+        + (("Whoer", "https://whoer.net/"), ("BrowserLeaks", "https://browserleaks.com/")),
+    ),
+    (
+        "云平台",
+        (
+            ("阿里云国际", "https://www.alibabacloud.com/"),
+            ("亚马逊云 AWS", "https://aws.amazon.com/"),
+            ("谷歌云 Google Cloud", "https://cloud.google.com/"),
+        ),
+    ),
+)
+
+
+def _start_page_links_html() -> str:
+    sections = []
+    for title, links in START_PAGE_LINK_GROUPS:
+        anchors = "\n".join(
+            f'        <a href="{html.escape(url)}" target="_blank" rel="noreferrer">{html.escape(name)}</a>'
+            for name, url in links
+        )
+        sections.append(
+            f'    <section class="links">\n      <h2>{html.escape(title)}</h2>\n'
+            f'      <div class="actions">\n{anchors}\n      </div>\n    </section>'
+        )
+    return "\n".join(sections)
+
+
 @app.get("/profile/{profile_id}/start", response_class=HTMLResponse, include_in_schema=False)
 async def profile_start_page(profile_id: str, request: Request):
     """Show proxy and browser time details when a native profile opens."""
@@ -1245,6 +1278,7 @@ async def profile_start_page(profile_id: str, request: Request):
         os.environ.get("CLOAKBROWSER_NETWORK_PROBE_URL")
         or DEFAULT_NETWORK_PROBE_URL
     )
+    links_html = _start_page_links_html()
 
     return HTMLResponse(
         f"""<!doctype html>
@@ -1285,6 +1319,9 @@ async def profile_start_page(profile_id: str, request: Request):
     dd {{ margin: 0; color: #f2f6f7; overflow-wrap: anywhere; }}
     .muted {{ color: #8c9aa0; font-size: 12px; margin-top: 12px; }}
     .actions {{ display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }}
+    .links {{ margin-top: 24px; }}
+    .links h2 {{ margin: 0; color: #9aa8ad; font-size: 13px; font-weight: 600; }}
+    .links .actions {{ margin-top: 10px; }}
     a {{ border: 1px solid #3a494f; border-radius: 7px; color: #dce5e8; padding: 10px 14px; text-decoration: none; font-size: 13px; }}
     a:hover {{ border-color: #76e4a3; color: #76e4a3; }}
     @media (max-width: 700px) {{
@@ -1337,9 +1374,9 @@ async def profile_start_page(profile_id: str, request: Request):
       </section>
     </div>
 
+{links_html}
+
     <div class="actions">
-      <a href="https://whoer.net/" target="_blank" rel="noreferrer">打开 Whoer 检查</a>
-      <a href="https://pixelscan.net/fingerprint-check" target="_blank" rel="noreferrer">打开 Pixelscan 检查</a>
       <a href="/">返回 Manager</a>
     </div>
   </main>
