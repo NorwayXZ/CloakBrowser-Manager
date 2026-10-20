@@ -138,7 +138,7 @@ http://127.0.0.1:8080
 - 点击打开前会检查主机系统与画像平台、UA、GPU 和逻辑分辨率。平台冲突会阻止启动，能力限制会显示中文警告。
 - 默认起始页会自动采集主页面、iframe、Worker 的语言、时区、UA、平台、CPU 和设备内存，并检查 WebGL、Canvas/Audio 稳定性、字体、Cookie、LocalStorage、SessionStorage、IndexedDB、Cache 和 WebRTC 本地候选。面板显示“外部 CDP：未开启”才代表本次是日常无外部 CDP 启动。
 - macOS 的 CloakBrowser 画像会同时设置 Chromium 语言参数和 Cocoa 应用语言，因此 `navigator` 与 `Intl` 在主页面、iframe、Worker 中使用同一代理地区语言；不是只靠页面 JavaScript 覆盖。
-- 编辑页的「浏览器语言」可以把界面固定成中文等语言。界面、`navigator` 和 `Intl` 会一起切换，时区仍按出口 IP。macOS 上界面语言和 `Intl` 由同一个系统设置决定，只换界面、网页语言保持日语，会被检测网站判为语言不一致。Chromium 设置页里手动添加的语言每次启动都会被重置。
+- 编辑页的「浏览器语言」可以把界面固定成中文等语言。界面、`navigator` 和 `Intl` 会一起切换，时区仍按出口 IP。macOS 上界面语言和 `Intl` 由同一个系统设置决定，只换界面、网页语言保持日语，会被检测网站判为语言不一致。也可以在浏览器设置页「语言」里把中文加为备用语言：Manager 每次启动把出口 IP 的语言放在最前，你加的语言排在后面并保留下来；Google 翻译开了也不会再被关掉。macOS 上的 Chromium 不能在设置页切换菜单语言，要看懂菜单仍需用「浏览器语言」。
 - 分辨率默认「跟随电脑屏幕」：每次启动时读取主显示器的逻辑分辨率。内核只伪装 `screen.width/height`，检测网站能通过 CSS 媒体查询（`device-width/height`）读到真实屏幕，两者不一致会被 IPHey 等网站判为指纹不一致。Windows 目前还读不到真实屏幕，会使用保存的分辨率。
 - 网络自检会报告代理 DNS 和 WebRTC 策略，并通过外部探针显示真实出口 IP、HTTP 协议、TLS 版本和加密套件。HTTP 探针无法证明操作系统使用了哪台 DNS 解析器，因此 DNS 会准确显示为“策略已启用、未经外部 DNS 解析器验证”。
 - 面板右上角的 `升级` 会读取当前平台实际生效的 CloakBrowser 内核版本；下载后还会核对缓存目录版本和文件是否完整，并显示是否验证通过。升级后需要关闭运行中的浏览器并重启 Manager。

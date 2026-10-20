@@ -11,7 +11,6 @@ from unittest.mock import AsyncMock, MagicMock, call
 import pytest
 
 from backend.browser_manager import (
-    _accept_language_value,
     _build_locale_timezone_env,
     _browser_exit_reason,
     _chrome_proxy_args,
@@ -23,6 +22,7 @@ from backend.browser_manager import (
     _launch_cloakbrowser_manual_process,
     _launch_system_chrome_manual_process,
     _launch_system_chrome_persistent_context_async,
+    _locale_fallbacks,
     _normalize_proxy,
     _parse_profile_cookies,
     _playwright_proxy,
@@ -539,7 +539,7 @@ async def test_fixed_language_overrides_exit_ip_locale(monkeypatch, tmp_path: Pa
     assert options["timezone"] == "Asia/Tokyo"
     assert "--lang=zh-CN" in options["args"]
     assert "--fingerprint-locale=zh-CN" in options["args"]
-    assert "--accept-lang=zh-CN,zh" in options["args"]
+    assert not any(arg.startswith("--accept-lang") for arg in options["args"])
     assert running.effective_locale == "zh-CN"
     prefs = json.loads((tmp_path / "profile-1" / "Default" / "Preferences").read_text(encoding="utf-8"))
     assert prefs["intl"]["accept_languages"] == "zh-CN,zh"
@@ -1084,9 +1084,9 @@ def test_init_creates_preferences(tmp_path: Path):
     assert "DuckDuckGo" in data["default_search_provider_data"]["template_url_data"]["short_name"]
 
 
-def test_accept_language_value_adds_base_language():
-    assert _accept_language_value("en-US") == "en-US,en"
-    assert _accept_language_value("zh-HK") == "zh-HK,zh"
+def test_locale_fallbacks_add_base_language():
+    assert _locale_fallbacks("en-US") == ["en-US", "en"]
+    assert _locale_fallbacks("zh-HK") == ["zh-HK", "zh"]
 
 
 def test_macos_sigtrap_quarantines_only_sync_metadata(tmp_path: Path):
@@ -1245,6 +1245,58 @@ def test_sync_profile_locale_updates_chrome_preferences(tmp_path: Path):
     assert local_state["intl"]["app_locale"] == "en-US"
 
 
+def _set_web_languages(user_data_dir: Path, languages: str, **extra) -> None:
+    prefs_path = user_data_dir / "Default" / "Preferences"
+    prefs = json.loads(prefs_path.read_text())
+    prefs["intl"]["accept_languages"] = languages
+    prefs.update(extra)
+    prefs_path.write_text(json.dumps(prefs))
+
+
+def test_sync_profile_locale_keeps_languages_added_in_settings(tmp_path: Path):
+    _sync_profile_locale(tmp_path, "ja-JP")
+    # The settings page collapses ja-JP,ja to ja when Chinese is added.
+    _set_web_languages(tmp_path, "ja,zh-CN")
+
+    _sync_profile_locale(tmp_path, "ja-JP")
+
+    prefs = json.loads((tmp_path / "Default" / "Preferences").read_text())
+    assert prefs["intl"]["accept_languages"] == "ja-JP,ja,zh-CN"
+    assert prefs["intl"]["selected_languages"] == "ja-JP,ja,zh-CN"
+
+
+def test_sync_profile_locale_replaces_the_previous_exit_languages(tmp_path: Path):
+    _sync_profile_locale(tmp_path, "ja-JP")
+    _set_web_languages(tmp_path, "ja-JP,ja,zh-CN")
+
+    _sync_profile_locale(tmp_path, "en-US")
+
+    prefs = json.loads((tmp_path / "Default" / "Preferences").read_text())
+    assert prefs["intl"]["accept_languages"] == "en-US,en,zh-CN"
+
+
+def test_sync_profile_locale_resets_languages_without_a_marker(tmp_path: Path):
+    _init_profile_defaults(tmp_path)
+    _sync_profile_locale(tmp_path, "ja-JP")
+    (tmp_path / ".cloakbrowser-manager-languages").unlink()
+    _set_web_languages(tmp_path, "ko-KR,ko")
+
+    _sync_profile_locale(tmp_path, "ja-JP")
+
+    prefs = json.loads((tmp_path / "Default" / "Preferences").read_text())
+    assert prefs["intl"]["accept_languages"] == "ja-JP,ja"
+
+
+def test_sync_profile_locale_keeps_google_translate_once_turned_on(tmp_path: Path):
+    _sync_profile_locale(tmp_path, "ja-JP")
+    _set_web_languages(tmp_path, "ja-JP,ja", translate={"enabled": True})
+
+    _sync_profile_locale(tmp_path, "ja-JP")
+
+    prefs = json.loads((tmp_path / "Default" / "Preferences").read_text())
+    assert prefs["translate"]["enabled"] is True
+
+
 def test_sync_session_restore_updates_chrome_preferences(tmp_path: Path):
     _init_profile_defaults(tmp_path)
     _sync_session_restore(tmp_path)
@@ -1376,7 +1428,7 @@ async def test_launch_applies_locale_timezone_to_process_and_page(
     assert options["locale"] == "en-US"
     assert options["timezone"] == "America/New_York"
     assert "--lang=en-US" in options["args"]
-    assert "--accept-lang=en-US,en" in options["args"]
+    assert not any(arg.startswith("--accept-lang") for arg in options["args"])
     assert options["env"]["TZ"] == "America/New_York"
     assert options["env"]["LANG"] == "en_US.UTF-8"
     assert "--fingerprint-locale=en-US" in options["args"]

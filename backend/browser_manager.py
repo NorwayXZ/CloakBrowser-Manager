@@ -123,17 +123,43 @@ def _locale_fallbacks(locale: str) -> list[str]:
     return languages
 
 
-def _accept_language_value(locale: str) -> str:
-    return ",".join(_locale_fallbacks(locale))
+LANGUAGES_MARKER = ".cloakbrowser-manager-languages"
+
+
+def _profile_languages(
+    user_data_dir: Path,
+    current: object,
+    locale: str,
+) -> str:
+    """The profile's languages first, then any the user added in the settings page.
+
+    The marker remembers which languages the Manager wrote last time, so a
+    language the user added (say Chinese as a backup) survives restarts while
+    the previous exit IP's languages are replaced.
+    """
+    primary = _locale_fallbacks(locale)
+    marker = user_data_dir / LANGUAGES_MARKER
+    try:
+        written_before = set(json.loads(marker.read_text(encoding="utf-8")))
+    except (OSError, ValueError, TypeError):
+        written_before = None
+    added: list[str] = []
+    if written_before is not None and isinstance(current, str):
+        for language in current.split(","):
+            language = language.strip()
+            if language and language not in written_before and language not in primary and language not in added:
+                added.append(language)
+    marker.write_text(json.dumps(primary), encoding="utf-8")
+    return ",".join([*primary, *added])
 
 
 def _sync_profile_locale(user_data_dir: Path, locale: str | None) -> None:
-    """Persist Chrome language preferences so renderer processes follow locale."""
-    if not locale:
-        return
+    """Persist Chrome language preferences so renderer processes follow locale.
 
-    languages = _accept_language_value(locale)
-    if not languages:
+    Languages go only into Preferences, never as --accept-lang: that switch
+    pins the list, so languages added in the settings page were dropped.
+    """
+    if not locale or not _locale_fallbacks(locale):
         return
 
     default_dir = user_data_dir / "Default"
@@ -141,6 +167,8 @@ def _sync_profile_locale(user_data_dir: Path, locale: str | None) -> None:
 
     prefs_path = default_dir / "Preferences"
     prefs = _read_json_file(prefs_path)
+    current = prefs.get("intl", {}).get("accept_languages") if isinstance(prefs.get("intl"), dict) else None
+    languages = _profile_languages(user_data_dir, current, locale)
     intl = prefs.setdefault("intl", {})
     if isinstance(intl, dict):
         intl["accept_languages"] = languages
@@ -150,9 +178,10 @@ def _sync_profile_locale(user_data_dir: Path, locale: str | None) -> None:
             "accept_languages": languages,
             "selected_languages": languages,
         }
+    # Off for new profiles; a user who turns Google Translate on keeps it.
     translate = prefs.setdefault("translate", {})
     if isinstance(translate, dict):
-        translate["enabled"] = False
+        translate.setdefault("enabled", False)
     else:
         prefs["translate"] = {"enabled": False}
     _write_json_file(prefs_path, prefs)
@@ -710,7 +739,6 @@ def _build_system_chrome_command_args(
         _append_chrome_arg_once(chrome_args, "--user-agent", user_agent)
     if locale:
         _append_chrome_arg_once(chrome_args, "--lang", locale)
-        _append_chrome_arg_once(chrome_args, "--accept-lang", _accept_language_value(locale))
 
     return chrome_args
 
@@ -2493,8 +2521,6 @@ class BrowserManager:
                     extra_args.append(f"--fingerprint-locale={resolved_locale}")
                 if resolved_timezone and not any(arg.startswith("--fingerprint-timezone") for arg in user_launch_args):
                     extra_args.append(f"--fingerprint-timezone={resolved_timezone}")
-                if resolved_locale and not any(arg.startswith("--accept-lang") for arg in user_launch_args):
-                    extra_args.append(f"--accept-lang={_accept_language_value(resolved_locale)}")
                 webrtc_arg = webrtc_ip_arg(
                     profile,
                     (proxy_geo or {}).get("ip"),
