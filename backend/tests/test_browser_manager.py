@@ -1359,6 +1359,122 @@ def test_sync_profile_locale_keeps_the_preferred_language_first(tmp_path: Path):
     assert settings_preferred_language(tmp_path) == "zh-CN"
 
 
+def test_language_switch_target_follows_the_first_language(tmp_path: Path):
+    from backend.browser_manager import language_switch_target
+
+    _sync_profile_locale(tmp_path, "ja-JP")
+    assert language_switch_target(tmp_path, "ja-JP") is None
+
+    # Adding Chinese below Japanese: the settings page collapses ja-JP to ja.
+    _set_web_languages(tmp_path, "ja,zh-CN")
+    assert language_switch_target(tmp_path, "ja-JP") is None
+
+    _set_web_languages(tmp_path, "zh-CN,ja")
+    assert language_switch_target(tmp_path, "ja-JP") == "zh-CN"
+    assert language_switch_target(tmp_path, "zh-CN") is None
+
+    # Japanese moved back to the top while running in Chinese.
+    _set_web_languages(tmp_path, "ja,zh-CN")
+    assert language_switch_target(tmp_path, "zh-CN") == "ja-JP"
+
+
+def _running_for(locale: str) -> MagicMock:
+    running = MagicMock()
+    running.effective_locale = locale
+    return running
+
+
+@pytest.mark.asyncio
+async def test_language_watch_restarts_once_the_new_first_language_settles(monkeypatch, tmp_path: Path):
+    from backend import browser_manager as module
+
+    monkeypatch.setattr(module, "LANGUAGE_WATCH_INTERVAL_SECONDS", 0.01)
+    _sync_profile_locale(tmp_path, "ja-JP")
+    manager = BrowserManager(NATIVE_RUNTIME)
+    manager.running["profile-1"] = _running_for("ja-JP")
+    restart = AsyncMock()
+    monkeypatch.setattr(manager, "_restart_for_language", restart)
+    process = MagicMock()
+    process.poll.return_value = None
+
+    watcher = asyncio.create_task(manager._watch_language_choice("profile-1", process, tmp_path))
+    await asyncio.sleep(0.05)
+    restart.assert_not_awaited()
+    _set_web_languages(tmp_path, "zh-CN,ja")
+    await asyncio.wait_for(watcher, timeout=2)
+
+    restart.assert_awaited_once_with("profile-1", "zh-CN")
+
+
+@pytest.mark.asyncio
+async def test_language_watch_ignores_a_backup_language(monkeypatch, tmp_path: Path):
+    from backend import browser_manager as module
+
+    monkeypatch.setattr(module, "LANGUAGE_WATCH_INTERVAL_SECONDS", 0.01)
+    _sync_profile_locale(tmp_path, "ja-JP")
+    manager = BrowserManager(NATIVE_RUNTIME)
+    manager.running["profile-1"] = _running_for("ja-JP")
+    restart = AsyncMock()
+    monkeypatch.setattr(manager, "_restart_for_language", restart)
+    process = MagicMock()
+    process.poll.return_value = None
+
+    watcher = asyncio.create_task(manager._watch_language_choice("profile-1", process, tmp_path))
+    _set_web_languages(tmp_path, "ja,zh-CN")
+    await asyncio.sleep(0.1)
+    process.poll.return_value = 0
+    await asyncio.wait_for(watcher, timeout=2)
+
+    restart.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_restart_for_language_stops_and_reopens(monkeypatch, tmp_path: Path):
+    from backend import database as db
+
+    manager = BrowserManager(NATIVE_RUNTIME)
+    profile = {"id": "profile-1", "name": "JP"}
+    monkeypatch.setattr(db, "get_profile", lambda _id: profile)
+    opened = MagicMock()
+    monkeypatch.setattr(db, "mark_profile_opened", opened)
+    order: list[str] = []
+    manager.stop = AsyncMock(side_effect=lambda *a, **k: order.append("stop"))
+    relaunched = MagicMock(proxy_geo={"ip": "1.2.3.4"})
+
+    async def launch(p, launch_mode):
+        order.append(f"launch:{launch_mode}")
+        assert p is profile
+        return relaunched
+
+    manager.launch = launch
+
+    await manager._restart_for_language("profile-1", "zh-CN")
+
+    assert order == ["stop", "launch:manual"]
+    assert "zh-CN" in manager.stop.call_args.kwargs["reason"]
+    opened.assert_called_once_with("profile-1", {"ip": "1.2.3.4"})
+
+
+@pytest.mark.asyncio
+async def test_manual_launch_watches_the_language_unless_it_is_fixed(monkeypatch, tmp_path: Path):
+    from backend import browser_manager as module
+
+    manager = BrowserManager(NATIVE_RUNTIME)
+    monkeypatch.setattr(module, "_launch_cloakbrowser_manual_process", MagicMock(return_value=MagicMock()))
+    monkeypatch.setattr(manager, "_watch_process", AsyncMock())
+    watch = AsyncMock()
+    monkeypatch.setattr(manager, "_watch_language_choice", watch)
+
+    running = await manager.launch(_launch_profile(tmp_path))
+    assert running.language_watch_task is not None
+    await running.language_watch_task
+    manager.running.clear()
+
+    fixed = {**_launch_profile(tmp_path), "fingerprint_options": {"language": "zh-CN"}}
+    running = await manager.launch(fixed)
+    assert running.language_watch_task is None
+
+
 def test_sync_profile_locale_keeps_google_translate_once_turned_on(tmp_path: Path):
     _sync_profile_locale(tmp_path, "ja-JP")
     _set_web_languages(tmp_path, "ja-JP,ja", translate={"enabled": True})

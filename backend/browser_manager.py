@@ -54,6 +54,10 @@ SESSION_RESTORE_ARG = "--restore-last-session"
 # macOS window watch: wait for the profile to open its files, then poll.
 MAC_WINDOW_WATCH_START_SECONDS = 10.0
 MAC_WINDOW_WATCH_INTERVAL_SECONDS = 2.0
+# How often a running profile's Preferences are checked for a new first
+# language, and how many identical reads in a row count as settled.
+LANGUAGE_WATCH_INTERVAL_SECONDS = 2.0
+LANGUAGE_WATCH_STABLE_READS = 2
 MAC_WINDOW_CLOSED_CHECKS = 2
 SYSTEM_CHROME_BASE_ARGS = [
     "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
@@ -127,12 +131,13 @@ LANGUAGES_MARKER = ".cloakbrowser-manager-languages"
 _SETTINGS_LANGUAGE_RE = re.compile(r"^[a-z]{2,3}(?:-[A-Za-z0-9]{2,4})?$")
 
 
-def _languages_written_before(user_data_dir: Path) -> set[str] | None:
+def _languages_written_before(user_data_dir: Path) -> list[str] | None:
     """Languages the Manager itself wrote at the last launch, if recorded."""
     try:
-        return set(json.loads((user_data_dir / LANGUAGES_MARKER).read_text(encoding="utf-8")))
+        languages = json.loads((user_data_dir / LANGUAGES_MARKER).read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError):
         return None
+    return [str(language) for language in languages] if isinstance(languages, list) else None
 
 
 def _web_languages(prefs: dict[str, Any]) -> list[str]:
@@ -154,6 +159,31 @@ def settings_preferred_language(user_data_dir: Path) -> str | None:
     if written_before is None or not current or current[0] in written_before:
         return None
     return current[0] if _SETTINGS_LANGUAGE_RE.match(current[0]) else None
+
+
+def first_web_language(user_data_dir: Path) -> str | None:
+    """The language at the top of the settings page's list right now."""
+    current = _web_languages(_read_json_file(user_data_dir / "Default" / "Preferences"))
+    return current[0] if current else None
+
+
+def language_switch_target(user_data_dir: Path, running_locale: str | None) -> str | None:
+    """The language a running browser should restart into, if the user changed
+    the first language in its settings page; None when nothing changes."""
+    if not running_locale:
+        return None
+    written_before = _languages_written_before(user_data_dir)
+    first = first_web_language(user_data_dir)
+    if not written_before or not first:
+        return None
+    if first in written_before:
+        # The profile's own language (exit IP or configured) is first again.
+        target = written_before[0]
+    elif _SETTINGS_LANGUAGE_RE.match(first):
+        target = first
+    else:
+        return None
+    return None if target.lower() == running_locale.lower() else target
 
 
 def _profile_languages(
@@ -2142,6 +2172,8 @@ class RunningProfile:
     screen: tuple[int, int] | None = None
     # macOS: ends the browser once its last window is closed.
     window_watch_task: asyncio.Task | None = None
+    # Restarts the browser when the user changes its first language.
+    language_watch_task: asyncio.Task | None = None
 
 
 class BrowserManager:
@@ -2800,6 +2832,16 @@ class BrowserManager:
                         self._watch_macos_windows(profile_id, browser_process, user_data_dir),
                         name=f"cloakbrowser-windows-{profile_id}",
                     )
+                if (
+                    effective_launch_mode == "manual"
+                    and browser_engine == "cloakbrowser"
+                    and self.runtime.runtime_mode == "native"
+                    and not fixed_language
+                ):
+                    running.language_watch_task = asyncio.create_task(
+                        self._watch_language_choice(profile_id, browser_process, user_data_dir),
+                        name=f"cloakbrowser-language-{profile_id}",
+                    )
 
             async with self._lock:
                 self.running[profile_id] = running
@@ -2888,12 +2930,73 @@ class BrowserManager:
                     return
             await asyncio.sleep(MAC_WINDOW_WATCH_INTERVAL_SECONDS)
 
+    async def _watch_language_choice(
+        self,
+        profile_id: str,
+        process: subprocess.Popen[Any],
+        user_data_dir: Path,
+    ) -> None:
+        """Restart the browser once the user moves another language to the top.
+
+        Chromium on macOS cannot switch its interface while running, so the
+        Manager relaunches it; the next launch reads the new first language.
+        Only a change from what was first at launch counts, and only once it
+        has settled, so adding a language and then moving it is one restart.
+        """
+        initial = await asyncio.to_thread(first_web_language, user_data_dir)
+        seen: str | None = None
+        reads = 0
+        while process.poll() is None:
+            await asyncio.sleep(LANGUAGE_WATCH_INTERVAL_SECONDS)
+            running = self.running.get(profile_id)
+            if running is None:
+                return
+            first = await asyncio.to_thread(first_web_language, user_data_dir)
+            if first == initial:
+                seen, reads = None, 0
+                continue
+            reads = reads + 1 if first == seen else 1
+            seen = first
+            if reads < LANGUAGE_WATCH_STABLE_READS:
+                continue
+            target = await asyncio.to_thread(
+                language_switch_target, user_data_dir, running.effective_locale,
+            )
+            if target is None:
+                initial, seen, reads = first, None, 0
+                continue
+            await self._restart_for_language(profile_id, target)
+            return
+
+    async def _restart_for_language(self, profile_id: str, language: str) -> None:
+        from . import database as db
+
+        profile = db.get_profile(profile_id)
+        if not profile or profile.get("deleted_at"):
+            return
+        logger.info("Restarting profile %s to switch its language to %s", profile_id, language)
+        await self.stop(profile_id, reason=f"切换浏览器语言为 {language}")
+        try:
+            running = await self.launch(profile, launch_mode="manual")
+        except Exception as exc:
+            logger.warning("Could not reopen profile %s after a language change: %s", profile_id, exc)
+            db.mark_profile_exit(profile_id, f"切换语言后重新打开失败：{exc}")
+            return
+        db.mark_profile_opened(profile_id, running.proxy_geo)
+
     async def _dispose_running(
         self,
         running: RunningProfile,
         *,
         close_context: bool,
     ) -> None:
+        if (
+            running.language_watch_task is not None
+            and running.language_watch_task is not asyncio.current_task()
+        ):
+            running.language_watch_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await running.language_watch_task
         if (
             running.window_watch_task is not None
             and running.window_watch_task is not asyncio.current_task()
