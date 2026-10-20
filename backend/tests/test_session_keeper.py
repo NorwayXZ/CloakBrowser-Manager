@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -26,11 +27,11 @@ HARNESS = Path(__file__).parent / "js" / "session_keeper_harness.mjs"
 def test_extension_is_invisible_to_pages_and_offline(tmp_path: Path):
     ext = sync_session_keeper_extension(tmp_path, port=18080)
 
-    manifest = json.loads((ext / "manifest.json").read_text())
+    manifest = json.loads((ext / "manifest.json").read_text(encoding="utf-8"))
     assert set(manifest["permissions"]) == {"tabs", "storage"}
     for key in ("host_permissions", "content_scripts", "web_accessible_resources"):
         assert key not in manifest
-    worker = (ext / "service_worker.js").read_text()
+    worker = (ext / "service_worker.js").read_text(encoding="utf-8")
     assert "fetch(" not in worker
     assert '"managerOrigin":"http://127.0.0.1:18080"' in worker
 
@@ -98,12 +99,12 @@ def _lsof(stdout: str, code: int = 0):
 
 def test_profile_files_open_reads_lsof(tmp_path: Path):
     default = (tmp_path / "Default").resolve()
-    open_files = f"p42\nn/usr/lib/dyld\nn{default}/Cookies\n"
+    open_files = f"p42\nn/usr/lib/dyld\nn{default}{os.sep}Cookies\n"
 
     assert profile_files_open(42, tmp_path, runner=_lsof(open_files)) is True
     assert profile_files_open(42, tmp_path, runner=_lsof("p42\nn/usr/lib/dyld\n")) is False
     # Another folder whose name merely starts the same way does not count.
-    assert profile_files_open(42, tmp_path, runner=_lsof(f"n{default}-old/Cookies\n")) is False
+    assert profile_files_open(42, tmp_path, runner=_lsof(f"n{default}-old{os.sep}Cookies\n")) is False
     assert profile_files_open(42, tmp_path, runner=_lsof("", code=2)) is None
 
 
