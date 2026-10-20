@@ -31,7 +31,16 @@ interface ProfileFormProps {
   onCancel: () => void;
   onDraftChange?: (data: ProfileCreateData) => void;
   hostOS?: HostOS | null;
+  /** This computer's screen [width, height], when the backend can read it. */
+  hostScreen?: number[] | null;
 }
+
+const BROWSER_LANGUAGES: [string, string][] = [
+  ["", "跟随上面的语言 / 出口 IP"],
+  ["zh-CN", "简体中文（zh-CN）"],
+  ["zh-TW", "繁體中文（zh-TW）"],
+  ["en-US", "English（en-US）"],
+];
 
 const RESOLUTION_PRESETS: Record<string, { width: number; height: number }> = {
   "1280 × 720 (原生窗口)": { width: 1280, height: 720 },
@@ -431,6 +440,7 @@ export function ProfileForm({
   onCancel,
   onDraftChange,
   hostOS,
+  hostScreen,
 }: ProfileFormProps) {
   const isEdit = profile !== null;
   const allowedPlatform = getDevicePlatformForHost(hostOS);
@@ -665,6 +675,15 @@ export function ProfileForm({
   )?.[0] ?? "custom";
 
   const currentEngine = normalizeFormEngine(form.browser_engine);
+  const realScreen = hostScreen && hostScreen.length === 2 ? hostScreen : null;
+  // Sites read the real display through CSS media queries, so a CloakBrowser
+  // profile follows it unless a custom size was chosen.
+  const screenFollowsDisplay = currentEngine === "cloakbrowser"
+    && realScreen !== null
+    && (form.fingerprint_options?.screen ?? "real") === "real";
+  const screenLabel = screenFollowsDisplay && realScreen
+    ? `跟随电脑 ${realScreen[0]} × ${realScreen[1]}`
+    : `${form.screen_width ?? 1920} × ${form.screen_height ?? 1080}`;
   const platformProfiles = getDeviceProfilesForPlatform(allowedPlatform);
   const platformFamilies = getDeviceProfileFamiliesForPlatform(allowedPlatform);
   const rawSelectedDeviceProfile = getDeviceProfile(form.device_profile);
@@ -684,7 +703,8 @@ export function ProfileForm({
   const effectiveTimezonePreview = form.timezone
     || proxyTest?.timezone
     || proxyGeoFallbackLabel;
-  const effectiveLocalePreview = form.locale
+  const effectiveLocalePreview = form.fingerprint_options?.language
+    || form.locale
     || proxyTest?.suggested_locale
     || proxyGeoFallbackLabel;
 
@@ -774,7 +794,7 @@ export function ProfileForm({
     ["启动页面", (form.startup_urls ?? []).length > 0 ? `${form.startup_urls?.length} 个网址` : "默认自检页"],
     ["时区", effectiveTimezonePreview],
     ["语言", effectiveLocalePreview],
-    ["分辨率", `${form.screen_width ?? 1920} × ${form.screen_height ?? 1080}`],
+    ["分辨率", screenLabel],
     ["Canvas", currentEngine === "system_chrome" ? "真实" : "按画像"],
     ["WebGL 图像", currentEngine === "system_chrome" ? "真实" : "按画像"],
     ["WebGL 元数据", summaryGpu],
@@ -788,7 +808,7 @@ export function ProfileForm({
     ["操作系统", platformLabel(allowedPlatform)],
     ["设备画像", selectedDeviceProfile.name],
     ["CPU / 芯片", selectedDeviceProfile.chip],
-    ["屏幕", `${form.screen_width ?? selectedDeviceProfile.screen_width} × ${form.screen_height ?? selectedDeviceProfile.screen_height}`],
+    ["屏幕", screenFollowsDisplay ? screenLabel : `${form.screen_width ?? selectedDeviceProfile.screen_width} × ${form.screen_height ?? selectedDeviceProfile.screen_height}`],
     ["CPU", summaryCpu],
     ["GPU", summaryGpu],
     ["语言/时区", `${effectiveLocalePreview} / ${effectiveTimezonePreview}`],
@@ -1246,6 +1266,23 @@ export function ProfileForm({
                     </label>
                     <FieldNote>适用于直连和代理。勾选后强制覆盖手动值；不勾选时，只要时区或语言留空，启动时也会按出口地区自动补全。</FieldNote>
                   </div>
+
+                  <label className="pt-2 text-right text-sm font-medium text-slate-600">浏览器语言</label>
+                  <div>
+                    <select
+                      className="input max-w-xl"
+                      aria-label="浏览器语言"
+                      value={fingerprintOptions.language ?? ""}
+                      onChange={(e) => setOption("language", e.target.value || null)}
+                    >
+                      {BROWSER_LANGUAGES.map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                    <FieldNote>
+                      想看懂菜单和设置页时选中文：浏览器界面、网页读到的语言和日期格式会一起换成中文，时区仍按出口 IP。只换界面、网页语言留日语会被检测网站判为语言不一致，所以三者一起换。浏览器设置页里手动添加的语言每次启动会被重置，请用这里。
+                    </FieldNote>
+                  </div>
                 </div>
               </section>
             )}
@@ -1290,8 +1327,14 @@ export function ProfileForm({
                   <div>
                     <select
                       className="input max-w-xl"
-                      value={currentResolution}
+                      aria-label="分辨率"
+                      value={screenFollowsDisplay ? "real" : currentResolution}
                       onChange={(e) => {
+                        if (e.target.value === "real") {
+                          setOption("screen", "real");
+                          return;
+                        }
+                        setOption("screen", "custom");
                         const preset = RESOLUTION_PRESETS[e.target.value];
                         if (preset) {
                           set("screen_width", preset.width);
@@ -1299,15 +1342,22 @@ export function ProfileForm({
                         }
                       }}
                     >
+                      {currentEngine === "cloakbrowser" && realScreen && (
+                        <option value="real">跟随电脑屏幕 {realScreen[0]} × {realScreen[1]}（推荐）</option>
+                      )}
                       {Object.keys(RESOLUTION_PRESETS).map((name) => (
                         <option key={name} value={name}>{name}</option>
                       ))}
                       <option value="custom">自定义</option>
                     </select>
-                    <div className="mt-1 text-xs text-slate-500">这里填写浏览器看到的逻辑分辨率，不是 Retina 面板物理像素。例如 MacBook Pro 14 默认常见 1512 × 982。</div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      {screenFollowsDisplay
+                        ? "每次启动时读取这台电脑主显示器的分辨率。检测网站能通过 CSS 媒体查询读到真实屏幕，自定义的分辨率和它对不上会被判为指纹不一致。"
+                        : "这里填写浏览器看到的逻辑分辨率，不是 Retina 面板物理像素。例如 MacBook Pro 14 默认常见 1512 × 982。"}
+                    </div>
                   </div>
 
-                  {currentResolution === "custom" && (
+                  {!screenFollowsDisplay && currentResolution === "custom" && (
                     <>
                       <label className="pt-2 text-right text-sm font-medium text-slate-600">宽高</label>
                       <div>

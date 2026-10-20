@@ -51,6 +51,16 @@ def isolated_secret_key(tmp_path_factory: pytest.TempPathFactory, monkeypatch: p
     secrets_crypto.reset_key_cache()
 
 
+@pytest.fixture(autouse=True)
+def unknown_host_screen(monkeypatch: pytest.MonkeyPatch):
+    """Tests see no real display, so results never depend on the machine's
+    screen; tests of the follow-the-display behaviour set one explicitly."""
+    from backend import browser_manager, main
+
+    monkeypatch.setattr(browser_manager, "primary_screen_size", lambda: None)
+    monkeypatch.setattr(main, "primary_screen_size", lambda: None)
+
+
 @pytest.fixture()
 def tmp_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Point database module at a temp directory and init schema."""

@@ -36,6 +36,7 @@ from . import auto_backup
 from . import backup as backups
 from . import database as db
 from .fingerprint_options import parse_fingerprint_options
+from .host_display import primary_screen_size
 from .cookie_formats import CookieFormatError, merge_cookies, normalize_cookie_text, parse_cookie_text
 from . import kernel
 from . import secrets_crypto
@@ -1407,6 +1408,7 @@ async def get_system_status():
         host_os=browser_mgr.runtime.host_os,
         runtime_mode=browser_mgr.runtime.runtime_mode,
         viewer_mode=browser_mgr.runtime.viewer_mode,
+        host_screen=list(primary_screen_size() or []) or None,
     )
 
 

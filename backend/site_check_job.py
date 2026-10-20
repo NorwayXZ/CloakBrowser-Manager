@@ -42,6 +42,7 @@ def describe_environment(
         "fingerprint": {key: profile.get(key) for key in FINGERPRINT_FIELDS},
         "effective_timezone": getattr(running, "effective_timezone", None),
         "effective_locale": getattr(running, "effective_locale", None),
+        "effective_screen": list(getattr(running, "screen", None) or []) or None,
         "proxy_type": proxy.split("://", 1)[0] if "://" in proxy else ("direct" if not proxy else "custom"),
         "exit_ip": geo.get("ip"),
         "exit_country": geo.get("country_code") or geo.get("country"),

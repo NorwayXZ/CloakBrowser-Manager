@@ -15,8 +15,10 @@ LaunchMode = Literal["manual", "debug"]
 BrowserBrand = Literal["Chrome", "Edge", "Opera", "Vivaldi"]
 GeolocationMode = Literal["ip", "block", "real"]
 WebRTCMode = Literal["proxy", "custom"]
+ScreenMode = Literal["real", "custom"]
 
 _DOTTED_VERSION_RE = re.compile(r"^\d+(?:\.\d+){0,3}$")
+_LANGUAGE_RE = re.compile(r"^[a-z]{2,3}(?:-[A-Z]{2})?$")
 
 
 class FingerprintOptions(BaseModel):
@@ -39,6 +41,15 @@ class FingerprintOptions(BaseModel):
     # CDP cannot override them and block the permission instead.
     geolocation: GeolocationMode = "ip"
     noise: bool | None = None
+    # real: the screen follows this computer's display at launch, because
+    # sites read the real one through CSS media queries; custom: use
+    # screen_width/screen_height as configured.
+    screen: ScreenMode = "real"
+    # Fixed browser language (e.g. zh-CN) for the interface, navigator and
+    # Intl alike, even when the exit IP is elsewhere; None follows the
+    # profile's locale / exit IP. One language for all three keeps them
+    # consistent: a Chinese interface over Japanese web languages is flagged.
+    language: str | None = None
     speech_voices: bool = True
     storage_quota_mb: int | None = Field(default=None, ge=100, le=10_000_000)
     taskbar_height: int | None = Field(default=None, ge=0, le=300)
@@ -62,6 +73,18 @@ class FingerprintOptions(BaseModel):
         if self.webrtc != "custom":
             self.webrtc_ip = None
         return self
+
+    @field_validator("language", mode="before")
+    @classmethod
+    def _language_tag(cls, v: object) -> str | None:
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return None
+        tag = str(v).strip().replace("_", "-")
+        parts = tag.split("-")
+        tag = parts[0].lower() + ("-" + parts[1].upper() if len(parts) > 1 else "")
+        if not _LANGUAGE_RE.match(tag):
+            raise ValueError("浏览器语言格式不对，例如 zh-CN")
+        return tag
 
     @field_validator("brand_version", "platform_version", mode="before")
     @classmethod
@@ -243,6 +266,8 @@ class StatusResponse(BaseModel):
     host_os: HostOS
     runtime_mode: RuntimeMode
     viewer_mode: ViewerMode
+    # This computer's screen, which profiles following it launch with.
+    host_screen: list[int] | None = None
 
 
 class ManagerUpdateResponse(BaseModel):

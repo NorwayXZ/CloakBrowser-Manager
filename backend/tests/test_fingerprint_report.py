@@ -195,3 +195,27 @@ def test_impossible_window_geometry_is_reported():
     assert "window.outerHeight" in signals
     assert "screen.width_geometry" in signals
     assert "screen.height_geometry" in signals
+
+
+def _raw_screen(**screen) -> dict:
+    raw = _raw_platform(
+        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+        platform="MacIntel",
+        ua_ch_platform="macOS",
+    )
+    raw["main"]["screen"] = {"width": 1512, "height": 982, **screen}
+    return raw
+
+
+def test_css_media_screen_mismatch_is_an_error():
+    result = _analyze(_raw_screen(mediaMatchesWidth=False, mediaMatchesHeight=False), "macos")
+
+    issues = [issue for issue in result["issues"] if issue["signal"] == "screen.media"]
+    assert len(issues) == 1
+    assert issues[0]["severity"] == "error"
+
+
+def test_css_media_screen_match_passes():
+    result = _analyze(_raw_screen(mediaMatchesWidth=True, mediaMatchesHeight=True), "macos")
+
+    assert not [issue for issue in result["issues"] if issue["signal"] == "screen.media"]

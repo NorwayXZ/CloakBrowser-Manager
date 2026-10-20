@@ -27,9 +27,11 @@ from .fingerprint_options import (
     apply_noise_preference,
     build_fingerprint_option_args,
     geolocation_plan,
+    parse_fingerprint_options,
     unsupported_option_labels,
     webrtc_ip_arg,
 )
+from .host_display import primary_screen_size
 from .fingerprint_report import DEFAULT_NETWORK_PROBE_URL, analyze_fingerprint, run_fingerprint_probe
 from .cloak_runtime import get_effective_chromium_version
 from .proxy_geo import fetch_proxy_geo
@@ -2076,6 +2078,9 @@ class RunningProfile:
     xray_process: XrayProcess | None = None
     monitor_task: asyncio.Task | None = None
     fingerprint_report: dict[str, Any] | None = None
+    # Screen the browser was launched with; differs from the stored profile
+    # when the screen follows the computer's display.
+    screen: tuple[int, int] | None = None
     # macOS: ends the browser once its last window is closed.
     window_watch_task: asyncio.Task | None = None
 
@@ -2122,6 +2127,20 @@ class BrowserManager:
         if self.runtime.runtime_mode == "native" and self.runtime.host_os in {"macos", "windows"}:
             return "system_chrome"
         return "cloakbrowser"
+
+    def follow_real_screen(self, profile: dict[str, Any]) -> dict[str, Any]:
+        """The profile with its screen set to this computer's display, if it follows it."""
+        if (
+            self.runtime.runtime_mode != "native"
+            or self.runtime.viewer_mode == "vnc"
+            or self._browser_engine(profile) != "cloakbrowser"
+            or parse_fingerprint_options(profile).screen != "real"
+        ):
+            return profile
+        size = primary_screen_size()
+        if size is None:
+            return profile
+        return {**profile, "screen_width": size[0], "screen_height": size[1]}
 
     def preflight(self, profile: dict[str, Any], launch_mode: str = "manual") -> dict[str, Any]:
         """Check compatibility before a process is started.
@@ -2219,7 +2238,30 @@ class BrowserManager:
                 "severity": "error", "code": "invalid_screen",
                 "message": "屏幕尺寸必须是至少 320×240 的有效逻辑分辨率。",
             })
+        elif (
+            engine == "cloakbrowser"
+            and self.runtime.runtime_mode == "native"
+            and parse_fingerprint_options(profile).screen == "custom"
+        ):
+            real = primary_screen_size()
+            if real and real != (width, height):
+                issues.append({
+                    "severity": "warning", "code": "screen_differs_from_display",
+                    "message": (
+                        f"自定义分辨率 {width}×{height} 和这台电脑的屏幕 {real[0]}×{real[1]} 不同。"
+                        "检测网站能通过 CSS 媒体查询读到真实屏幕，会判为指纹不一致；建议改回「跟随电脑屏幕」。"
+                    ),
+                })
 
+        fixed_language = parse_fingerprint_options(profile).language
+        if fixed_language and engine == "cloakbrowser":
+            issues.append({
+                "severity": "info", "code": "fixed_browser_language",
+                "message": (
+                    f"浏览器语言固定为 {fixed_language}：界面、网页语言和日期格式都用它，时区仍按出口 IP。"
+                    "网站能看出这是该语言的浏览器，但语言之间不会互相矛盾。"
+                ),
+            })
         if profile.get("geoip") and not profile.get("proxy_geo"):
             connection_label = "代理" if profile.get("proxy") else "直连出口"
             issues.append({
@@ -2286,6 +2328,7 @@ class BrowserManager:
         proxy_bridge: HttpProxyBridge | None = None
         xray_process: XrayProcess | None = None
         try:
+            profile = self.follow_real_screen(profile)
             preflight = self.preflight(profile, requested_launch_mode)
             if not preflight["can_launch"]:
                 messages = "；".join(issue["message"] for issue in preflight["issues"] if issue["severity"] == "error")
@@ -2427,6 +2470,9 @@ class BrowserManager:
             except Exception as exc:
                 logger.warning("GeoIP lookup failed for %s: %s", profile_id, exc)
 
+            fixed_language = parse_fingerprint_options(profile).language
+            if fixed_language:
+                resolved_locale = fixed_language
             _sync_profile_locale(user_data_dir, resolved_locale)
             if browser_engine == "system_chrome" and proxy:
                 _sync_webrtc_policy(user_data_dir)
@@ -2673,6 +2719,7 @@ class BrowserManager:
                 proxy_bridge=proxy_bridge,
                 xray_process=xray_process,
                 browser_process=browser_process,
+                screen=(int(profile.get("screen_width") or 0), int(profile.get("screen_height") or 0)),
             )
             if context is not None:
                 context.on(
@@ -2913,8 +2960,12 @@ class BrowserManager:
             and profile.get("platform") == "macos"
         )
         native_or_seed_derived = running.browser_engine == "system_chrome" or seed_derived_macos
-        expected_screen_width = None if running.browser_engine == "system_chrome" else profile.get("screen_width")
-        expected_screen_height = None if running.browser_engine == "system_chrome" else profile.get("screen_height")
+        launched_width, launched_height = running.screen or (
+            profile.get("screen_width"),
+            profile.get("screen_height"),
+        )
+        expected_screen_width = None if running.browser_engine == "system_chrome" else launched_width
+        expected_screen_height = None if running.browser_engine == "system_chrome" else launched_height
         expected_hardware_concurrency = (
             None if native_or_seed_derived else profile.get("hardware_concurrency")
         )

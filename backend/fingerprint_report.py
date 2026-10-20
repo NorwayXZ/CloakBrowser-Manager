@@ -230,6 +230,9 @@ async () => {
         innerHeight: window.innerHeight,
         outerWidth: window.outerWidth,
         outerHeight: window.outerHeight,
+        // CSS media queries see the real display; detection sites compare them.
+        mediaMatchesWidth: matchMedia(`(device-width: ${screen.width}px)`).matches,
+        mediaMatchesHeight: matchMedia(`(device-height: ${screen.height}px)`).matches,
       },
       graphics: {
         webgl: readWebGL(),
@@ -762,6 +765,17 @@ def analyze_fingerprint(
             expected=expected_screen_height,
             actual=screen.get("height"),
             message="Screen height differs from the configured profile height",
+        )
+
+    if screen.get("mediaMatchesWidth") is False or screen.get("mediaMatchesHeight") is False:
+        _add_issue(
+            issues,
+            severity="error",
+            signal="screen.media",
+            scope="main",
+            expected=f"{screen.get('width')}x{screen.get('height')}",
+            actual="CSS device-width/height differ",
+            message="CSS 媒体查询读到的屏幕和 screen.width/height 不同，检测网站会判为指纹不一致；请把分辨率设为「跟随电脑屏幕」。",
         )
 
     inner_width = screen.get("innerWidth")

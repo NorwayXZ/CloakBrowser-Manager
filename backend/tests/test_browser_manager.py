@@ -457,6 +457,130 @@ async def test_native_launch_skips_vnc_and_display(monkeypatch, tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_native_launch_follows_the_real_display(monkeypatch, tmp_path: Path):
+    from backend import browser_manager as module
+
+    monkeypatch.setattr(module, "primary_screen_size", lambda: (2560, 1440))
+    manager = BrowserManager(NATIVE_RUNTIME)
+    manual_launch = MagicMock(return_value=MagicMock())
+    monkeypatch.setattr(module, "_launch_cloakbrowser_manual_process", manual_launch)
+    monkeypatch.setattr(manager, "_watch_process", AsyncMock())
+
+    running = await manager.launch(_launch_profile(tmp_path))
+
+    options = manual_launch.call_args.kwargs
+    assert options["viewport"] == {"width": 2560, "height": 1440}
+    assert "--fingerprint-screen-width=2560" in options["args"]
+    assert "--fingerprint-screen-height=1440" in options["args"]
+    assert running.screen == (2560, 1440)
+
+
+@pytest.mark.asyncio
+async def test_native_launch_keeps_a_custom_screen(monkeypatch, tmp_path: Path):
+    from backend import browser_manager as module
+
+    monkeypatch.setattr(module, "primary_screen_size", lambda: (2560, 1440))
+    manager = BrowserManager(NATIVE_RUNTIME)
+    manual_launch = MagicMock(return_value=MagicMock())
+    monkeypatch.setattr(module, "_launch_cloakbrowser_manual_process", manual_launch)
+    monkeypatch.setattr(manager, "_watch_process", AsyncMock())
+    profile = {
+        **_launch_profile(tmp_path),
+        "fingerprint_options": {"screen": "custom"},
+    }
+
+    running = await manager.launch(profile)
+
+    assert manual_launch.call_args.kwargs["viewport"] == {"width": 1920, "height": 1080}
+    assert "--fingerprint-screen-width=1920" in manual_launch.call_args.kwargs["args"]
+    assert running.screen == (1920, 1080)
+
+
+def test_follow_real_screen_only_for_native_cloakbrowser(monkeypatch, tmp_path: Path):
+    from backend import browser_manager as module
+
+    monkeypatch.setattr(module, "primary_screen_size", lambda: (2560, 1440))
+    profile = {"browser_engine": "cloakbrowser", "screen_width": 1512, "screen_height": 982}
+
+    native = BrowserManager(RuntimeConfig("macos", "native", "native-window", tmp_path))
+    docker = BrowserManager(RuntimeConfig("linux", "docker", "vnc", tmp_path))
+
+    assert native.follow_real_screen(profile)["screen_width"] == 2560
+    assert native.follow_real_screen({**profile, "browser_engine": "system_chrome"}) == {
+        **profile, "browser_engine": "system_chrome",
+    }
+    assert docker.follow_real_screen(profile) == profile
+    monkeypatch.setattr(module, "primary_screen_size", lambda: None)
+    assert native.follow_real_screen(profile) == profile
+
+
+@pytest.mark.asyncio
+async def test_fixed_language_overrides_exit_ip_locale(monkeypatch, tmp_path: Path):
+    from backend import browser_manager as module
+
+    async def japan_geo(_proxy):
+        return {"ip": "153.224.77.139", "timezone": "Asia/Tokyo", "suggested_locale": "ja-JP"}
+
+    monkeypatch.setattr(module, "fetch_proxy_geo", japan_geo)
+    manager = BrowserManager(NATIVE_RUNTIME)
+    manual_launch = MagicMock(return_value=MagicMock())
+    monkeypatch.setattr(module, "_launch_cloakbrowser_manual_process", manual_launch)
+    monkeypatch.setattr(manager, "_watch_process", AsyncMock())
+    profile = {
+        **_launch_profile(tmp_path),
+        "geoip": True,
+        "fingerprint_options": {"language": "zh-CN"},
+    }
+
+    running = await manager.launch(profile)
+
+    options = manual_launch.call_args.kwargs
+    assert options["locale"] == "zh-CN"
+    assert options["timezone"] == "Asia/Tokyo"
+    assert "--lang=zh-CN" in options["args"]
+    assert "--fingerprint-locale=zh-CN" in options["args"]
+    assert "--accept-lang=zh-CN,zh" in options["args"]
+    assert running.effective_locale == "zh-CN"
+    prefs = json.loads((tmp_path / "profile-1" / "Default" / "Preferences").read_text(encoding="utf-8"))
+    assert prefs["intl"]["accept_languages"] == "zh-CN,zh"
+
+
+@pytest.mark.parametrize(("raw", "expected"), [("zh_cn", "zh-CN"), ("en-us", "en-US"), ("ja", "ja"), ("", None)])
+def test_fixed_language_is_normalized(raw, expected):
+    from backend.models import FingerprintOptions
+
+    assert FingerprintOptions(language=raw).language == expected
+
+
+def test_fixed_language_rejects_garbage():
+    from pydantic import ValidationError
+
+    from backend.models import FingerprintOptions
+
+    with pytest.raises(ValidationError):
+        FingerprintOptions(language="chinese please")
+
+
+def test_preflight_warns_when_custom_screen_differs_from_display(monkeypatch, tmp_path: Path):
+    from backend import browser_manager as module
+
+    monkeypatch.setattr(module, "primary_screen_size", lambda: (2560, 1440))
+    manager = BrowserManager(RuntimeConfig("macos", "native", "native-window", tmp_path))
+    base = {
+        "platform": "macos",
+        "browser_engine": "cloakbrowser",
+        "screen_width": 1512,
+        "screen_height": 982,
+    }
+
+    custom = manager.preflight({**base, "fingerprint_options": {"screen": "custom"}})
+    following = manager.preflight(base)
+
+    assert any(issue["code"] == "screen_differs_from_display" for issue in custom["issues"])
+    assert not any(issue["code"] == "screen_differs_from_display" for issue in following["issues"])
+
+
+@pytest.mark.asyncio
 async def test_manual_launch_adds_profile_local_cookie_importer(monkeypatch, tmp_path: Path):
     from backend import browser_manager as module
 

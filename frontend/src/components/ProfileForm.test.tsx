@@ -86,6 +86,45 @@ describe("ProfileForm extra fingerprint options", () => {
   });
 });
 
+describe("ProfileForm screen and browser language", () => {
+  it("follows the computer's screen by default and can switch to a preset", async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<ProfileForm profile={null} hostOS="macos" hostScreen={[2560, 1440]} onSave={onSave} onCancel={vi.fn()} />);
+
+    const picker = screen.getByRole("combobox", { name: "分辨率" }) as HTMLSelectElement;
+    expect(picker.value).toBe("real");
+    expect(screen.getByText("跟随电脑屏幕 2560 × 1440（推荐）")).toBeTruthy();
+
+    fireEvent.change(picker, { target: { value: "1920 × 1080 (Windows 常见)" } });
+    fireEvent.change(screen.getByPlaceholderText("例如 Amazon Seller #1"), { target: { value: "Custom screen" } });
+    fireEvent.click(screen.getByRole("button", { name: "创建" }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.fingerprint_options.screen).toBe("custom");
+    expect([saved.screen_width, saved.screen_height]).toEqual([1920, 1080]);
+  });
+
+  it("hides the follow option when the screen cannot be read", () => {
+    render(<ProfileForm profile={null} hostOS="windows" onSave={vi.fn()} onCancel={vi.fn()} />);
+
+    const picker = screen.getByRole("combobox", { name: "分辨率" }) as HTMLSelectElement;
+    expect(Array.from(picker.options).some((option) => option.value === "real")).toBe(false);
+  });
+
+  it("saves a fixed browser language", async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<ProfileForm profile={null} hostOS="macos" onSave={onSave} onCancel={vi.fn()} />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "浏览器语言" }), { target: { value: "zh-CN" } });
+    fireEvent.change(screen.getByPlaceholderText("例如 Amazon Seller #1"), { target: { value: "Chinese UI" } });
+    fireEvent.click(screen.getByRole("button", { name: "创建" }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
+    expect(onSave.mock.calls[0][0].fingerprint_options.language).toBe("zh-CN");
+  });
+});
+
 afterEach(() => vi.restoreAllMocks());
 
 describe("ProfileForm cookies and layout", () => {

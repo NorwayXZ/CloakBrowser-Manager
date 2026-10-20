@@ -151,6 +151,7 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
   const [trashProfiles, setTrashProfiles] = useState<Profile[]>([]);
   const [managerError, setManagerError] = useState<string | null>(null);
   const [hostOS, setHostOS] = useState<HostOS>(() => detectClientHostOS());
+  const [hostScreen, setHostScreen] = useState<number[] | null>(null);
   const [versions, setVersions] = useState<{ app: string | null; kernel: string | null } | null>(null);
   const [pendingLaunch, setPendingLaunch] = useState<{ entries: PreflightEntry[]; mode: LaunchMode } | null>(null);
 
@@ -170,6 +171,7 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
 
     if (statusResult.status === "fulfilled") {
       setHostOS(statusResult.value.host_os);
+      setHostScreen(statusResult.value.host_screen ?? null);
       setVersions({ app: statusResult.value.app_version ?? null, kernel: statusResult.value.binary_version || null });
     }
     setGroups(groupsResult.status === "fulfilled" ? groupsResult.value : []);
@@ -441,6 +443,7 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
           groups={groups}
           proxyPresets={proxyPresets}
           hostOS={hostOS}
+          hostScreen={hostScreen}
           onSave={handleCreate}
           onCancel={() => setView("list")}
         />
@@ -452,6 +455,7 @@ function AppContent({ authRequired, authUsername, onAccountUpdated, onLogout }: 
           groups={groups}
           proxyPresets={proxyPresets}
           hostOS={hostOS}
+          hostScreen={hostScreen}
           onSave={handleUpdate}
           onDelete={handleFormDelete}
           onCancel={() => {

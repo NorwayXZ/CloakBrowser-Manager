@@ -12,6 +12,8 @@ export type WebRTCMode = "proxy" | "custom";
 export type GeolocationMode = "ip" | "block" | "real";
 
 /** CloakBrowser switches beyond the core persona; empty means "kernel decides". */
+export type ScreenMode = "real" | "custom";
+
 export interface FingerprintOptions {
   brand?: BrowserBrand | null;
   brand_version?: string | null;
@@ -20,6 +22,9 @@ export interface FingerprintOptions {
   webrtc_ip?: string | null;
   geolocation?: GeolocationMode;
   noise?: boolean | null;
+  screen?: ScreenMode;
+  /** Fixed language for the interface, navigator and Intl; null follows the locale / exit IP. */
+  language?: string | null;
   speech_voices?: boolean;
   storage_quota_mb?: number | null;
   taskbar_height?: number | null;
@@ -131,6 +136,8 @@ export interface SystemStatus {
   host_os: HostOS;
   runtime_mode: RuntimeMode;
   viewer_mode: ViewerMode;
+  /** This computer's screen [width, height]; profiles that follow it launch with it. */
+  host_screen?: number[] | null;
 }
 
 export interface ManagerUpdateResult {
