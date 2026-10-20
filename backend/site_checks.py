@@ -71,7 +71,7 @@ SITES: tuple[SiteCheck, ...] = (
     SiteCheck("browserleaks_webrtc", "BrowserLeaks WebRTC", "https://browserleaks.com/webrtc",
               "WebRTC 没有泄漏 IP", timeout=45.0),
     SiteCheck("fingerprint", "Fingerprint.com", "https://demo.fingerprint.com/playground",
-              "不是机器人、未篡改、不是反检测浏览器、不是虚拟机", timeout=75.0),
+              "不是机器人、未篡改、不是反检测浏览器、不是虚拟机；IP 没被认出是代理/VPN", timeout=75.0),
 )
 SITES_BY_ID = {site.id: site for site in SITES}
 
@@ -233,11 +233,27 @@ def judge_fingerprint(raw: Any) -> Verdict | None:
     devtools = _fp_value(text, "developer_tools")
     suspect = _fp_value(text, "suspect_score")
     vpn = re.search(r"\nVPN\s*\n+\s*([^\n]+)", text)
+    proxy_line = re.search(r"\nProxy Detection\s*\n+\s*([^\n]+)", text)
     details = [
         f"机器人：{bot}", f"篡改：{tampering}", f"反检测浏览器：{anti_detect or 'false'}",
         f"虚拟机：{vm or '未显示'}", f"开发者工具：{devtools}", f"可疑分数：{suspect}",
-        f"VPN：{vpn.group(1).strip() if vpn else '未显示'}（不计入结论）",
+        f"VPN：{vpn.group(1).strip() if vpn else '未显示'}",
+        f"代理检测：{proxy_line.group(1).strip() if proxy_line else '未显示'}",
     ]
+    # The IP's reputation, separate from the browser: a known proxy or VPN
+    # address tells a site a proxy is in use even when the browser passes.
+    ip_flags = []
+    if _fp_value(text, "proxy") == "true":
+        kind = _fp_value(text, "proxy_type") or "未知类型"
+        provider = _fp_value(text, "provider")
+        confidence = _fp_value(text, "proxy_confidence") or "未知"
+        ip_flags.append(f"代理 IP（{kind}{'，' + provider if provider else ''}，置信度 {confidence}）")
+    if _fp_value(text, "vpn") == "true":
+        methods = [
+            name for name in ("public_vpn", "relay", "auxiliary_mobile", "timezone_mismatch", "os_mismatch")
+            if _fp_value(text, name) == "true"
+        ]
+        ip_flags.append(f"VPN（{'、'.join(methods) or _fp_value(text, 'vpn_confidence') or '原因未显示'}）")
     problems = []
     if bot and bot != "not_detected":
         problems.append(f"机器人（{bot}）")
@@ -249,6 +265,8 @@ def judge_fingerprint(raw: Any) -> Verdict | None:
         problems.append("虚拟机")
     if problems:
         return "fail", "检测到：" + "、".join(problems), details
+    if ip_flags:
+        return "warn", "浏览器没被认出，但 IP 被认出：" + "、".join(ip_flags), details
     return "pass", "不是机器人，未检测到篡改", details
 
 

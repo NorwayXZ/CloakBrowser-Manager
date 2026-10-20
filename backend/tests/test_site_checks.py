@@ -129,10 +129,31 @@ def test_fingerprint(text, status, problem):
         assert problem in verdict[1]
 
 
-def test_fingerprint_ignores_vpn_in_the_verdict():
-    verdict = sc.judge_fingerprint("SMART SIGNALS\nVPN\t\nYou are using a VPN\n" + FP_OK)
-    assert verdict[0] == "pass"
-    assert any("VPN：You are using a VPN" in d for d in verdict[2])
+FP_PROXIED = (
+    "VPN\t\nYou are using a VPN (public VPN IP)\n\nProxy Detection\t\n"
+    "Your IP is used by a residential proxy from SX (confidence: high, ML score: 0.143)\n"
+    + FP_OK
+    + 'proxy: true\nproxy_confidence: "high"\nproxy_details: {\nproxy_type: "residential"\n'
+    'last_seen_at: 1792523276000\nprovider: "SX"\n}\nvpn: true\nvpn_confidence: "high"\n'
+    "vpn_methods: {\ntimezone_mismatch: false\npublic_vpn: true\nauxiliary_mobile: false\n"
+    "os_mismatch: false\nrelay: false\n}\n"
+)
+
+
+def test_fingerprint_flags_a_known_proxy_ip_as_a_warning():
+    verdict = sc.judge_fingerprint(FP_PROXIED)
+
+    assert verdict[0] == "warn"
+    assert "IP 被认出" in verdict[1]
+    assert "residential，SX，置信度 high" in verdict[1]
+    assert "public_vpn" in verdict[1]
+    assert any(d.startswith("代理检测：Your IP is used by a residential proxy") for d in verdict[2])
+
+
+def test_fingerprint_clean_ip_passes():
+    clean = FP_OK + "proxy: false\nvpn: false\n"
+
+    assert sc.judge_fingerprint(clean)[0] == "pass"
 
 
 def test_every_site_has_a_rule():
