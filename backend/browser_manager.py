@@ -35,6 +35,12 @@ from .cloak_runtime import get_effective_chromium_version
 from .proxy_geo import fetch_proxy_geo
 from .proxy_bridge import HttpProxyBridge
 from .runtime import RuntimeConfig, resolve_runtime, server_port
+from .session_keeper import (
+    profile_files_open,
+    remove_session_keeper_extension,
+    sync_session_keeper_extension,
+    window_name_arg,
+)
 from .vnc_manager import VNCManager
 from .xray_runtime import XrayProcess, is_xray_link, parse_xray_link, start_xray_proxy
 
@@ -43,6 +49,10 @@ logger = logging.getLogger("cloakbrowser.manager.browser")
 BROWSER_ENGINE_ENV = "CLOAKBROWSER_MANAGER_ENGINE"
 SYSTEM_CHROME_PATH_ENV = "CLOAKBROWSER_SYSTEM_CHROME_PATH"
 SESSION_RESTORE_ARG = "--restore-last-session"
+# macOS window watch: wait for the profile to open its files, then poll.
+MAC_WINDOW_WATCH_START_SECONDS = 10.0
+MAC_WINDOW_WATCH_INTERVAL_SECONDS = 2.0
+MAC_WINDOW_CLOSED_CHECKS = 2
 SYSTEM_CHROME_BASE_ARGS = [
     "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
     SESSION_RESTORE_ARG,
@@ -2066,6 +2076,8 @@ class RunningProfile:
     xray_process: XrayProcess | None = None
     monitor_task: asyncio.Task | None = None
     fingerprint_report: dict[str, Any] | None = None
+    # macOS: ends the browser once its last window is closed.
+    window_watch_task: asyncio.Task | None = None
 
 
 class BrowserManager:
@@ -2339,6 +2351,15 @@ class BrowserManager:
                     user_data_dir,
                     profile.get("last_exit_reason"),
                 )
+            if self.runtime.host_os == "macos" and self.runtime.runtime_mode == "native":
+                name_arg = window_name_arg(profile.get("name"))
+                if name_arg and not any(arg.startswith("--window-name") for arg in user_launch_args):
+                    user_launch_args.append(name_arg)
+                if requested_launch_mode == "manual" and browser_engine == "cloakbrowser":
+                    keeper = sync_session_keeper_extension(user_data_dir, port=server_port())
+                    _append_unpacked_extension_arg(user_launch_args, keeper)
+                else:
+                    remove_session_keeper_extension(user_data_dir)
             browser_proxy = proxy
             if proxy and is_xray_link(proxy):
                 xray_process = await start_xray_proxy(
@@ -2663,6 +2684,11 @@ class BrowserManager:
                     self._watch_process(profile_id, browser_process),
                     name=f"cloakbrowser-watch-{profile_id}",
                 )
+                if self.runtime.host_os == "macos" and self.runtime.runtime_mode == "native":
+                    running.window_watch_task = asyncio.create_task(
+                        self._watch_macos_windows(profile_id, browser_process, user_data_dir),
+                        name=f"cloakbrowser-windows-{profile_id}",
+                    )
 
             async with self._lock:
                 self.running[profile_id] = running
@@ -2723,12 +2749,47 @@ class BrowserManager:
             exit_reason=_browser_exit_reason(process.returncode),
         )
 
+    async def _watch_macos_windows(
+        self,
+        profile_id: str,
+        process: subprocess.Popen[Any],
+        user_data_dir: Path,
+    ) -> None:
+        """macOS keeps a browser running after its last window closes; end it then.
+
+        Chromium releases every file in the profile folder as soon as the last
+        window closes (a minimized or hidden window keeps them), so two checks
+        in a row without any open profile file mean the windows are gone.
+        """
+        await asyncio.sleep(MAC_WINDOW_WATCH_START_SECONDS)
+        misses = 0
+        while process.poll() is None:
+            files_open = await asyncio.to_thread(profile_files_open, process.pid, user_data_dir)
+            if files_open is None:
+                misses = 0
+            elif files_open:
+                misses = 0
+            else:
+                misses += 1
+                if misses >= MAC_WINDOW_CLOSED_CHECKS:
+                    logger.info("Last window closed for profile %s; closing its browser", profile_id)
+                    await self.stop(profile_id, reason="关闭了浏览器窗口")
+                    return
+            await asyncio.sleep(MAC_WINDOW_WATCH_INTERVAL_SECONDS)
+
     async def _dispose_running(
         self,
         running: RunningProfile,
         *,
         close_context: bool,
     ) -> None:
+        if (
+            running.window_watch_task is not None
+            and running.window_watch_task is not asyncio.current_task()
+        ):
+            running.window_watch_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await running.window_watch_task
         if (
             running.monitor_task is not None
             and running.monitor_task is not asyncio.current_task()
@@ -2762,7 +2823,7 @@ class BrowserManager:
             except Exception as exc:
                 logger.debug("Could not persist exit status for %s: %s", profile_id, exc)
 
-    async def stop(self, profile_id: str):
+    async def stop(self, profile_id: str, reason: str = "用户关闭"):
         """Stop a running browser instance and release all owned resources."""
         # Pop before close so the close event observes an already-clean state.
         async with self._lock:
@@ -2775,7 +2836,7 @@ class BrowserManager:
         await self._dispose_running(running, close_context=True)
         try:
             from . import database as db
-            db.mark_profile_exit(profile_id, "用户关闭")
+            db.mark_profile_exit(profile_id, reason)
         except Exception as exc:
             logger.debug("Could not persist stop status for %s: %s", profile_id, exc)
 
