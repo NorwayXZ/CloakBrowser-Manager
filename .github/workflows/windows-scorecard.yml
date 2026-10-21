@@ -39,6 +39,11 @@ jobs:
         env:
           CLOAKBROWSER_MANAGER_PORT: "18080"
           CLOAKBROWSER_MANAGER_DATA_DIR: ${{ runner.temp }}\cbm-scorecard-data
+          # Optional repo secret. Without a key the wrapper can only fetch
+          # the keyless Chromium 146 build; a free cloakbrowser.dev key
+          # (GitHub sign-in, 1 concurrent session) unlocks the latest 154
+          # build, which is what the scorecard should be measuring.
+          CLOAKBROWSER_LICENSE_KEY: ${{ secrets.CLOAKBROWSER_LICENSE_KEY }}
         run: |
           # Server and checks must live in one step: a process started in an
           # earlier step is reaped when that step ends on Windows runners
