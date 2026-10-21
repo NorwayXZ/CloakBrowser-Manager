@@ -20,6 +20,21 @@ logger = logging.getLogger(__name__)
 NOISE_OFF_ARG = "--fingerprint-noise=false"
 GEOLOCATION_ACCURACY_METERS = 1000
 
+# WEI-approved (2026-10-21) default preset for NEW profiles, verified by the
+# detection scorecard (CI + physical Windows machine, kernel 155):
+# - noise=false: fingerprint noise net-hurt modern detectors; closing it
+#   turned CreepJS's 3 lies to 0 and removed the BrowserScan audio exception.
+# - storage_quota_mb=50000: an explicit 50 GB quota removed BrowserScan's
+#   -10% "incognito" penalty (the kernel's seed-derived default quota reads
+#   like an incognito cap).
+# Existing profiles keep their own values (the model still defaults to
+# "let the binary decide" = None), and the panel offers "自动" to roll any
+# profile back to kernel defaults at any time.
+RECOMMENDED_NEW_PROFILE_OPTIONS: dict[str, Any] = {
+    "noise": False,
+    "storage_quota_mb": 50000,
+}
+
 # Oldest Chromium major that understands each switch. Older kernels ignore
 # unknown switches, so these only drive preflight warnings.
 OPTION_MIN_MAJOR: dict[str, tuple[int, str]] = {
