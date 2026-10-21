@@ -185,8 +185,15 @@ async def test_system_chrome_on_macos_is_watched_but_gets_no_extension(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_windows_launch_is_unchanged(monkeypatch, tmp_path: Path):
+async def test_windows_launch_has_no_session_keeper(monkeypatch, tmp_path: Path):
     _manager, running, args = await _manual_launch(monkeypatch, tmp_path, "windows")
 
     assert running.window_watch_task is None
-    assert not any(a.startswith(("--window-name", "--load-extension")) for a in args)
+    assert not any(a.startswith("--window-name") for a in args)
+    assert not (tmp_path / "profile" / SESSION_KEEPER_DIRNAME).exists()
+    # The one extension a Windows manual launch does carry is the cookie
+    # importer/pull-back extension, which is platform-independent.
+    cookie_extension = tmp_path / "profile" / "manager-cookie-importer"
+    assert any(
+        a.startswith("--load-extension=") and str(cookie_extension) in a for a in args
+    )
