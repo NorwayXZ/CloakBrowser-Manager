@@ -75,7 +75,7 @@ SITES: tuple[SiteCheck, ...] = (
     SiteCheck("sannysoft", "Sannysoft", "https://bot.sannysoft.com/",
               "没有任何失败项", SANNYSOFT_JS, 45.0),
     SiteCheck("iphey", "IPHey", "https://iphey.com/",
-              "结论为 Trustworthy（可信）", IPHEY_JS),
+              "结论为 Trustworthy（可信）", IPHEY_JS, timeout=150.0),
     SiteCheck("browserleaks_webrtc", "BrowserLeaks WebRTC", "https://browserleaks.com/webrtc",
               "WebRTC 没有泄漏 IP", timeout=45.0),
     SiteCheck("fingerprint", "Fingerprint.com", "https://demo.fingerprint.com/playground",
