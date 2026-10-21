@@ -47,7 +47,7 @@ describe("SiteCheckPanel", () => {
     mockApi();
     render(<SiteCheckPanel profiles={[profile("p1", "win", "running")]} onRefresh={vi.fn()} />);
 
-    const start = (await screen.findByRole("button", { name: "开始检测" })) as HTMLButtonElement;
+    const start = (await screen.findByRole("button", { name: "开始一键检测" })) as HTMLButtonElement;
     expect(start.disabled).toBe(true);
     expect(screen.getByText(/请先关闭它/)).toBeTruthy();
   });
@@ -62,7 +62,7 @@ describe("SiteCheckPanel", () => {
     render(<SiteCheckPanel profiles={[profile("p1", "win")]} onRefresh={vi.fn()} />);
     await screen.findByText("CreepJS");
 
-    fireEvent.click(screen.getByRole("button", { name: "开始检测" }));
+    fireEvent.click(screen.getByRole("button", { name: "开始一键检测" }));
 
     await waitFor(() => expect(start).toHaveBeenCalledWith("p1"));
     expect(await screen.findByText(/正在检测「win」：Pixelscan（2\/2）/)).toBeTruthy();
@@ -80,6 +80,69 @@ describe("SiteCheckPanel", () => {
     expect(screen.getByText("指纹不一致、检测到伪装")).toBeTruthy();
     expect(screen.getByAltText("Pixelscan 截图").getAttribute("src")).toBe(api.siteCheckFileUrl(REPORT.id, "pixelscan.png"));
     expect(screen.getByRole("link", { name: /导出报告（zip）/ }).getAttribute("href")).toBe(api.siteCheckDownloadUrl(REPORT.id));
+  });
+
+  it("shows counts, the egress note, local items and IP caveats", async () => {
+    mockApi();
+    const rich: SiteCheckReport = {
+      ...REPORT,
+      summary: { pass: 1, warn: 1, fail: 1, unknown: 0, error: 0, total: 3 },
+      egress_note: "本次 direct 出口 1.2.3.4（JP）。标注「IP 信誉」的条目结论受出口 IP 影响。",
+      results: [
+        { site: "local_gpu", name: "GPU / WebGL", url: "", criteria: "与画像配置一致", status: "pass", summary: "Google Inc. (NVIDIA) / ANGLE (NVIDIA)", details: [], screenshot: null, seconds: 0, source: "local" },
+        { site: "fingerprint", name: "Fingerprint.com", url: "u", criteria: "不是机器人", status: "warn", summary: "浏览器没被认出，但 IP 被认出", details: [], screenshot: null, seconds: 40, source: "site", ip_note: "这一项的结论受出口 IP 信誉影响" },
+        REPORT.results[1]!,
+      ],
+    };
+    vi.spyOn(api, "getSiteCheckReport").mockResolvedValue(rich);
+    render(<SiteCheckPanel profiles={[profile("p1", "win")]} onRefresh={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "查看" }));
+
+    expect(await screen.findByText(/共 3 项：通过 1 · 警告 1 · 未通过 1/)).toBeTruthy();
+    expect(screen.getByText(/标注「IP 信誉」的条目结论受出口 IP 影响/)).toBeTruthy();
+    expect(screen.getByText("本地自检")).toBeTruthy();
+    expect(screen.getByText(/IP 信誉：这一项的结论受出口 IP 信誉影响/)).toBeTruthy();
+  });
+
+  it("shows what changed against the previous report", async () => {
+    mockApi();
+    const withDiff: SiteCheckReport = {
+      ...REPORT,
+      diff: {
+        previous_id: "20261019-190000-win",
+        previous_created_at: "2026-10-19T19:00:00+08:00",
+        changes: [
+          { site: "pixelscan", name: "Pixelscan", from: "pass", to: "fail", summary: "指纹不一致、检测到伪装" },
+          { site: "local_gpu", name: "GPU / WebGL", from: null, to: "pass", summary: "ANGLE (NVIDIA)" },
+        ],
+      },
+    };
+    vi.spyOn(api, "getSiteCheckReport").mockResolvedValue(withDiff);
+    render(<SiteCheckPanel profiles={[profile("p1", "win")]} onRefresh={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "查看" }));
+
+    expect(await screen.findByText(/与上次报告（.*）相比的变化/)).toBeTruthy();
+    expect(screen.getByText("新增")).toBeTruthy();
+    // The changed row is highlighted (the summary also appears in the diff list).
+    const rowSummary = screen.getAllByText("指纹不一致、检测到伪装")
+      .find((el) => el.closest("tr"));
+    expect(rowSummary?.closest("tr")?.className).toContain("bg-amber-50");
+  });
+
+  it("says so when nothing changed against the previous report", async () => {
+    mockApi();
+    const noChange: SiteCheckReport = {
+      ...REPORT,
+      diff: { previous_id: "20261019-190000-win", previous_created_at: "2026-10-19T19:00:00+08:00", changes: [] },
+    };
+    vi.spyOn(api, "getSiteCheckReport").mockResolvedValue(noChange);
+    render(<SiteCheckPanel profiles={[profile("p1", "win")]} onRefresh={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "查看" }));
+
+    expect(await screen.findByText(/各条目结论没有变化/)).toBeTruthy();
   });
 
   it("deletes a report after confirmation", async () => {
