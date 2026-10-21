@@ -362,7 +362,9 @@ function createDefaultForm(hostOS?: HostOS | null): ProfileCreateData {
     cookies_json: null,
     startup_urls: [],
     launch_args: [],
-    fingerprint_options: {},
+    // 新建画像的推荐预设（2026-10-21 实测：关噪声对检测分数净正面，
+    // 50 GB 配额消除 BrowserScan 的无痕模式扣分）；可随时在下方切回「自动」。
+    fingerprint_options: { noise: false, storage_quota_mb: 50000 },
     tags: [],
   }, getDeviceProfile(getDefaultDeviceProfileId(hostOS)));
 }
@@ -1596,7 +1598,7 @@ export function ProfileForm({
                       options={[["auto", "自动"], ["on", "开启"], ["off", "关闭"]]}
                       onChange={(value) => setOption("noise", value === "auto" ? null : value === "on")}
                     />
-                    <FieldNote>噪声让每个画像的 Canvas、WebGL、音频输出各不相同。少数风控能识别噪声，被拦时可以试试关闭；macOS 画像默认关闭。</FieldNote>
+                    <FieldNote>噪声让每个画像的 Canvas、WebGL、音频输出各不相同。实测多数现代检测器对噪声净扣分，新建画像默认关闭；想回到内核默认可随时切换回「自动」；macOS 画像默认关闭。</FieldNote>
                   </div>
 
                   <label className="pt-1.5 text-right text-sm font-medium text-slate-600">存储配额</label>
@@ -1605,7 +1607,7 @@ export function ProfileForm({
                       label="存储配额"
                       value={fingerprintOptions.storage_quota_mb == null ? "auto" : "custom"}
                       options={[["auto", "按种子自动"], ["custom", "自定义"]]}
-                      onChange={(value) => setOption("storage_quota_mb", value === "auto" ? null : 60000)}
+                      onChange={(value) => setOption("storage_quota_mb", value === "auto" ? null : 50000)}
                     />
                     {fingerprintOptions.storage_quota_mb != null && (
                       <input
@@ -1617,7 +1619,7 @@ export function ProfileForm({
                         placeholder="单位 MB"
                       />
                     )}
-                    <FieldNote>navigator.storage.estimate() 报告的磁盘配额，单位 MB。真实电脑通常是几十 GB 以上。</FieldNote>
+                    <FieldNote>navigator.storage.estimate() 报告的磁盘配额，单位 MB。真实电脑通常是几十 GB 以上；新建画像默认 50000（≈50 GB），实测可消除 BrowserScan 的无痕模式扣分。</FieldNote>
                   </div>
 
                   <label className="pt-1.5 text-right text-sm font-medium text-slate-600">任务栏高度</label>
