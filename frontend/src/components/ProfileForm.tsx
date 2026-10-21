@@ -1,7 +1,8 @@
-import { ArrowLeft, ClipboardCheck, Globe, Loader2, MousePointer2, Plus, RefreshCw, Save, Settings2, Trash2, Wifi, X } from "lucide-react";
+import { ArrowLeft, ClipboardCheck, Download, FileDown, Globe, Loader2, MousePointer2, Plus, RefreshCw, Save, Settings2, Trash2, Wifi, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import {
   api,
+  type CookieExportFormat,
   type CookieMergeResult,
   type FingerprintOptions,
   type HostOS,
@@ -497,6 +498,9 @@ export function ProfileForm({
   const [startupUrlsText, setStartupUrlsText] = useState("");
   const [draftProfileId, setDraftProfileId] = useState<string | null>(null);
   const [cookieMerge, setCookieMerge] = useState<CookieMergeState | null>(null);
+  const [cookieBusy, setCookieBusy] = useState<"pull" | "export" | null>(null);
+  const [cookieNotice, setCookieNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const [cookieExportFormat, setCookieExportFormat] = useState<CookieExportFormat>("json");
 
   useEffect(() => {
     if (profile) {
@@ -576,6 +580,42 @@ export function ProfileForm({
       return "";
     }
   })();
+
+  const handlePullCookies = async () => {
+    if (!profile) return;
+    setCookieBusy("pull");
+    setCookieNotice(null);
+    try {
+      const result = await api.pullProfileCookies(profile.id);
+      set("cookies_json", result.cookies_json);
+      setCookieNotice({
+        tone: "success",
+        text: result.count > 0
+          ? `已从浏览器导回 ${result.count} 条 Cookie，已填入上方文本框；点保存后写入配置`
+          : "浏览器里目前没有 Cookie",
+      });
+    } catch (err) {
+      setCookieNotice({ tone: "error", text: err instanceof Error ? err.message : "导回 Cookie 失败" });
+    } finally {
+      setCookieBusy(null);
+    }
+  };
+
+  const handleExportCookies = async () => {
+    if (!profile) return;
+    setCookieBusy("export");
+    setCookieNotice(null);
+    try {
+      const safeName = (form.name || "profile").replace(/[^\w\- ]+/g, "_").trim() || "profile";
+      const extension = cookieExportFormat === "json" ? "json" : "txt";
+      await api.downloadCookieExport(profile.id, cookieExportFormat, `${safeName}-cookies.${extension}`);
+      setCookieNotice({ tone: "success", text: "Cookie 文件已开始下载" });
+    } catch (err) {
+      setCookieNotice({ tone: "error", text: err instanceof Error ? err.message : "导出 Cookie 失败" });
+    } finally {
+      setCookieBusy(null);
+    }
+  };
 
   const handleMergeCookies = async () => {
     if (!cookieMerge) return;
@@ -1034,8 +1074,10 @@ export function ProfileForm({
                         placeholder={"支持 JSON、Netscape（cookies.txt）格式，保存时自动转成 JSON。\nName=Value 格式要指定网站，请用下面的「合并 Cookie」。"}
                         spellCheck={false}
                       />
-                      <div className="mt-2 flex max-w-3xl items-center justify-between gap-3">
-                        <FieldNote>Cookie 会随配置保存；普通启动通过画像专用的本地扩展导入一次，调试启动通过浏览器上下文导入，之后由同一用户数据目录保存登录状态。</FieldNote>
+                      <div className="mt-2 max-w-3xl">
+                        <FieldNote>Cookie 会随配置保存；普通启动通过画像专用的本地扩展导入一次，调试启动通过浏览器上下文导入，之后由同一用户数据目录保存登录状态。浏览器里新产生的 Cookie 不会自动出现在这里，可用下面的「从浏览器导回 Cookie」读回（需要浏览器以调试模式运行）。</FieldNote>
+                      </div>
+                      <div className="mt-2 flex max-w-3xl flex-wrap items-center gap-2">
                         <button
                           type="button"
                           className="btn-secondary flex shrink-0 items-center gap-1 px-2.5 text-xs"
@@ -1044,7 +1086,45 @@ export function ProfileForm({
                           <Plus className="h-3.5 w-3.5" />
                           <span>合并 Cookie</span>
                         </button>
+                        {profile && (
+                          <>
+                            <button
+                              type="button"
+                              className="btn-secondary flex shrink-0 items-center gap-1 px-2.5 text-xs disabled:opacity-60"
+                              disabled={cookieBusy !== null}
+                              onClick={() => void handlePullCookies()}
+                            >
+                              <Download className="h-3.5 w-3.5" />
+                              <span>{cookieBusy === "pull" ? "导回中..." : "从浏览器导回 Cookie"}</span>
+                            </button>
+                            <span className="ml-auto flex shrink-0 items-center gap-2">
+                              <select
+                                className="input w-auto px-2 py-1 text-xs"
+                                aria-label="导出格式"
+                                value={cookieExportFormat}
+                                onChange={(e) => setCookieExportFormat(e.target.value as CookieExportFormat)}
+                              >
+                                <option value="json">Cookie-Editor JSON</option>
+                                <option value="netscape">cookies.txt</option>
+                              </select>
+                              <button
+                                type="button"
+                                className="btn-secondary flex items-center gap-1 px-2.5 text-xs disabled:opacity-60"
+                                disabled={cookieBusy !== null}
+                                onClick={() => void handleExportCookies()}
+                              >
+                                <FileDown className="h-3.5 w-3.5" />
+                                <span>{cookieBusy === "export" ? "导出中..." : "导出 Cookie"}</span>
+                              </button>
+                            </span>
+                          </>
+                        )}
                       </div>
+                      {cookieNotice && (
+                        <div className={`mt-1.5 max-w-3xl text-xs ${cookieNotice.tone === "error" ? "text-red-600" : "text-emerald-700"}`}>
+                          {cookieNotice.text}
+                        </div>
+                      )}
                       {cookieMerge && (
                         <div className="mt-2 max-w-3xl space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3">
                           <textarea
