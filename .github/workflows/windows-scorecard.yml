@@ -12,6 +12,11 @@ name: Windows detection scorecard
 
 on:
   workflow_dispatch:
+    inputs:
+      fp_options:
+        description: 'Optional fingerprint_options JSON for A/B runs, e.g. {"noise": false}'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -49,6 +54,7 @@ jobs:
           # scorecard profile egresses through it so IP-reputation verdicts
           # measure the profile, not the runner's datacenter IP.
           SCORECARD_PROXY: ${{ secrets.SCORECARD_PROXY }}
+          SCORECARD_FP_OPTIONS: ${{ inputs.fp_options }}
         run: |
           # Server and checks must live in one step: a process started in an
           # earlier step is reaped when that step ends on Windows runners
