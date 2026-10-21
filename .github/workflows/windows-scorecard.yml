@@ -1,0 +1,70 @@
+name: Windows detection scorecard
+
+# Runs one throwaway Windows profile through the Manager's own site checks
+# (backend/site_checks.py: CreepJS, Pixelscan, BrowserScan, Sannysoft,
+# IPHey, BrowserLeaks WebRTC, Fingerprint.com) on a hosted Windows runner
+# and uploads the verdicts as SCORECARD.md + report.json + screenshots.
+# Manual only: it takes a while and talks to third-party sites, so it does
+# not belong in per-push CI. Read the result with two CI caveats: the
+# runner IP is a datacenter IP (hurts IP-reputation verdicts) and there is
+# no real GPU (WebGL renders in software). Neither reflects the kernel or
+# the profile configuration; both are re-checked on a physical machine.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-scorecard
+  cancel-in-progress: false
+
+jobs:
+  scorecard:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend
+        shell: pwsh
+        run: python -m pip install -r backend/requirements.txt
+      - name: Start Manager
+        shell: pwsh
+        env:
+          CLOAKBROWSER_MANAGER_PORT: "18080"
+          CLOAKBROWSER_MANAGER_DATA_DIR: ${{ runner.temp }}\cbm-scorecard-data
+        run: |
+          $proc = Start-Process -PassThru python -ArgumentList @(
+            "-m", "uvicorn", "backend.main:app",
+            "--host", "127.0.0.1", "--port", "18080"
+          ) -RedirectStandardOutput "$env:RUNNER_TEMP\manager-out.log" `
+             -RedirectStandardError "$env:RUNNER_TEMP\manager-err.log"
+          $ok = $false
+          foreach ($i in 1..60) {
+            try { Invoke-RestMethod http://127.0.0.1:18080/api/status | Out-Null; $ok = $true; break }
+            catch { Start-Sleep 1 }
+          }
+          if (-not $ok) {
+            Get-Content "$env:RUNNER_TEMP\manager-err.log" -ErrorAction SilentlyContinue
+            throw "Manager server did not start"
+          }
+      - name: Run site checks
+        shell: pwsh
+        run: python scripts/windows_scorecard.py scorecard-out
+      - name: Upload scorecard
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-scorecard
+          path: |
+            scorecard-out/**
+            ${{ runner.temp }}\cbm-scorecard-data\check-reports\**
+            ${{ runner.temp }}\manager-out.log
+            ${{ runner.temp }}\manager-err.log
+          if-no-files-found: warn
