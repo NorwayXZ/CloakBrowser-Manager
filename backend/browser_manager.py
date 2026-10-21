@@ -97,16 +97,20 @@ def _read_json_file(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     try:
-        data = json.loads(path.read_text())
+        # Chromium writes its JSON files (Preferences, Local State, Bookmarks)
+        # as UTF-8. Reading with the locale default encoding crashes on
+        # non-ASCII Windows locales (e.g. GBK on zh-CN): UnicodeDecodeError is
+        # not a JSONDecodeError, so it used to escape and fail profile launch.
+        data = json.loads(path.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else {}
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         logger.warning("Could not read Chrome JSON file %s: %s", path, exc)
         return {}
 
 
 def _write_json_file(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, sort_keys=True))
+    path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def _locale_to_posix(locale: str) -> str:
@@ -282,7 +286,7 @@ def _sync_geolocation_permission(user_data_dir: Path, *, block: bool) -> None:
     if block:
         defaults["geolocation"] = 2
         _write_json_file(prefs_path, prefs)
-        marker.write_text("1")
+        marker.write_text("1", encoding="utf-8")
     else:
         defaults.pop("geolocation", None)
         _write_json_file(prefs_path, prefs)
@@ -2086,7 +2090,7 @@ def _init_profile_defaults(user_data_dir: Path) -> None:
             },
             "version": 1,
         }
-        bookmarks_path.write_text(json.dumps(bookmarks, indent=2))
+        bookmarks_path.write_text(json.dumps(bookmarks, indent=2), encoding="utf-8")
         logger.info("Created default bookmarks for %s", user_data_dir.name)
 
 
