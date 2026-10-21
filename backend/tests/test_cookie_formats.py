@@ -10,6 +10,7 @@ from starlette.testclient import TestClient
 from backend.cookie_formats import (
     CookieFormatError,
     cookie_editor_cookies,
+    extension_cookies_to_profile,
     live_cookies_to_profile,
     merge_cookies,
     normalize_cookie_text,
@@ -186,6 +187,53 @@ def test_cookie_editor_export_fields():
 
     parsed = json.loads(to_cookie_editor_json(live_cookies_to_profile(LIVE_COOKIES)))
     assert [c["name"] for c in parsed] == ["sid", "pref"]
+
+
+def test_extension_cookies_become_the_stored_shape():
+    raw = [
+        {
+            "name": "sid", "value": "abc123", "domain": ".example.com", "path": "/",
+            "secure": True, "httpOnly": True, "hostOnly": False, "storeId": "0",
+            "sameSite": "lax", "session": False, "expirationDate": 1893456000.0,
+        },
+        {
+            "name": "pref", "value": "zh", "domain": "shop.example.com", "path": "/cart",
+            "secure": False, "httpOnly": False, "hostOnly": True, "storeId": "0",
+            "sameSite": "no_restriction", "session": True,
+        },
+        {
+            "name": "plain", "value": "1", "domain": "example.com", "path": "/",
+            "secure": False, "httpOnly": False, "hostOnly": True,
+            "sameSite": "unspecified", "session": True,
+        },
+    ]
+
+    cookies = extension_cookies_to_profile(raw)
+
+    assert cookies[0] == {
+        "name": "sid", "value": "abc123", "domain": ".example.com", "path": "/",
+        "secure": True, "httpOnly": True, "hostOnly": False,
+        "sameSite": "lax", "expirationDate": 1893456000,
+    }
+    assert cookies[1]["sameSite"] == "none"
+    assert cookies[1]["session"] is True
+    assert "expirationDate" not in cookies[1]
+    # "unspecified" is not a stored sameSite value; the key is dropped.
+    assert "sameSite" not in cookies[2]
+    assert cookies[2]["session"] is True
+
+
+def test_extension_cookies_skip_malformed_entries():
+    raw = [
+        {"name": "ok", "value": "1", "domain": "example.com"},
+        {"name": "", "value": "1", "domain": "example.com"},
+        {"name": "no-domain", "value": "1"},
+        "not-a-dict",
+        None,
+    ]
+    cookies = extension_cookies_to_profile(raw)
+    assert [c["name"] for c in cookies] == ["ok"]
+    assert extension_cookies_to_profile(None) == []
 
 
 def test_netscape_export_parses_back_to_the_same_cookies():
