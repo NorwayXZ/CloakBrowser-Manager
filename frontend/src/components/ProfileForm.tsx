@@ -1075,7 +1075,7 @@ export function ProfileForm({
                         spellCheck={false}
                       />
                       <div className="mt-2 max-w-3xl">
-                        <FieldNote>Cookie 会随配置保存；普通启动通过画像专用的本地扩展导入一次，调试启动通过浏览器上下文导入，之后由同一用户数据目录保存登录状态。浏览器里新产生的 Cookie 不会自动出现在这里，可用下面的「从浏览器导回 Cookie」读回（需要浏览器以调试模式运行）。</FieldNote>
+                        <FieldNote>Cookie 会随配置保存；普通启动通过画像专用的本地扩展导入一次，调试启动通过浏览器上下文导入，之后由同一用户数据目录保存登录状态。浏览器里新产生的 Cookie 不会自动出现在这里，可用下面的「从浏览器导回 Cookie」读回（浏览器需正在运行：普通模式通过本地扩展导回，调试模式通过浏览器上下文导回）。</FieldNote>
                       </div>
                       <div className="mt-2 flex max-w-3xl flex-wrap items-center gap-2">
                         <button
