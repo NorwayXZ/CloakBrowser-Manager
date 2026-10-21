@@ -35,6 +35,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from . import auto_backup
 from . import backup as backups
 from . import database as db
+from . import device_templates
 from .fingerprint_options import parse_fingerprint_options
 from .host_display import primary_screen_size
 from .cookie_formats import CookieFormatError, merge_cookies, normalize_cookie_text, parse_cookie_text
@@ -56,12 +57,14 @@ from .rfb import _RFB_MSG_SIZE, _build_server_cut_text, _filter_rfb_client_messa
 from .updater import UpdateError, update_from_git
 from .xray_runtime import is_xray_link, start_xray_proxy
 from .models import (
+    ApplyDeviceTemplateRequest,
     AuthAccountUpdate,
     AutoBackupSettingsModel,
     AutoBackupStatusResponse,
     BrowserUpdateResponse,
     CookieMergeRequest,
     CookieMergeResponse,
+    DeviceTemplateResponse,
     KernelCheckResponse,
     KernelOverviewResponse,
     KernelSettingsModel,
@@ -626,6 +629,61 @@ async def purge_profile(profile_id: str):
         except ValueError:
             logger.error("Refusing to purge %s: invalid path", user_data_dir)
     return {"ok": True}
+
+
+@app.get("/api/device-templates", response_model=list[DeviceTemplateResponse])
+async def list_device_templates(q: str | None = None, family: str | None = None):
+    """List the Windows device template library, with optional filters."""
+    items = device_templates.list_templates()
+    if family:
+        items = [t for t in items if t["family"] == family]
+    if q:
+        needle = q.strip().lower()
+        items = [
+            t for t in items
+            if needle in t["name"].lower()
+            or needle in t["id"].lower()
+            or needle in t["gpu_renderer"].lower()
+            or needle in t["cpu"].lower()
+        ]
+    return [DeviceTemplateResponse(**t) for t in items]
+
+
+@app.get("/api/device-templates/{template_id}", response_model=DeviceTemplateResponse)
+async def get_device_template(template_id: str):
+    tpl = device_templates.get_template(template_id)
+    if not tpl:
+        raise HTTPException(status_code=404, detail="设备模板不存在")
+    return DeviceTemplateResponse(**tpl)
+
+
+@app.post("/api/profiles/{profile_id}/apply-device-template", response_model=ProfileResponse)
+async def apply_device_template(profile_id: str, req: ApplyDeviceTemplateRequest):
+    """Pin a Windows device template onto a profile (screen/GPU/CPU/memory).
+
+    The template id is recorded in the profile's device_profile field so the
+    applied persona stays traceable.
+    """
+    tpl = device_templates.get_template(req.template_id)
+    if not tpl:
+        raise HTTPException(status_code=404, detail="设备模板不存在")
+    profile = db.get_profile(profile_id)
+    if not profile or profile.get("deleted_at"):
+        raise HTTPException(status_code=404, detail="Profile not found")
+    updated = db.update_profile(
+        profile_id,
+        platform="windows",
+        screen_width=tpl["screen_width"],
+        screen_height=tpl["screen_height"],
+        gpu_vendor=tpl["gpu_vendor"],
+        gpu_renderer=tpl["gpu_renderer"],
+        hardware_concurrency=tpl["hardware_concurrency"],
+        device_memory=tpl["device_memory"],
+        device_profile=tpl["id"],
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return _profile_response(updated)
 
 
 @app.post("/api/cookies/merge", response_model=CookieMergeResponse)
