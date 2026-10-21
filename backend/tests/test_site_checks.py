@@ -280,10 +280,31 @@ def test_environment_never_contains_proxy_credentials_or_cookies():
     assert env["fingerprint"]["fingerprint_options"] == {"brand": "Edge"}
 
 
+PROBE_MAIN = {
+    "navigator": {
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/154.0.0.0",
+        "platform": "Win32", "language": "ja-JP", "languages": ["ja-JP", "ja"],
+        "hardwareConcurrency": 8, "deviceMemory": 8, "webdriver": False,
+    },
+    "date": {"timezone": "Asia/Tokyo"},
+    "screen": {"width": 1920, "height": 1080},
+    "graphics": {
+        "webgl": {"vendor": "Google Inc. (NVIDIA)", "renderer": "ANGLE (NVIDIA)", "version": "WebGL 2.0"},
+        "canvasHashA": "abcd1234", "audioHashA": "ef015678",
+    },
+    "fonts": {"available": ["Arial", "Segoe UI"]},
+    "network": {"webrtcCandidates": []},
+}
+
+
 @pytest.mark.asyncio
 async def test_job_launches_in_debug_checks_and_closes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     running = SimpleNamespace(context=_context([FakePage([{"passed": 31, "failed": 0, "warn": 0}])]))
-    mgr = SimpleNamespace(launch=AsyncMock(return_value=running), stop=AsyncMock())
+    probe = {"analysis": {"status": "pass", "score": 100, "issues": []}, "raw": {"main": PROBE_MAIN}}
+    mgr = SimpleNamespace(
+        launch=AsyncMock(return_value=running), stop=AsyncMock(),
+        fingerprint_report=AsyncMock(return_value=probe),
+    )
     job = SiteCheckJob()
 
     assert job.start({"id": "p1", "name": "P"}, browser_mgr=mgr, data_dir=tmp_path,
@@ -294,7 +315,29 @@ async def test_job_launches_in_debug_checks_and_closes(tmp_path: Path, monkeypat
     mgr.launch.assert_awaited_once_with({"id": "p1", "name": "P"}, launch_mode="debug")
     mgr.stop.assert_awaited_once_with("p1", reason="指纹检测完成")
     state = job.snapshot()
-    assert state["phase"] == "done" and state["overall"] == "pass" and len(state["results"]) == 1
+    assert state["phase"] == "done" and state["overall"] == "pass"
+    sources = [r["source"] for r in state["results"]]
+    assert sources[-1] == "site" and set(sources[:-1]) == {"local"}
+    stored = sc.load_report(tmp_path, state["report_id"])
+    assert stored["summary"]["pass"] == stored["summary"]["total"] == len(stored["results"])
+    assert "出口" in stored["egress_note"]
+
+
+@pytest.mark.asyncio
+async def test_job_survives_a_failed_local_probe(tmp_path: Path):
+    running = SimpleNamespace(context=_context([FakePage([{"passed": 31, "failed": 0, "warn": 0}])]))
+    mgr = SimpleNamespace(
+        launch=AsyncMock(return_value=running), stop=AsyncMock(),
+        fingerprint_report=AsyncMock(side_effect=RuntimeError("probe broke")),
+    )
+    job = SiteCheckJob()
+    job.start({"id": "p1", "name": "P"}, browser_mgr=mgr, data_dir=tmp_path,
+              environment=lambda p, r: {"profile_name": "P"}, sites=(SANNY,))
+    await job._task
+
+    state = job.snapshot()
+    assert state["phase"] == "done" and state["overall"] == "pass"
+    assert [r["site"] for r in state["results"]] == ["sannysoft"]
 
 
 @pytest.mark.asyncio
@@ -327,6 +370,150 @@ def test_api_starts_a_check(app_client: TestClient, monkeypatch: pytest.MonkeyPa
     assert app_client.post(f"/api/profiles/{pid}/site-check").status_code == 200
     assert started == [pid]
     assert [s["id"] for s in app_client.get("/api/site-checks/sites").json()][:2] == ["creepjs", "pixelscan"]
+
+
+# ── One-click report: local items, counts, egress note, diff ─────────────────
+
+
+def test_local_probe_items_pass_and_show_values():
+    results = sc.local_probe_results(
+        {"status": "pass", "score": 100, "issues": []},
+        {"main": PROBE_MAIN},
+        exit_ip="1.2.3.4",
+    )
+    by_id = {r.site: r for r in results}
+
+    assert set(by_id) >= {"local_user_agent", "local_gpu", "local_timezone", "local_egress_ip"}
+    assert all(r.status == "pass" and r.source == "local" for r in results)
+    assert "Chrome/154" in by_id["local_user_agent"].summary
+    assert by_id["local_timezone"].summary == "Asia/Tokyo"
+    assert "ANGLE (NVIDIA)" in by_id["local_gpu"].summary
+    assert by_id["local_egress_ip"].summary == "1.2.3.4"
+    assert by_id["local_egress_ip"].ip_note == sc.IP_RESULT_NOTE
+    # Issue-free checks with no value to show stay out of the report.
+    assert "local_storage" not in by_id and "local_scope" not in by_id
+
+
+def test_local_probe_items_turn_issues_into_statuses():
+    analysis = {"issues": [
+        {"severity": "error", "signal": "webgl.renderer", "scope": "main",
+         "message": "WebGL renderer does not match the profile GPU"},
+        {"severity": "warning", "signal": "navigator.language", "scope": "iframe",
+         "message": "Navigator language does not match the profile locale"},
+        {"severity": "warning", "signal": "something.unmapped", "scope": "worker",
+         "message": "Unmapped signal"},
+    ]}
+
+    by_id = {r.site: r for r in sc.local_probe_results(analysis, {"main": PROBE_MAIN})}
+
+    assert by_id["local_gpu"].status == "fail"
+    assert "WebGL renderer" in by_id["local_gpu"].summary
+    assert by_id["local_language"].status == "warn"
+    assert by_id["local_language"].details == ["[iframe] Navigator language does not match the profile locale"]
+    # Unmapped signals land in the cross-scope consistency item.
+    assert by_id["local_scope"].status == "warn"
+    assert by_id["local_user_agent"].status == "pass"
+
+
+def test_status_counts_and_egress_note():
+    results = [
+        sc.CheckResult("a", "A", "u", "c", "pass", ""),
+        sc.CheckResult("b", "B", "u", "c", "warn", ""),
+        sc.CheckResult("c", "C", "u", "c", "fail", ""),
+        {"site": "d", "status": "unknown"},
+    ]
+    assert sc.status_counts(results) == {
+        "pass": 1, "warn": 1, "fail": 1, "unknown": 1, "error": 0, "total": 4,
+    }
+    note = sc.egress_note({"proxy_type": "socks5", "exit_ip": "1.2.3.4", "exit_country": "JP"})
+    assert "socks5 出口 1.2.3.4（JP）" in note and "住宅 IP" in note
+    assert "未取到出口 IP" in sc.egress_note({})
+
+
+@pytest.mark.asyncio
+async def test_run_checks_annotates_ip_items_and_counts(tmp_path: Path):
+    report_dir = sc.new_report_dir(tmp_path, "p")
+    extra = [sc.CheckResult("local_timezone", "时区", "", "与画像配置一致", "pass", "Asia/Tokyo", source="local")]
+    fingerprint = sc.CheckResult("fingerprint", "Fingerprint.com", "u", "c", "warn", "IP 被认出")
+
+    report = await sc.run_checks(
+        _context([]), report_dir,
+        environment={"profile_id": "p1", "profile_name": "p", "proxy_type": "direct", "exit_ip": "9.9.9.9"},
+        sites=(), extra_results=[*extra, fingerprint],
+    )
+
+    assert report["summary"] == {"pass": 1, "warn": 1, "fail": 0, "unknown": 0, "error": 0, "total": 2}
+    assert report["results"][0]["site"] == "local_timezone"
+    assert report["results"][1]["ip_note"] == sc.IP_RESULT_NOTE
+    assert "direct 出口 9.9.9.9" in report["egress_note"]
+    listed = sc.list_reports(tmp_path)
+    assert listed[0]["profile_id"] == "p1" and listed[0]["counts"]["warn"] == 1
+
+
+def _stored_report(data_dir: Path, name: str, created_at: str, *, profile_id=None, profile_name="p", results=()):
+    # Hand-named directories: new_report_dir's second-resolution stamp would
+    # collide between the reports these tests store back to back.
+    stamp = created_at.replace("-", "").replace(":", "").replace("T", "-").replace("+", "")
+    report_dir = sc.reports_dir(data_dir) / f"{stamp}-{name}"
+    report_dir.mkdir(parents=True, exist_ok=False)
+    report = {
+        "id": report_dir.name,
+        "created_at": created_at,
+        "overall": "pass",
+        "environment": {"profile_id": profile_id, "profile_name": profile_name},
+        "results": list(results),
+    }
+    (report_dir / sc.REPORT_FILE).write_text(json.dumps(report), encoding="utf-8")
+    return report
+
+
+def _result(site: str, status: str) -> dict:
+    return {"site": site, "name": site, "status": status, "summary": f"{site} {status}"}
+
+
+def test_previous_report_and_diff(tmp_path: Path):
+    older = _stored_report(tmp_path, "p", "2026-10-20T10:00:00+08:00", profile_id="p1",
+                           results=[_result("creepjs", "pass"), _result("pixelscan", "fail"), _result("iphey", "pass")])
+    newer = _stored_report(tmp_path, "p", "2026-10-21T10:00:00+08:00", profile_id="p1",
+                           results=[_result("creepjs", "fail"), _result("pixelscan", "fail"), _result("local_gpu", "pass")])
+    _stored_report(tmp_path, "q", "2026-10-21T11:00:00+08:00", profile_id="other",
+                   results=[_result("creepjs", "pass")])
+
+    previous = sc.previous_report(tmp_path, newer)
+    assert previous is not None and previous["id"] == older["id"]
+    assert sc.previous_report(tmp_path, older) is None
+
+    diff = sc.diff_reports(previous, newer)
+    assert diff["previous_id"] == older["id"]
+    changes = {c["site"]: c for c in diff["changes"]}
+    assert changes["creepjs"]["from"] == "pass" and changes["creepjs"]["to"] == "fail"
+    assert changes["local_gpu"]["from"] is None and changes["local_gpu"]["to"] == "pass"
+    assert changes["iphey"]["from"] == "pass" and changes["iphey"]["to"] is None
+    assert "pixelscan" not in changes  # unchanged items are not listed
+
+
+def test_previous_report_falls_back_to_profile_name(tmp_path: Path):
+    older = _stored_report(tmp_path, "p", "2026-10-20T10:00:00+08:00", profile_name="legacy")
+    newer = _stored_report(tmp_path, "p", "2026-10-21T10:00:00+08:00", profile_id="p1", profile_name="legacy")
+
+    previous = sc.previous_report(tmp_path, newer)
+    assert previous is not None and previous["id"] == older["id"]
+
+
+def test_api_report_includes_the_diff(app_client: TestClient):
+    from backend import database as db
+
+    _stored_report(db.DATA_DIR, "p", "2026-10-20T10:00:00+08:00", profile_id="p1",
+                   results=[_result("creepjs", "pass")])
+    newer = _stored_report(db.DATA_DIR, "p", "2026-10-21T10:00:00+08:00", profile_id="p1",
+                           results=[_result("creepjs", "fail")])
+
+    body = app_client.get(f"/api/site-checks/{newer['id']}").json()
+    assert body["diff"]["changes"] == [
+        {"site": "creepjs", "name": "creepjs", "from": "pass", "to": "fail", "summary": "creepjs fail"}
+    ]
+    older_id = body["diff"]["previous_id"]
+    assert app_client.get(f"/api/site-checks/{older_id}").json()["diff"] is None
 
 
 def test_api_reports_round_trip(app_client: TestClient):
