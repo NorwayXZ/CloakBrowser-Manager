@@ -37,6 +37,13 @@ def call(method: str, path: str, body: dict | None = None) -> dict:
 
 
 def main() -> int:
+    # Windows consoles default to a legacy code page; the report is Chinese.
+    # Without this the final print raises UnicodeEncodeError after all the
+    # work is done and the step fails for a cosmetic reason (run #2).
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
     OUT.mkdir(parents=True, exist_ok=True)
     profile = call("POST", "/api/profiles", {
         "name": "windows-scorecard",
