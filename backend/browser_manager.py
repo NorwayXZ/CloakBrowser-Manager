@@ -23,6 +23,7 @@ from urllib.parse import unquote, urlparse
 
 from cloakbrowser import launch_persistent_context_async
 
+from .cookie_formats import live_cookies_to_profile
 from .fingerprint_options import (
     apply_noise_preference,
     build_fingerprint_option_args,
@@ -85,6 +86,10 @@ LICENSE_EXIT_REASONS = {
 
 class BrowserLaunchError(RuntimeError):
     """Browser process exited during its startup handshake."""
+
+
+class CookiePullError(RuntimeError):
+    """A running browser's cookies cannot be read right now; say why."""
 
 
 def _browser_exit_reason(returncode: int | None) -> str:
@@ -3080,6 +3085,35 @@ class BrowserManager:
             "proxy_geo": proxy_geo,
         }
         return status
+
+    async def pull_profile_cookies(self, profile_id: str) -> list[dict[str, Any]]:
+        """Current cookies of a running profile, in the panel's stored shape.
+
+        The read channel is the Playwright context the Manager already holds
+        for debug-mode launches (and the Docker/VNC/headless paths) — the
+        same channel that writes cookies at launch via ``add_cookies``.
+        Manual native launches are plain processes with no CDP on purpose,
+        so there is nothing to read from until the browser is restarted in
+        debug mode; a stopped profile's on-disk store is OS-crypt encrypted
+        and is not read either. Cookie values are never logged, only counts.
+        """
+        running = self.running.get(profile_id)
+        if running is None:
+            raise CookiePullError(
+                "浏览器没有在运行：请先用「调试模式」启动这个浏览器，再导回它的 Cookie"
+            )
+        if running.context is None:
+            raise CookiePullError(
+                "这个浏览器是普通模式启动的，Manager 没有连接它的通道，读不到当前 Cookie。"
+                "请先关闭它，再用「调试模式」启动后导回"
+            )
+        try:
+            raw_cookies = await running.context.cookies()
+        except Exception as exc:
+            raise CookiePullError(f"从浏览器读取 Cookie 失败：{exc}") from exc
+        cookies = live_cookies_to_profile(raw_cookies)
+        logger.info("Pulled %d cookies from running profile %s", len(cookies), profile_id)
+        return cookies
 
     async def fingerprint_report(self, profile: dict[str, Any]) -> dict[str, Any]:
         """Run a local consistency probe in an already running profile."""
