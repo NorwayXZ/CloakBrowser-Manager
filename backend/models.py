@@ -314,6 +314,24 @@ class ProxyTestRequest(BaseModel):
     proxy: str | None = None
 
 
+class IpQualitySignal(BaseModel):
+    source: str
+    status: Literal["flagged", "suspicious", "clean", "unknown"]
+    detail: str
+
+
+class IpQualityLink(BaseModel):
+    name: str
+    url: str
+
+
+class IpQuality(BaseModel):
+    verdict: Literal["flagged", "suspicious", "clean", "unknown"]
+    summary: str
+    signals: list[IpQualitySignal] = []
+    links: list[IpQualityLink] = []
+
+
 class ProxyTestResponse(BaseModel):
     ok: bool = True
     ip: str | None = None
@@ -327,6 +345,7 @@ class ProxyTestResponse(BaseModel):
     asn: str | None = None
     source: str = "ipapi.co"
     connection_mode: Literal["direct", "proxy"] | None = None
+    ip_quality: IpQuality | None = None
 
 
 class GroupCreate(BaseModel):

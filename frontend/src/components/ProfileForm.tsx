@@ -9,6 +9,8 @@ import {
   type ProfileCreateData,
   type ProfileGroup,
   type ProxyPreset,
+  type IpQuality,
+  type IpQualityStatus,
   type ProxyTestResult,
 } from "../lib/api";
 import {
@@ -33,6 +35,40 @@ interface ProfileFormProps {
   hostOS?: HostOS | null;
   /** This computer's screen [width, height], when the backend can read it. */
   hostScreen?: number[] | null;
+}
+
+const IP_QUALITY_STYLE: Record<IpQualityStatus, { box: string; label: string }> = {
+  flagged: { box: "border-red-200 bg-red-50 text-red-800", label: "已被标记" },
+  suspicious: { box: "border-amber-200 bg-amber-50 text-amber-800", label: "有风险" },
+  clean: { box: "border-emerald-200 bg-emerald-50 text-emerald-800", label: "未标记" },
+  unknown: { box: "border-slate-200 bg-slate-50 text-slate-700", label: "无法判断" },
+};
+
+function IpQualityPanel({ quality }: { quality: IpQuality }) {
+  const style = IP_QUALITY_STYLE[quality.verdict];
+  return (
+    <div className={`rounded-md border p-3 text-xs ${style.box}`} data-testid="ip-quality">
+      <div className="font-medium">IP 质量：{style.label}</div>
+      <div className="mt-1">{quality.summary}</div>
+      <ul className="mt-2 space-y-0.5">
+        {quality.signals.map((signal) => (
+          <li key={signal.source}>
+            {signal.source}：{IP_QUALITY_STYLE[signal.status].label} · {signal.detail}
+          </li>
+        ))}
+      </ul>
+      {quality.links.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span>手动再查：</span>
+          {quality.links.map((link) => (
+            <a key={link.name} href={link.url} target="_blank" rel="noreferrer" className="underline">
+              {link.name}
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 const BROWSER_LANGUAGES: [string, string][] = [
@@ -1232,6 +1268,7 @@ export function ProfileForm({
                         </button>
                       </div>
                     )}
+                    {proxyTest?.ip_quality && <IpQualityPanel quality={proxyTest.ip_quality} />}
                   </div>
 
                   <label className="pt-2 text-right text-sm font-medium text-slate-600">时区语言</label>

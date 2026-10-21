@@ -86,6 +86,43 @@ describe("ProfileForm extra fingerprint options", () => {
   });
 });
 
+describe("ProfileForm proxy IP quality", () => {
+  it("shows whether the exit IP is flagged as a proxy", async () => {
+    vi.spyOn(api, "testProxy").mockResolvedValue({
+      ok: true,
+      ip: "150.31.13.127",
+      country: "Japan",
+      country_code: "JP",
+      suggested_locale: "ja-JP",
+      region: null,
+      city: "Toyama",
+      timezone: "Asia/Tokyo",
+      org: "IIJ",
+      asn: "AS2497",
+      source: "test",
+      connection_mode: "proxy",
+      ip_quality: {
+        verdict: "flagged",
+        summary: "已被标记为代理 / VPN / 机房 IP（proxycheck.io）：网站能看出你在用代理",
+        signals: [
+          { source: "proxycheck.io", status: "flagged", detail: "代理（Shadowsocks，风险 66）" },
+          { source: "ip-api.com", status: "clean", detail: "没有标记（家庭宽带，IIJ）" },
+        ],
+        links: [{ name: "Scamalytics", url: "https://scamalytics.com/ip/150.31.13.127" }],
+      },
+    });
+    render(<ProfileForm profile={null} hostOS="macos" onSave={vi.fn()} onCancel={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "检查直连出口" }));
+
+    const panel = await screen.findByTestId("ip-quality");
+    expect(panel.textContent).toContain("IP 质量：已被标记");
+    expect(panel.textContent).toContain("proxycheck.io：已被标记 · 代理（Shadowsocks，风险 66）");
+    expect(within(panel).getByRole("link", { name: "Scamalytics" }).getAttribute("href"))
+      .toBe("https://scamalytics.com/ip/150.31.13.127");
+  });
+});
+
 describe("ProfileForm screen and browser language", () => {
   it("follows the computer's screen by default and can switch to a preset", async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);

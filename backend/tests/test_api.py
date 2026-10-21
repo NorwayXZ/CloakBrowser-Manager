@@ -122,13 +122,33 @@ def test_direct_connection_test_uses_local_network(app_client: TestClient):
         "suggested_locale": "zh-HK",
         "source": "test",
     }
-    with patch("backend.main.fetch_proxy_geo", AsyncMock(return_value=geo)) as lookup:
+    quality = {
+        "verdict": "flagged",
+        "summary": "已被标记",
+        "signals": [{"source": "proxycheck.io", "status": "flagged", "detail": "代理（VPN，风险 66）"}],
+        "links": [{"name": "Scamalytics", "url": "https://scamalytics.com/ip/203.0.113.20"}],
+    }
+    with patch("backend.main.fetch_proxy_geo", AsyncMock(return_value=geo)) as lookup, \
+            patch("backend.main.check_ip_quality", AsyncMock(return_value=quality)) as reputation:
         response = app_client.post("/api/proxy/test", json={"proxy": None})
 
     assert response.status_code == 200
     assert response.json()["timezone"] == "Asia/Hong_Kong"
     assert response.json()["connection_mode"] == "direct"
+    assert response.json()["ip_quality"]["verdict"] == "flagged"
     lookup.assert_awaited_once_with(None)
+    reputation.assert_awaited_once_with(None, "203.0.113.20")
+
+
+def test_proxy_test_survives_a_failed_quality_check(app_client: TestClient):
+    geo = {"ip": "203.0.113.20", "timezone": "Asia/Tokyo", "source": "test"}
+    with patch("backend.main.fetch_proxy_geo", AsyncMock(return_value=geo)), \
+            patch("backend.main.check_ip_quality", AsyncMock(side_effect=RuntimeError("boom"))):
+        response = app_client.post("/api/proxy/test", json={"proxy": None})
+
+    assert response.status_code == 200
+    assert response.json()["ip"] == "203.0.113.20"
+    assert response.json()["ip_quality"] is None
 
 
 def test_delete_profile(app_client: TestClient):

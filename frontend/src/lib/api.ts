@@ -299,6 +299,15 @@ export interface PreflightResult {
   capabilities: Record<string, unknown>;
 }
 
+export type IpQualityStatus = "flagged" | "suspicious" | "clean" | "unknown";
+
+export interface IpQuality {
+  verdict: IpQualityStatus;
+  summary: string;
+  signals: { source: string; status: IpQualityStatus; detail: string }[];
+  links: { name: string; url: string }[];
+}
+
 export interface ProxyTestResult {
   ok: boolean;
   ip: string | null;
@@ -312,6 +321,8 @@ export interface ProxyTestResult {
   asn: string | null;
   source: string;
   connection_mode?: "direct" | "proxy" | null;
+  /** Whether the exit IP is known as a proxy, VPN or datacenter address. */
+  ip_quality?: IpQuality | null;
 }
 
 export interface ProfileGroup {

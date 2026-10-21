@@ -49,6 +49,7 @@ from .update_job import UpdateEnv, UpdateJob, platform_name
 from .fingerprint_report import DEFAULT_NETWORK_PROBE_URL, DIAGNOSTIC_SCRIPT
 from .proxy_bridge import HttpProxyBridge
 from .proxy_geo import fetch_proxy_geo
+from .ip_quality import check_ip_quality
 from .request_guard import RequestGuardMiddleware
 from .runtime import server_port
 from .rfb import _RFB_MSG_SIZE, _build_server_cut_text, _filter_rfb_client_messages, _parse_kasmvnc_clipboard
@@ -1571,6 +1572,10 @@ async def test_proxy(req: ProxyTestRequest):
             effective_proxy = await proxy_bridge.start()
         data = await fetch_proxy_geo(effective_proxy)
         data["connection_mode"] = "proxy" if effective_proxy else "direct"
+        try:
+            data["ip_quality"] = await check_ip_quality(effective_proxy, data.get("ip"))
+        except Exception as exc:  # the geo result stands without it
+            logger.warning("IP quality check failed: %s", exc)
     except Exception as exc:
         label = "代理测试" if proxy else "直连出口检测"
         raise HTTPException(status_code=400, detail=f"{label}失败：{exc}") from exc
