@@ -34,29 +34,35 @@ jobs:
       - name: Install backend
         shell: pwsh
         run: python -m pip install -r backend/requirements.txt
-      - name: Start Manager
+      - name: Start Manager and run site checks
         shell: pwsh
         env:
           CLOAKBROWSER_MANAGER_PORT: "18080"
           CLOAKBROWSER_MANAGER_DATA_DIR: ${{ runner.temp }}\cbm-scorecard-data
         run: |
+          # Server and checks must live in one step: a process started in an
+          # earlier step is reaped when that step ends on Windows runners
+          # (first run died exactly this way, before its first request).
           $proc = Start-Process -PassThru python -ArgumentList @(
             "-m", "uvicorn", "backend.main:app",
             "--host", "127.0.0.1", "--port", "18080"
           ) -RedirectStandardOutput "$env:RUNNER_TEMP\manager-out.log" `
              -RedirectStandardError "$env:RUNNER_TEMP\manager-err.log"
-          $ok = $false
-          foreach ($i in 1..60) {
-            try { Invoke-RestMethod http://127.0.0.1:18080/api/status | Out-Null; $ok = $true; break }
-            catch { Start-Sleep 1 }
+          try {
+            $ok = $false
+            foreach ($i in 1..60) {
+              try { Invoke-RestMethod http://127.0.0.1:18080/api/status | Out-Null; $ok = $true; break }
+              catch { Start-Sleep 1 }
+            }
+            if (-not $ok) {
+              Get-Content "$env:RUNNER_TEMP\manager-err.log" -ErrorAction SilentlyContinue
+              throw "Manager server did not start"
+            }
+            python scripts/windows_scorecard.py scorecard-out
+            if ($LASTEXITCODE -ne 0) { throw "Scorecard script exited with $LASTEXITCODE" }
+          } finally {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
           }
-          if (-not $ok) {
-            Get-Content "$env:RUNNER_TEMP\manager-err.log" -ErrorAction SilentlyContinue
-            throw "Manager server did not start"
-          }
-      - name: Run site checks
-        shell: pwsh
-        run: python scripts/windows_scorecard.py scorecard-out
       - name: Upload scorecard
         if: always()
         uses: actions/upload-artifact@v7
