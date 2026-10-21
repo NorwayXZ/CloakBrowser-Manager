@@ -211,6 +211,40 @@ def live_cookies_to_profile(raw_cookies: list[dict[str, Any]] | None) -> list[di
     return cookies
 
 
+_EXTENSION_SAMESITE = {"strict": "strict", "lax": "lax", "no_restriction": "none"}
+
+
+def extension_cookies_to_profile(raw_cookies: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """``chrome.cookies.getAll`` entries (from the profile extension) in the
+    stored shape. Chrome spells sameSite ``no_restriction``/``unspecified``
+    and marks session cookies with ``session: true`` instead of an expiry.
+    """
+    cookies: list[dict[str, Any]] = []
+    for item in raw_cookies or []:
+        if _valid_cookie(item) is None:
+            continue
+        domain = str(item["domain"])
+        cookie: dict[str, Any] = {
+            "name": item["name"],
+            "value": item["value"],
+            "domain": domain,
+            "path": str(item.get("path") or "/"),
+            "secure": bool(item.get("secure", False)),
+            "httpOnly": bool(item.get("httpOnly", False)),
+            "hostOnly": bool(item.get("hostOnly", not domain.startswith("."))),
+        }
+        same_site = str(item.get("sameSite") or "").strip().lower()
+        if same_site in _EXTENSION_SAMESITE:
+            cookie["sameSite"] = _EXTENSION_SAMESITE[same_site]
+        expiry = item.get("expirationDate")
+        if not item.get("session") and isinstance(expiry, (int, float)) and expiry > 0:
+            cookie["expirationDate"] = int(expiry)
+        else:
+            cookie["session"] = True
+        cookies.append(cookie)
+    return cookies
+
+
 def cookie_editor_cookies(cookies: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     """Stored-shape cookies as the array the Cookie-Editor extension imports."""
     exported: list[dict[str, Any]] = []
