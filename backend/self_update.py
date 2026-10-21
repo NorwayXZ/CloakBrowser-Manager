@@ -282,7 +282,7 @@ def write_pending(data_dir: Path, *, from_version: str | None, to_version: str) 
         "from": from_version,
         "to": to_version,
         "started_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-    }))
+    }), encoding="utf-8")
 
 
 def clean_after_success(work_dir: Path) -> list[Path]:
@@ -314,7 +314,7 @@ def settle_pending(data_dir: Path, running_version: str | None) -> dict | None:
     if not path.is_file():
         return None
     try:
-        pending = json.loads(path.read_text())
+        pending = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         pending = {}
     path.unlink(missing_ok=True)
