@@ -95,6 +95,99 @@ def resolve_license() -> LicenseState:
     )
 
 
+LICENSE_KEY_FILENAME = "license.key"
+ENV_LICENSE_KEY = "CLOAKBROWSER_LICENSE_KEY"
+
+
+def license_key_path() -> Path:
+    """Where the wrapper reads a saved license key: its cache dir / license.key.
+
+    Matches cloakbrowser.license resolution (param > env var > this file);
+    the cache dir honours CLOAKBROWSER_CACHE_DIR, defaulting to ~/.cloakbrowser.
+    """
+    from cloakbrowser.config import get_cache_dir
+
+    return get_cache_dir() / LICENSE_KEY_FILENAME
+
+
+def license_key_source() -> str:
+    """How the wrapper finds a key right now: "env", "file" or "none".
+
+    Mirrors the wrapper's resolution order without ever returning the key.
+    """
+    if os.environ.get(ENV_LICENSE_KEY, "").strip():
+        return "env"
+    try:
+        if license_key_path().read_text(encoding="utf-8").strip():
+            return "file"
+    except OSError:
+        pass
+    return "none"
+
+
+def license_key_stored() -> bool:
+    """True when a key is saved in the license.key file the panel manages."""
+    return license_key_source() == "file"
+
+
+def _restore_license_key_file(path: Path, previous: bytes | None) -> None:
+    try:
+        if previous is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_bytes(previous)
+    except OSError:
+        pass
+
+
+def save_license_key(raw_key: str) -> LicenseState:
+    """Save a key where the wrapper resolves it, then report the new state.
+
+    A key the server rejects (tier "invalid") is rolled back to whatever was
+    saved before, so a typo never replaces a working key. An env-provided key
+    outranks the file, so saving is refused while one is set — otherwise the
+    panel would report a failure that has nothing to do with the typed key.
+    """
+    key = (raw_key or "").strip()
+    if not key:
+        raise KernelError("授权密钥是空的。")
+    if license_key_source() == "env":
+        raise KernelError(
+            f"当前授权密钥由环境变量 {ENV_LICENSE_KEY} 提供，面板保存的密钥不会生效；"
+            "请先移除该环境变量并重启 Manager，再在这里保存。"
+        )
+    path = license_key_path()
+    previous = path.read_bytes() if path.exists() else None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(key + "\n", encoding="utf-8")
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass  # Windows has no POSIX modes; the profile dir is user-private.
+    except OSError as exc:
+        raise KernelError("保存授权密钥失败：写不进密钥文件。") from exc
+    state = resolve_license()
+    if state.tier == "invalid":
+        _restore_license_key_file(path, previous)
+        raise KernelError("这个授权密钥没有通过官方验证，已恢复之前的设置。请核对密钥后重新输入。")
+    return state
+
+
+def remove_license_key() -> LicenseState:
+    """Delete the saved key file and report the state that leaves behind.
+
+    An env-provided key is not the panel's to remove; the file is deleted
+    either way and the returned state reflects what still resolves.
+    """
+    path = license_key_path()
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as exc:
+        raise KernelError("删除保存的授权密钥失败。") from exc
+    return resolve_license()
+
+
 def effective_binary(license_state: LicenseState, *, network: bool = False) -> dict[str, Any]:
     return _cli()._effective_binary(license_state.entitled_pro, quick=not network)
 
