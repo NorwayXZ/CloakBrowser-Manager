@@ -23,7 +23,13 @@ from urllib.parse import unquote, urlparse
 
 from cloakbrowser import launch_persistent_context_async
 
-from .cookie_formats import live_cookies_to_profile
+from .cookie_formats import extension_cookies_to_profile, live_cookies_to_profile
+from .cookie_pull import (
+    PULL_TIMEOUT_SECONDS,
+    CookiePullChannel,
+    CookiePullTimeout,
+    CookiePullUnavailable,
+)
 from .fingerprint_options import (
     apply_noise_preference,
     build_fingerprint_option_args,
@@ -429,11 +435,25 @@ def _parse_profile_cookies(
     return cookies
 
 
-def _sync_cookie_import_extension(user_data_dir: Path, raw: str | None) -> Path | None:
-    """Create a profile-local MV3 extension for no-CDP cookie imports."""
+def _sync_cookie_import_extension(
+    user_data_dir: Path,
+    raw: str | None,
+    *,
+    pull_config: dict[str, Any] | None = None,
+) -> Path | None:
+    """Create the profile-local MV3 extension for no-CDP cookie handling.
+
+    Two jobs: import the profile's saved Cookie JSON once (payload hash
+    guards repeats, as before), and — when ``pull_config`` is given — answer
+    cookie pull-backs from the Manager by polling its localhost endpoint
+    with the per-profile token embedded in the worker. The directory is
+    rewritten on every manual launch, so older extensions upgrade in place.
+    Without cookies and without a pull config there is nothing to do and
+    any stale directory is removed.
+    """
     extension_dir = user_data_dir / COOKIE_IMPORTER_DIRNAME
     cookies = _parse_profile_cookies(raw, preserve_host_only=True)
-    if not cookies:
+    if not cookies and pull_config is None:
         shutil.rmtree(extension_dir, ignore_errors=True)
         return None
 
@@ -444,9 +464,9 @@ def _sync_cookie_import_extension(user_data_dir: Path, raw: str | None) -> Path 
     manifest = {
         "manifest_version": 3,
         "name": "CloakBrowser Cookie Importer",
-        "version": "1.0.0",
-        "description": "Imports the Cookie JSON saved for this local browser profile.",
-        "permissions": ["cookies", "storage"],
+        "version": "2.0.0",
+        "description": "Imports this profile's saved Cookie JSON and answers the Manager's cookie pull-back requests.",
+        "permissions": ["cookies", "storage", "alarms"],
         "host_permissions": ["<all_urls>"],
         "background": {"service_worker": "service_worker.js"},
     }
@@ -511,10 +531,56 @@ const importCookies = async () => {
 chrome.runtime.onInstalled.addListener(() => { void importCookies(); });
 chrome.runtime.onStartup.addListener(() => { void importCookies(); });
 void importCookies();
+
+// --- Cookie pull-back -------------------------------------------------------
+// The Manager cannot read a manual launch's cookies itself, so it leaves a
+// pending request on its localhost API; this worker polls for one, reads
+// chrome.cookies and posts the entries back with the per-profile token.
+// Cookie values only ever go to that localhost endpoint; nothing is logged.
+const PULL_CONFIG = __PULL_CONFIG__;
+const PULL_POLL_MS = 4000;
+let pullInFlight = false;
+
+const checkPullRequest = async () => {
+  if (!PULL_CONFIG || pullInFlight) return;
+  pullInFlight = true;
+  try {
+    const headers = { "X-Profile-Token": PULL_CONFIG.token };
+    const base = `${PULL_CONFIG.apiBase}/ext/cookie-pull/${encodeURIComponent(PULL_CONFIG.profileId)}`;
+    const pendingResponse = await fetch(`${base}/pending`, { headers });
+    if (!pendingResponse.ok) return;
+    const pending = await pendingResponse.json();
+    if (!pending || !pending.request_id) return;
+    const cookies = await chrome.cookies.getAll({});
+    await fetch(`${base}/result`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ request_id: pending.request_id, cookies }),
+    });
+  } catch (_) {
+    // Manager not reachable yet (or restarting); the next tick retries.
+  } finally {
+    pullInFlight = false;
+  }
+};
+
+if (PULL_CONFIG) {
+  const schedulePullPoll = () => {
+    setTimeout(() => { void checkPullRequest().then(schedulePullPoll); }, PULL_POLL_MS);
+  };
+  // Alarms revive the worker after Chromium puts it to sleep.
+  chrome.alarms.create("cookiePullPoll", { periodInMinutes: 0.5 });
+  chrome.alarms.onAlarm.addListener(() => { void checkPullRequest(); });
+  void checkPullRequest();
+  schedulePullPoll();
+}
 """.strip()
     worker = worker_template.replace(
         "__COOKIE_PAYLOAD__",
         json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+    ).replace(
+        "__PULL_CONFIG__",
+        json.dumps(pull_config, ensure_ascii=False, separators=(",", ":")),
     )
     _write_json_file(extension_dir / "manifest.json", manifest)
     _write_json_file(extension_dir / "cookies.json", payload)
@@ -2174,6 +2240,7 @@ class BrowserManager:
     def __init__(self, runtime_config: RuntimeConfig | None = None):
         self.runtime = runtime_config or resolve_runtime()
         self.running: dict[str, RunningProfile] = {}
+        self.cookie_pulls = CookiePullChannel()
         self._launching: set[str] = set()  # profile IDs currently being launched
         self.vnc = VNCManager(self.runtime.viewer_mode == "vnc")
         self._lock = asyncio.Lock()
@@ -2452,9 +2519,18 @@ class BrowserManager:
 
             user_launch_args = list(profile.get("launch_args") or [])
             if requested_launch_mode == "manual":
+                # Every manual launch carries the cookie extension: it imports
+                # the saved cookies and, with this per-launch token, can answer
+                # pull-back requests for browsers the Manager cannot drive.
+                pull_config = {
+                    "apiBase": f"http://127.0.0.1:{server_port()}",
+                    "profileId": profile_id,
+                    "token": self.cookie_pulls.register_token(profile_id),
+                }
                 cookie_importer = _sync_cookie_import_extension(
                     user_data_dir,
                     profile.get("cookies_json"),
+                    pull_config=pull_config,
                 )
                 if cookie_importer is not None:
                     _append_unpacked_extension_arg(user_launch_args, cookie_importer)
@@ -2863,6 +2939,7 @@ class BrowserManager:
         except BaseException:
             async with self._lock:
                 self._launching.discard(profile_id)
+            self.cookie_pulls.drop(profile_id)
             if context is not None:
                 await self._close_context(context, profile_id)
             elif browser_process is not None:
@@ -2984,6 +3061,9 @@ class BrowserManager:
         *,
         close_context: bool,
     ) -> None:
+        # The extension's pull token dies with the browser; a pull still
+        # waiting on it fails at once instead of running out its timeout.
+        self.cookie_pulls.drop(running.profile_id)
         if (
             running.language_watch_task is not None
             and running.language_watch_task is not asyncio.current_task()
@@ -3089,30 +3169,50 @@ class BrowserManager:
     async def pull_profile_cookies(self, profile_id: str) -> list[dict[str, Any]]:
         """Current cookies of a running profile, in the panel's stored shape.
 
-        The read channel is the Playwright context the Manager already holds
-        for debug-mode launches (and the Docker/VNC/headless paths) — the
-        same channel that writes cookies at launch via ``add_cookies``.
-        Manual native launches are plain processes with no CDP on purpose,
-        so there is nothing to read from until the browser is restarted in
-        debug mode; a stopped profile's on-disk store is OS-crypt encrypted
-        and is not read either. Cookie values are never logged, only counts.
+        Two read channels, same result. Debug-mode launches (and the
+        Docker/VNC/headless paths) hand the Manager a Playwright context —
+        the fast path, the same channel that writes cookies at launch via
+        ``add_cookies``. Manual native launches are plain processes with no
+        CDP on purpose, so the pull goes through the profile's local
+        extension instead: the Manager leaves a pending request and the
+        extension posts its ``chrome.cookies`` back (see ``cookie_pull``).
+        A stopped profile's on-disk store is OS-crypt encrypted and is not
+        read either way. Cookie values are never logged, only counts.
         """
         running = self.running.get(profile_id)
         if running is None:
             raise CookiePullError(
-                "浏览器没有在运行：请先用「调试模式」启动这个浏览器，再导回它的 Cookie"
+                "浏览器没有在运行：请先启动这个浏览器，再导回它的 Cookie"
             )
-        if running.context is None:
+        if running.context is not None:
+            try:
+                raw_cookies = await running.context.cookies()
+            except Exception as exc:
+                raise CookiePullError(f"从浏览器读取 Cookie 失败：{exc}") from exc
+            cookies = live_cookies_to_profile(raw_cookies)
+            logger.info("Pulled %d cookies from running profile %s", len(cookies), profile_id)
+            return cookies
+        if not self.cookie_pulls.has_token(profile_id):
             raise CookiePullError(
-                "这个浏览器是普通模式启动的，Manager 没有连接它的通道，读不到当前 Cookie。"
-                "请先关闭它，再用「调试模式」启动后导回"
+                "这个浏览器还没有装上导回通道（它是用旧版本启动的）："
+                "请先关闭它，重新启动一次，再导回 Cookie"
             )
         try:
-            raw_cookies = await running.context.cookies()
-        except Exception as exc:
-            raise CookiePullError(f"从浏览器读取 Cookie 失败：{exc}") from exc
-        cookies = live_cookies_to_profile(raw_cookies)
-        logger.info("Pulled %d cookies from running profile %s", len(cookies), profile_id)
+            raw_cookies = await self.cookie_pulls.request_cookies(
+                profile_id, timeout=PULL_TIMEOUT_SECONDS
+            )
+        except CookiePullTimeout as exc:
+            raise CookiePullError(
+                "浏览器没有响应导回请求：请确认该浏览器已打开，稍等几秒后重试"
+            ) from exc
+        except CookiePullUnavailable as exc:
+            raise CookiePullError(f"导回没有完成：{exc}") from exc
+        cookies = extension_cookies_to_profile(raw_cookies)
+        logger.info(
+            "Pulled %d cookies from manual profile %s via its extension",
+            len(cookies),
+            profile_id,
+        )
         return cookies
 
     async def fingerprint_report(self, profile: dict[str, Any]) -> dict[str, Any]:
