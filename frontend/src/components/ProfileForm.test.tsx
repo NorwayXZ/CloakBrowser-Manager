@@ -69,6 +69,8 @@ describe("ProfileForm extra fingerprint options", () => {
 
     await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
     expect(onSave.mock.calls[0][0].fingerprint_options).toEqual({
+      noise: false,
+      storage_quota_mb: 50000,
       brand: "Edge",
       webrtc: "custom",
       webrtc_ip: "203.0.113.9",
@@ -76,6 +78,31 @@ describe("ProfileForm extra fingerprint options", () => {
       portable_cookies: true,
       speech_voices: false,
     });
+  });
+
+  it("applies the recommended noise/quota preset to new profiles and can roll back to auto", async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<ProfileForm profile={null} hostOS="windows" onSave={onSave} onCancel={vi.fn()} />);
+
+    // New form defaults to the 2026-10-21 recommended preset.
+    fireEvent.change(screen.getByPlaceholderText("例如 Amazon Seller #1"), { target: { value: "Preset" } });
+    fireEvent.click(screen.getByRole("button", { name: "创建" }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
+    expect(onSave.mock.calls[0][0].fingerprint_options.noise).toBe(false);
+    expect(onSave.mock.calls[0][0].fingerprint_options.storage_quota_mb).toBe(50000);
+  });
+
+  it("rolls the noise/quota preset back to kernel defaults (auto)", async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<ProfileForm profile={null} hostOS="windows" onSave={onSave} onCancel={vi.fn()} />);
+
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "指纹噪声" })).getByRole("radio", { name: "自动" }));
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "存储配额" })).getByRole("radio", { name: "按种子自动" }));
+    fireEvent.change(screen.getByPlaceholderText("例如 Amazon Seller #1"), { target: { value: "Rollback" } });
+    fireEvent.click(screen.getByRole("button", { name: "创建" }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
+    expect(onSave.mock.calls[0][0].fingerprint_options.noise).toBeNull();
+    expect(onSave.mock.calls[0][0].fingerprint_options.storage_quota_mb).toBeNull();
   });
 
   it("keeps transparent proxy off until a proxy is set", () => {
