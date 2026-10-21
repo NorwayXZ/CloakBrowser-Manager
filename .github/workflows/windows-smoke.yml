@@ -65,11 +65,27 @@ jobs:
           $setup = Get-ChildItem "build\windows\*-setup.exe" | Select-Object -First 1
           if (-not $setup) { throw "setup.exe was not built" }
           Write-Host "Installing $($setup.FullName)"
-          $proc = Start-Process -PassThru -Wait $setup.FullName -ArgumentList @(
+          # No Start-Process -Wait here: on Windows it also waits for child
+          # processes, and the installer auto-starts the long-running Manager
+          # after a silent install, so -Wait never returns (run #1 hung 8+
+          # minutes on exactly this). Poll for the installed files instead.
+          $proc = Start-Process -PassThru $setup.FullName -ArgumentList @(
             "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-",
             "/LOG=$env:RUNNER_TEMP\innosetup.log"
           )
-          if ($proc.ExitCode -ne 0) { throw "Installer exited with code $($proc.ExitCode)" }
+          $appDir = "$env:LOCALAPPDATA\Programs\CloakBrowser Manager"
+          $deadline = (Get-Date).AddSeconds(180)
+          $installed = $false
+          while ((Get-Date) -lt $deadline) {
+            if ($proc.HasExited -and $proc.ExitCode -ne 0) {
+              throw "Installer exited with code $($proc.ExitCode)"
+            }
+            if ((Test-Path (Join-Path $appDir "CloakBrowser Manager.exe")) -and
+                (Test-Path (Join-Path $appDir "unins000.exe"))) { $installed = $true; break }
+            Start-Sleep 2
+          }
+          if (-not $installed) { throw "Installer did not finish within 180s" }
+          Start-Sleep 5
 
       - name: Verify installed files and registration
         shell: pwsh
