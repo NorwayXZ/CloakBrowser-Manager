@@ -82,6 +82,27 @@ def test_native_rejects_cross_site_post(native_client: TestClient):
     assert allowed.status_code == 201
 
 
+def test_extension_endpoints_skip_the_origin_rule_but_keep_the_host_rule(native_client: TestClient):
+    # A profile extension posts with its chrome-extension:// Origin; the
+    # per-profile token is its credential, so the guard lets it through…
+    resp = native_client.post(
+        "/ext/cookie-pull/missing/result",
+        json={"request_id": "x", "cookies": []},
+        headers={"origin": "chrome-extension://abcdefghijklmnop", "x-forwarded-for": "127.0.0.1"},
+    )
+    assert resp.status_code == 403  # the endpoint's own token check, not the guard's
+    assert "其他网站" not in resp.json()["detail"]
+
+    # …but a rebinding Host is still rejected before the endpoint runs.
+    resp = native_client.post(
+        "/ext/cookie-pull/missing/result",
+        json={"request_id": "x", "cookies": []},
+        headers={"origin": "chrome-extension://abcdefghijklmnop", "host": "attacker.example:8080"},
+    )
+    assert resp.status_code == 403
+    assert "其他网站" in resp.json()["detail"]
+
+
 def test_cross_site_get_is_not_blocked_by_origin(native_client: TestClient):
     # Cross-site GETs cannot read the response (CORS); only Host is enforced.
     resp = native_client.get("/api/status", headers={"origin": "https://attacker.example"})
