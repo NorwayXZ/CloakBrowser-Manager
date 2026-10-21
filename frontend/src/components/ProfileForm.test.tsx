@@ -290,7 +290,7 @@ describe("ProfileForm cookies and layout", () => {
   });
 
   it("shows the backend error when the browser cannot be read", async () => {
-    vi.spyOn(api, "pullProfileCookies").mockRejectedValue(new Error("浏览器没有在运行：请先用「调试模式」启动这个浏览器，再导回它的 Cookie"));
+    vi.spyOn(api, "pullProfileCookies").mockRejectedValue(new Error("浏览器没有在运行：请先启动这个浏览器，再导回它的 Cookie"));
     render(<ProfileForm profile={makeProfile()} hostOS="macos" onSave={vi.fn()} onCancel={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: /从浏览器导回 Cookie/ }));
