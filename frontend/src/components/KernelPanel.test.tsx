@@ -8,7 +8,7 @@ function overview(patch: Partial<KernelOverview> = {}): KernelOverview {
     wrapper_version: "0.6.2",
     platform: "darwin-arm64",
     cache_dir: "/Users/me/.cloakbrowser",
-    license: { tier: "free", plan: "free", expires: null, can_pin: false },
+    license: { tier: "free", plan: "free", expires: null, can_pin: false, key_stored: true },
     settings: { auto_update: true, release_channel: "stable", pinned_version: null },
     version: "154.0.8037.57.1",
     installed: true,
@@ -81,6 +81,70 @@ describe("KernelPanel", () => {
       expect(save).toHaveBeenCalledWith({ auto_update: false, release_channel: "stable", pinned_version: null }),
     );
     expect(await screen.findByText(/内核设置已保存/)).toBeTruthy();
+  });
+
+  it("saves a typed license key and clears the field", async () => {
+    vi.spyOn(api, "getKernel").mockResolvedValue(
+      overview({ license: { tier: "none", plan: null, expires: null, can_pin: true, key_stored: false } }),
+    );
+    const save = vi
+      .spyOn(api, "saveLicenseKey")
+      .mockResolvedValue(
+        overview({ license: { tier: "free", plan: "free", expires: null, can_pin: false, key_stored: true } }),
+      );
+    render(<KernelPanel runningCount={0} />);
+    await screen.findByText("未登录授权");
+
+    const input = screen.getByLabelText("CloakBrowser 授权密钥") as HTMLInputElement;
+    expect(input.type).toBe("password");
+    const button = screen.getByRole("button", { name: "保存密钥" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    fireEvent.change(input, { target: { value: "cb_test_fixture_000" } });
+    fireEvent.click(button);
+
+    await waitFor(() => expect(save).toHaveBeenCalledWith("cb_test_fixture_000"));
+    expect(await screen.findByText(/授权密钥已保存并通过验证/)).toBeTruthy();
+    expect(input.value).toBe("");
+    expect(screen.queryByRole("button", { name: "保存密钥" })).toBeNull();
+    expect(screen.getByRole("button", { name: /移除密钥/ })).toBeTruthy();
+  });
+
+  it("keeps the typed key and shows the error when the key is rejected", async () => {
+    vi.spyOn(api, "getKernel").mockResolvedValue(
+      overview({ license: { tier: "none", plan: null, expires: null, can_pin: true, key_stored: false } }),
+    );
+    vi.spyOn(api, "saveLicenseKey").mockRejectedValue(
+      new Error("这个授权密钥没有通过官方验证，已恢复之前的设置。请核对密钥后重新输入。"),
+    );
+    render(<KernelPanel runningCount={0} />);
+    await screen.findByText("未登录授权");
+
+    const input = screen.getByLabelText("CloakBrowser 授权密钥") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "cb_test_fixture_999" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存密钥" }));
+
+    expect(await screen.findByText(/没有通过官方验证/)).toBeTruthy();
+    expect(input.value).toBe("cb_test_fixture_999");
+  });
+
+  it("removes a stored license key after confirmation", async () => {
+    vi.spyOn(api, "getKernel").mockResolvedValue(overview());
+    const remove = vi.spyOn(api, "removeLicenseKey").mockResolvedValue(
+      overview({ license: { tier: "none", plan: null, expires: null, can_pin: true, key_stored: false } }),
+    );
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<KernelPanel runningCount={0} />);
+    await screen.findByText("免费 GitHub 密钥");
+
+    expect(screen.getByText(/已保存授权密钥/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /移除密钥/ }));
+    expect(remove).not.toHaveBeenCalled();
+
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: /移除密钥/ }));
+    await waitFor(() => expect(remove).toHaveBeenCalledOnce());
+    expect(await screen.findByText(/已移除保存的授权密钥/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "保存密钥" })).toBeTruthy();
   });
 
   it("deletes an old kernel only after confirmation and while no browser runs", async () => {
