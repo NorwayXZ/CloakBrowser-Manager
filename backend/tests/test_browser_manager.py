@@ -1239,7 +1239,9 @@ def test_cookie_import_extension_is_profile_local_and_hash_stable(tmp_path: Path
     extension = _sync_cookie_import_extension(tmp_path, raw)
 
     assert extension == tmp_path / "manager-cookie-importer"
-    assert json.loads((extension / "manifest.json").read_text())["permissions"] == ["cookies", "storage"]
+    manifest = json.loads((extension / "manifest.json").read_text())
+    assert manifest["permissions"] == ["cookies", "storage", "alarms"]
+    assert manifest["version"] == "2.0.0"
     payload = json.loads((extension / "cookies.json").read_text())
     assert payload["cookies"][0]["name"] == "sid"
     assert payload["cookies"][0]["hostOnly"] is True
@@ -1254,6 +1256,32 @@ def test_cookie_import_extension_is_profile_local_and_hash_stable(tmp_path: Path
     unchanged = (extension / "cookies.json").read_text()
     _sync_cookie_import_extension(tmp_path, raw)
     assert (extension / "cookies.json").read_text() == unchanged
+
+
+def test_cookie_extension_without_cookies_or_pull_config_is_removed(tmp_path: Path):
+    extension = _sync_cookie_import_extension(tmp_path, "[]")
+    assert extension is None
+    assert not (tmp_path / "manager-cookie-importer").exists()
+
+
+def test_cookie_extension_with_pull_config_answers_pull_requests(tmp_path: Path):
+    pull_config = {
+        "apiBase": "http://127.0.0.1:8080",
+        "profileId": "p1",
+        "token": "tok-123",
+    }
+    # No seed cookies: the extension is still installed for the pull channel.
+    extension = _sync_cookie_import_extension(tmp_path, None, pull_config=pull_config)
+
+    assert extension == tmp_path / "manager-cookie-importer"
+    payload = json.loads((extension / "cookies.json").read_text())
+    assert payload["cookies"] == []
+    worker = (extension / "service_worker.js").read_text()
+    assert "chrome.cookies.set" in worker  # one-time import still there
+    assert "chrome.cookies.getAll" in worker
+    assert "/ext/cookie-pull/" in worker
+    assert "tok-123" in worker
+    assert "alarms" in json.loads((extension / "manifest.json").read_text())["permissions"]
 
 
 def test_cookie_parser_strips_host_only_only_for_playwright():
