@@ -81,6 +81,7 @@ jobs:
           path: |
             scorecard-out/**
             ${{ runner.temp }}\cbm-scorecard-data\check-reports\**
+            ${{ runner.temp }}\cbm-scorecard-data\profiles\*\xray\xray.log
             ${{ runner.temp }}\manager-out.log
             ${{ runner.temp }}\manager-err.log
           if-no-files-found: warn
