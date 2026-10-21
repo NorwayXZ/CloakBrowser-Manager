@@ -9,9 +9,13 @@ from starlette.testclient import TestClient
 
 from backend.cookie_formats import (
     CookieFormatError,
+    cookie_editor_cookies,
+    live_cookies_to_profile,
     merge_cookies,
     normalize_cookie_text,
     parse_cookie_text,
+    to_cookie_editor_json,
+    to_netscape,
 )
 
 NETSCAPE = (
@@ -125,3 +129,83 @@ def test_merge_endpoint_adds_to_existing_cookies(app_client: TestClient):
 def test_merge_endpoint_rejects_empty_text(app_client: TestClient):
     resp = app_client.post("/api/cookies/merge", json={"text": "   "})
     assert resp.status_code == 422
+
+
+# --- Reading cookies back from a live browser, and exporting them ----------
+
+LIVE_COOKIES = [
+    {
+        "name": "sid", "value": "abc123", "domain": ".example.com", "path": "/",
+        "expires": 1893456000.0, "httpOnly": True, "secure": True, "sameSite": "Lax",
+    },
+    {
+        "name": "pref", "value": "zh", "domain": "shop.example.com", "path": "/cart",
+        "expires": -1, "httpOnly": False, "secure": False, "sameSite": "None",
+    },
+]
+
+
+def test_live_cookies_become_the_stored_shape():
+    cookies = live_cookies_to_profile(LIVE_COOKIES)
+
+    assert cookies[0] == {
+        "name": "sid", "value": "abc123", "domain": ".example.com", "path": "/",
+        "secure": True, "httpOnly": True, "hostOnly": False,
+        "sameSite": "lax", "expirationDate": 1893456000,
+    }
+    # A session cookie (expires -1) carries the flag instead of a date.
+    assert cookies[1]["session"] is True
+    assert "expirationDate" not in cookies[1]
+    assert cookies[1]["hostOnly"] is True
+    assert cookies[1]["sameSite"] == "none"
+
+
+def test_live_cookies_skip_malformed_entries():
+    raw = [
+        {"name": "ok", "value": "1", "domain": "example.com"},
+        {"name": "", "value": "1", "domain": "example.com"},
+        {"value": "1", "domain": "example.com"},
+        "not-a-dict",
+    ]
+    assert [c["name"] for c in live_cookies_to_profile(raw)] == ["ok"]
+
+
+def test_cookie_editor_export_fields():
+    exported = cookie_editor_cookies(live_cookies_to_profile(LIVE_COOKIES))
+
+    persistent, session = exported
+    assert persistent["expirationDate"] == 1893456000
+    assert persistent["session"] is False
+    assert persistent["httpOnly"] is True and persistent["secure"] is True
+    assert persistent["sameSite"] == "lax"
+    # Session cookies omit the date and map SameSite=None to Cookie-Editor's
+    # "no_restriction" spelling.
+    assert "expirationDate" not in session
+    assert session["session"] is True
+    assert session["sameSite"] == "no_restriction"
+
+    parsed = json.loads(to_cookie_editor_json(live_cookies_to_profile(LIVE_COOKIES)))
+    assert [c["name"] for c in parsed] == ["sid", "pref"]
+
+
+def test_netscape_export_parses_back_to_the_same_cookies():
+    profile_cookies = live_cookies_to_profile(LIVE_COOKIES)
+    document = to_netscape(profile_cookies)
+
+    lines = [
+        line for line in document.splitlines()
+        if line and (not line.startswith("#") or line.startswith("#HttpOnly_"))
+    ]
+    assert lines[0].startswith("#HttpOnly_.example.com\tTRUE\t/\tTRUE\t1893456000\tsid\tabc123")
+    assert lines[1] == "shop.example.com\tFALSE\t/cart\tFALSE\t0\tpref\tzh"
+
+    fmt, parsed = parse_cookie_text(document)
+    assert fmt == "netscape"
+
+    def key(cookie):
+        return (
+            cookie["domain"], cookie["path"], cookie["name"], cookie["value"],
+            cookie["secure"], cookie["httpOnly"], cookie.get("expirationDate"),
+        )
+
+    assert sorted(map(key, parsed)) == sorted(map(key, profile_cookies))
