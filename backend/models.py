@@ -490,6 +490,13 @@ class CookieMergeResponse(BaseModel):
     total: int
 
 
+class CookiePullResponse(BaseModel):
+    """Cookies read back from a running browser, ready to save as config."""
+    cookies: list[dict]
+    cookies_json: str
+    count: int
+
+
 class AutoBackupSettingsModel(BaseModel):
     enabled: bool = True
     interval_days: int = Field(default=7, ge=1, le=90)
