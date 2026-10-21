@@ -1,0 +1,171 @@
+name: Windows installer smoke
+
+# Builds the Windows setup.exe on a hosted Windows runner and tests the
+# installer itself — release.yml only smoke-tests the unpacked PyInstaller
+# exe, so silent install / auto-start after install / uninstall regressions
+# would ship unnoticed. Run it by hand from the Actions tab before tagging a
+# release, or let it run when the Windows packaging changes.
+#
+# What this covers: build -> silent install -> installed files, uninstall
+# registry entry and Start Menu shortcut exist -> the app the installer
+# auto-starts (installer.iss [Run] WizardSilent) answers /api/status and /
+# -> manager.log is written -> silent uninstall removes the app but keeps
+# the data directory.
+# What it cannot cover (needs a physical Windows machine): tray icon and
+# panel window behaviour, real GPU/Chrome rendering, SmartScreen prompts.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "packaging/windows/**"
+      - ".github/workflows/windows-smoke.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  installer-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      SMOKE_PORT: "18080"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.10"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Ensure Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup -y --no-progress
+          }
+      - name: Build installer
+        shell: pwsh
+        run: ./packaging/windows/build-installer.ps1
+
+      - name: Silent install
+        shell: pwsh
+        env:
+          CLOAKBROWSER_MANAGER_PORT: "18080"
+          CLOAKBROWSER_MANAGER_DATA_DIR: ${{ runner.temp }}\cbm-smoke-data
+        run: |
+          $setup = Get-ChildItem "build\windows\*-setup.exe" | Select-Object -First 1
+          if (-not $setup) { throw "setup.exe was not built" }
+          Write-Host "Installing $($setup.FullName)"
+          $proc = Start-Process -PassThru -Wait $setup.FullName -ArgumentList @(
+            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-",
+            "/LOG=$env:RUNNER_TEMP\innosetup.log"
+          )
+          if ($proc.ExitCode -ne 0) { throw "Installer exited with code $($proc.ExitCode)" }
+
+      - name: Verify installed files and registration
+        shell: pwsh
+        run: |
+          $appDir = "$env:LOCALAPPDATA\Programs\CloakBrowser Manager"
+          $exe = Join-Path $appDir "CloakBrowser Manager.exe"
+          if (-not (Test-Path $exe)) { throw "Installed exe missing: $exe" }
+          if (-not (Test-Path (Join-Path $appDir "unins000.exe"))) { throw "Uninstaller missing" }
+          $entry = Get-ItemProperty `
+            "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{6E0B7C1E-3F1B-4C8E-9C55-0C9E4B1A7D21}_is1" `
+            -ErrorAction SilentlyContinue
+          if (-not $entry) { throw "Uninstall registry entry missing" }
+          Write-Host "Registered version: $($entry.DisplayVersion)"
+          $shortcut = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\CloakBrowser Manager\CloakBrowser Manager.lnk"
+          if (-not (Test-Path $shortcut)) { throw "Start Menu shortcut missing: $shortcut" }
+
+      - name: Wait for the installed Manager
+        shell: pwsh
+        env:
+          CLOAKBROWSER_MANAGER_PORT: "18080"
+          CLOAKBROWSER_MANAGER_DATA_DIR: ${{ runner.temp }}\cbm-smoke-data
+        run: |
+          # installer.iss starts the app itself after a silent install
+          # ([Run] Check: WizardSilent). If that ever stops happening, start
+          # the installed exe the way a user would, but in the background.
+          $status = $null
+          foreach ($i in 1..90) {
+            try {
+              $status = Invoke-RestMethod "http://127.0.0.1:$env:SMOKE_PORT/api/status" -TimeoutSec 2
+              break
+            } catch {
+              if ($i -eq 15 -and -not (Get-Process "CloakBrowser Manager" -ErrorAction SilentlyContinue)) {
+                Write-Host "Installer did not auto-start the app; launching installed exe"
+                $appDir = "$env:LOCALAPPDATA\Programs\CloakBrowser Manager"
+                Start-Process (Join-Path $appDir "CloakBrowser Manager.exe") -ArgumentList "--background"
+              }
+              Start-Sleep 1
+            }
+          }
+          if (-not $status) {
+            Get-Content "$env:LOCALAPPDATA\CloakBrowser Manager\Logs\manager.log" -ErrorAction SilentlyContinue
+            throw "Installed Manager did not answer /api/status within 90s"
+          }
+          # Same payload contract the app itself checks in desktop_app.py.
+          foreach ($key in @("running_count", "profiles_total", "runtime_mode")) {
+            if ($null -eq $status.$key -and -not ($status.PSObject.Properties.Name -contains $key)) {
+              throw "/api/status payload is missing '$key': $($status | ConvertTo-Json -Compress)"
+            }
+          }
+          if ($status.runtime_mode -ne "native") { throw "Expected runtime_mode=native, got $($status.runtime_mode)" }
+          if ($status.host_os -ne "windows") { throw "Expected host_os=windows, got $($status.host_os)" }
+          $page = Invoke-WebRequest "http://127.0.0.1:$env:SMOKE_PORT/" -UseBasicParsing -TimeoutSec 5
+          if ($page.StatusCode -ne 200 -or $page.Content.Length -lt 100) { throw "Panel page did not serve HTML" }
+          Write-Host "Manager is up: $($status | ConvertTo-Json -Compress)"
+
+      - name: Check log and data directory
+        shell: pwsh
+        run: |
+          $log = "$env:LOCALAPPDATA\CloakBrowser Manager\Logs\manager.log"
+          if (-not (Test-Path $log)) { throw "manager.log was not written: $log" }
+          Get-Content $log -Tail 20
+          $data = "$env:RUNNER_TEMP\cbm-smoke-data"
+          if (-not (Test-Path $data)) { throw "Smoke data directory was not created: $data" }
+
+      - name: Stop Manager and silently uninstall
+        shell: pwsh
+        run: |
+          Get-Process "CloakBrowser Manager" -ErrorAction SilentlyContinue |
+            Stop-Process -Force -ErrorAction SilentlyContinue
+          Start-Sleep 2
+          $appDir = "$env:LOCALAPPDATA\Programs\CloakBrowser Manager"
+          $uninstaller = Join-Path $appDir "unins000.exe"
+          Start-Process $uninstaller -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART")
+          # The Inno uninstaller hands off to a temp copy and returns at once;
+          # poll until the installed exe is actually gone.
+          $removed = $false
+          foreach ($i in 1..60) {
+            if (-not (Test-Path (Join-Path $appDir "CloakBrowser Manager.exe"))) { $removed = $true; break }
+            Start-Sleep 1
+          }
+          if (-not $removed) { throw "Uninstaller did not remove the installed exe" }
+          $entry = Get-ItemProperty `
+            "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{6E0B7C1E-3F1B-4C8E-9C55-0C9E4B1A7D21}_is1" `
+            -ErrorAction SilentlyContinue
+          if ($entry) { throw "Uninstall registry entry still present after uninstall" }
+          # Documented behaviour: uninstalling keeps profile data.
+          $data = "$env:RUNNER_TEMP\cbm-smoke-data"
+          if (-not (Test-Path $data)) { throw "Uninstall deleted the data directory: $data" }
+          Write-Host "Uninstall OK; data directory preserved"
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-smoke-logs
+          path: |
+            ${{ runner.temp }}\innosetup.log
+            ~\AppData\Local\CloakBrowser Manager\Logs\manager.log
+          if-no-files-found: ignore
