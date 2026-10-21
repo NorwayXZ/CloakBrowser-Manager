@@ -98,7 +98,7 @@ export function SiteCheckPanel({ profiles, onRefresh }: SiteCheckPanelProps) {
 
   const handleStart = async () => {
     if (!candidate) return;
-    if (!confirm(`对「${candidate.name}」做指纹检测？\n会用调试模式打开这个浏览器，依次访问 ${sites.length || 7} 个检测网站，大约需要 5 分钟，测完自动关闭。期间不要操作这个浏览器。`)) return;
+    if (!confirm(`对「${candidate.name}」生成一键检测报告？\n会用调试模式打开这个浏览器，先做本地一致性自检，再依次访问 ${sites.length || 7} 个检测网站，大约需要 5 分钟，测完自动关闭。期间不要操作这个浏览器。`)) return;
     setError(null);
     setSelected(null);
     try {
@@ -127,6 +127,17 @@ export function SiteCheckPanel({ profiles, onRefresh }: SiteCheckPanelProps) {
   const running = profiles.some((profile) => profile.id === profileId && profile.status === "running");
   const doneResults = state.results ?? [];
   const currentSite = sites.find((site) => site.id === state.site);
+  const currentSiteLabel = currentSite?.name
+    ?? (state.site?.startsWith("local_") ? "本地自检" : state.site ?? "");
+  const changedSites = new Set((selected?.diff?.changes ?? []).map((change) => change.site));
+  const counts = selected?.summary ?? {
+    pass: selected?.results.filter((r) => r.status === "pass").length ?? 0,
+    warn: selected?.results.filter((r) => r.status === "warn").length ?? 0,
+    fail: selected?.results.filter((r) => r.status === "fail").length ?? 0,
+    unknown: selected?.results.filter((r) => r.status === "unknown").length ?? 0,
+    error: selected?.results.filter((r) => r.status === "error").length ?? 0,
+    total: selected?.results.length ?? 0,
+  };
 
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
@@ -136,9 +147,10 @@ export function SiteCheckPanel({ profiles, onRefresh }: SiteCheckPanelProps) {
             <ShieldCheck className="h-4 w-4" />
           </div>
           <div>
-            <h2 className="text-sm font-semibold text-slate-900">用公开检测网站验收指纹</h2>
+            <h2 className="text-sm font-semibold text-slate-900">一键检测报告</h2>
             <p className="mt-1 text-xs leading-5 text-slate-500">
-              自动打开画像，依次访问下面的网站，读出每个网站的结论并截图。7 项都通过才算这个画像合格。报告可以导出 zip 发给开发者排查。
+              自动打开画像，先用 Manager 自带探针逐项核对 UA、平台、GPU、时区、语言、CPU、内存、WebGL、Canvas、Audio、字体、WebRTC 和出口 IP，
+              再依次访问下面的网站，读出每个网站的结论并截图。报告按条目给出通过/警告/未通过，并标注受出口 IP 信誉影响的条目；打开报告还能和该画像上一次报告逐项对比。
             </p>
           </div>
         </div>
@@ -168,7 +180,7 @@ export function SiteCheckPanel({ profiles, onRefresh }: SiteCheckPanelProps) {
             onClick={() => void handleStart()}
           >
             <Play className="h-4 w-4" />
-            <span>开始检测</span>
+            <span>开始一键检测</span>
           </button>
           {running && <span className="text-xs text-amber-700">这个浏览器正在运行，请先关闭它。</span>}
         </div>
@@ -187,7 +199,7 @@ export function SiteCheckPanel({ profiles, onRefresh }: SiteCheckPanelProps) {
               <Loader2 className="h-4 w-4 animate-spin" />
               <span>
                 {state.phase === "launching" && `正在用调试模式打开「${state.profile_name}」`}
-                {state.phase === "checking" && `正在检测「${state.profile_name}」：${currentSite?.name ?? state.site ?? ""}（${Math.min((state.index ?? 0) + 1, state.total ?? 7)}/${state.total ?? 7}）`}
+                {state.phase === "checking" && `正在检测「${state.profile_name}」：${currentSiteLabel}（${Math.min((state.index ?? 0) + 1, state.total ?? 7)}/${state.total ?? 7}）`}
                 {state.phase === "closing" && "检测完成，正在关闭浏览器"}
               </span>
             </div>
@@ -234,12 +246,45 @@ export function SiteCheckPanel({ profiles, onRefresh }: SiteCheckPanelProps) {
               </button>
             </div>
           </div>
+          <div className="border-b border-border px-5 py-3 text-xs text-slate-600">
+            <span>
+              共 {counts.total} 项：通过 {counts.pass} · 警告 {counts.warn} · 未通过 {counts.fail}
+              {counts.unknown > 0 && <> · 未读到结论 {counts.unknown}</>}
+              {counts.error > 0 && <> · 出错 {counts.error}</>}
+            </span>
+            {selected.egress_note && <p className="mt-1.5 text-amber-700">{selected.egress_note}</p>}
+            {selected.diff && (
+              <div className="mt-2">
+                {selected.diff.changes.length === 0 ? (
+                  <p className="text-slate-500">与上次报告（{formatTime(selected.diff.previous_created_at)}）相比，各条目结论没有变化。</p>
+                ) : (
+                  <>
+                    <p className="font-medium text-slate-700">与上次报告（{formatTime(selected.diff.previous_created_at)}）相比的变化：</p>
+                    <ul className="mt-1 space-y-1">
+                      {selected.diff.changes.map((change) => (
+                        <li key={change.site} className="flex flex-wrap items-center gap-1.5">
+                          <span className="font-medium text-slate-800">{change.name ?? change.site}</span>
+                          {change.from ? <StatusBadge status={change.from} /> : <span className="text-slate-400">新增</span>}
+                          <span aria-hidden="true">→</span>
+                          {change.to ? <StatusBadge status={change.to} /> : <span className="text-slate-400">本次未检</span>}
+                          {change.summary && <span className="text-slate-500">{change.summary}</span>}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
           <table className="w-full text-sm">
             <tbody>
               {selected.results.map((result) => (
-                <tr key={result.site} className="border-b border-border align-top last:border-b-0">
+                <tr key={result.site} className={`border-b border-border align-top last:border-b-0 ${changedSites.has(result.site) ? "bg-amber-50" : ""}`}>
                   <td className="w-36 px-5 py-3">
                     <div className="font-medium text-slate-800">{result.name}</div>
+                    {result.source === "local" && (
+                      <span className="mt-1 inline-block rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-700">本地自检</span>
+                    )}
                     <div className="mt-1"><StatusBadge status={result.status} /></div>
                   </td>
                   <td className="px-3 py-3">
@@ -249,6 +294,7 @@ export function SiteCheckPanel({ profiles, onRefresh }: SiteCheckPanelProps) {
                         {result.details.map((detail) => <li key={detail}>{detail}</li>)}
                       </ul>
                     )}
+                    {result.ip_note && <p className="mt-1 text-xs text-amber-700">IP 信誉：{result.ip_note}</p>}
                     <div className="mt-1 text-xs text-slate-400">标准：{result.criteria}</div>
                   </td>
                   <td className="w-40 px-5 py-3">
