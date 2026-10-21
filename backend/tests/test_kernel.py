@@ -184,7 +184,9 @@ def test_overview_lists_cached_kernels_and_marks_the_one_in_use(app_client: Test
     assert resp.status_code == 200
     body = resp.json()
     assert body["version"] == "154.0.8037.57.1"
-    assert body["license"] == {"tier": "free", "plan": "free", "expires": None, "can_pin": False}
+    assert body["license"] == {
+        "tier": "free", "plan": "free", "expires": None, "can_pin": False, "key_stored": True,
+    }
     assert "secret" not in resp.text
     assert [(k["name"], k["pro"], k["size_bytes"], k["in_use"]) for k in body["installed_kernels"]] == [
         ("chromium-154.0.8037.57.1-pro", True, 7, True),
@@ -202,6 +204,104 @@ def test_paid_and_keyless_licenses_can_pin(wrapper):
     assert kernel.resolve_license().can_pin is True
     wrapper.license = ({"tier": "invalid", "valid": False}, False)
     assert kernel.resolve_license().can_pin is False
+
+
+# ── License key ────────────────────────────────────────────────────────────
+
+VALID_FAKE_KEY = "cb_test_fixture_000"
+BOGUS_FAKE_KEY = "cb_test_fixture_999"
+
+
+@pytest.fixture()
+def license_files(wrapper, monkeypatch: pytest.MonkeyPatch):
+    """Resolve the fake license from the key file, like the real wrapper:
+    no file → keyless, the valid fake key → free tier, anything else → invalid."""
+    cache = wrapper.cache
+
+    def resolve():
+        try:
+            content = (cache / "license.key").read_text().strip()
+        except OSError:
+            content = ""
+        if not content:
+            return NO_KEY
+        if content == VALID_FAKE_KEY:
+            return FREE_KEY
+        return ({"tier": "invalid", "valid": False}, False)
+
+    monkeypatch.setattr(sys.modules["cloakbrowser.__main__"], "_resolve_license", resolve)
+    monkeypatch.delenv("CLOAKBROWSER_LICENSE_KEY", raising=False)
+    return cache
+
+
+def test_save_valid_license_key(app_client: TestClient, license_files):
+    resp = app_client.post("/api/kernel/license", json={"license_key": VALID_FAKE_KEY})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["license"]["tier"] == "free"
+    assert body["license"]["key_stored"] is True
+    assert (license_files / "license.key").read_text().strip() == VALID_FAKE_KEY
+    assert VALID_FAKE_KEY not in resp.text
+
+
+def test_save_invalid_key_rolls_back_to_no_key(app_client: TestClient, license_files):
+    resp = app_client.post("/api/kernel/license", json={"license_key": BOGUS_FAKE_KEY})
+
+    assert resp.status_code == 400
+    assert "没有通过官方验证" in resp.json()["detail"]
+    assert BOGUS_FAKE_KEY not in resp.text
+    assert not (license_files / "license.key").exists()
+    follow = app_client.get("/api/kernel")
+    assert follow.json()["license"]["tier"] == "none"
+    assert follow.json()["license"]["key_stored"] is False
+
+
+def test_save_invalid_key_keeps_the_previous_working_key(app_client: TestClient, license_files):
+    assert app_client.post(
+        "/api/kernel/license", json={"license_key": VALID_FAKE_KEY}
+    ).status_code == 200
+
+    resp = app_client.post("/api/kernel/license", json={"license_key": BOGUS_FAKE_KEY})
+
+    assert resp.status_code == 400
+    assert (license_files / "license.key").read_text().strip() == VALID_FAKE_KEY
+    assert app_client.get("/api/kernel").json()["license"]["tier"] == "free"
+
+
+def test_remove_license_key(app_client: TestClient, license_files):
+    assert app_client.post(
+        "/api/kernel/license", json={"license_key": VALID_FAKE_KEY}
+    ).status_code == 200
+
+    resp = app_client.delete("/api/kernel/license")
+
+    assert resp.status_code == 200
+    assert resp.json()["license"]["tier"] == "none"
+    assert resp.json()["license"]["key_stored"] is False
+    assert not (license_files / "license.key").exists()
+    # Removing again is a no-op, not an error.
+    assert app_client.delete("/api/kernel/license").status_code == 200
+
+
+def test_save_blank_key_is_rejected(app_client: TestClient, license_files):
+    resp = app_client.post("/api/kernel/license", json={"license_key": "   "})
+
+    assert resp.status_code == 400
+    assert not (license_files / "license.key").exists()
+
+
+def test_env_provided_key_blocks_panel_save(
+    app_client: TestClient, license_files, monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("CLOAKBROWSER_LICENSE_KEY", "cb_env_fixture_111")
+
+    resp = app_client.post("/api/kernel/license", json={"license_key": VALID_FAKE_KEY})
+
+    assert resp.status_code == 400
+    assert "CLOAKBROWSER_LICENSE_KEY" in resp.json()["detail"]
+    assert "cb_env_fixture_111" not in resp.text
+    assert not (license_files / "license.key").exists()
 
 
 # ── Settings ─────────────────────────────────────────────────────────────────
