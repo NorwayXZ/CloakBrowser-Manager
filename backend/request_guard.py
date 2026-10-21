@@ -26,6 +26,12 @@ logger = logging.getLogger("cloakbrowser.manager.guard")
 
 ALLOWED_HOSTS_ENV = "CLOAKBROWSER_MANAGER_ALLOWED_HOSTS"
 LOOPBACK_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "::1"})
+# Machine-to-machine endpoints spoken by software the Manager itself launched
+# (a profile's local extension). Those clients send their own Origin
+# (chrome-extension://…), so the same-origin rule cannot apply; they are
+# authenticated by a per-profile token instead, and the loopback Host check
+# above still applies to them.
+TOKEN_AUTHENTICATED_PREFIXES = ("/ext/",)
 UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _DEFAULT_PORTS = {"http": 80, "https": 443, "ws": 80, "wss": 443}
 
@@ -102,12 +108,15 @@ class RequestGuardMiddleware:
 
         host = _header(scope, b"host")
         origin = _header(scope, b"origin")
+        token_authenticated = scope["path"].startswith(TOKEN_AUTHENTICATED_PREFIXES)
         reason: str | None = None
         if self.local_only() and not host_is_allowed(host, self.allowed_hosts()):
             reason = "Host not allowed"
         elif (
-            scope["type"] == "websocket" or scope.get("method", "GET").upper() in UNSAFE_METHODS
-        ) and not origin_matches_host(origin, host):
+            not token_authenticated
+            and (scope["type"] == "websocket" or scope.get("method", "GET").upper() in UNSAFE_METHODS)
+            and not origin_matches_host(origin, host)
+        ):
             reason = "Cross-site request blocked"
 
         if reason is None:
