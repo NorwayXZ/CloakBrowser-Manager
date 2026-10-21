@@ -208,6 +208,28 @@ export interface KernelCheckResult {
   pinned: boolean;
 }
 
+/** One cookie in the panel's stored shape (Cookie-Editor style fields). */
+export interface PulledCookie {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  secure?: boolean;
+  httpOnly?: boolean;
+  hostOnly?: boolean;
+  expirationDate?: number;
+  sameSite?: string;
+  session?: boolean;
+}
+
+export interface CookiePullResult {
+  cookies: PulledCookie[];
+  cookies_json: string;
+  count: number;
+}
+
+export type CookieExportFormat = "json" | "netscape";
+
 export interface CookieMergeResult {
   cookies_json: string;
   format: "json" | "netscape" | "header";
@@ -610,6 +632,34 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ text, existing, domain }),
     }),
+
+  pullProfileCookies: (id: string) =>
+    request<CookiePullResult>(`/api/profiles/${id}/cookies/pull`, { method: "POST" }),
+
+  cookieExportUrl: (id: string, format: CookieExportFormat) =>
+    `/api/profiles/${encodeURIComponent(id)}/cookies/export?format=${format}`,
+
+  /** Fetch the export as a file; surfaces the server's error instead of
+   *  downloading an error page when the browser is not readable. */
+  downloadCookieExport: async (id: string, format: CookieExportFormat, filename: string) => {
+    const res = await fetch(api.cookieExportUrl(id, format));
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new ApiError(res.status, body.detail || res.statusText);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    try {
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  },
 
   getAppUpdate: () => request<AppUpdateState>("/api/app/update"),
 
