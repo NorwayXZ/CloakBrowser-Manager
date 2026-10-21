@@ -928,9 +928,14 @@ async def list_site_check_reports():
 @app.get("/api/site-checks/{report_id}")
 async def get_site_check_report(report_id: str):
     try:
-        return await asyncio.to_thread(site_checks.load_report, db.DATA_DIR, report_id)
+        report = await asyncio.to_thread(site_checks.load_report, db.DATA_DIR, report_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="找不到这份报告") from exc
+    # Attach the diff against the previous report of the same profile; it is
+    # computed on read so stored reports stay exactly what the run wrote.
+    previous = await asyncio.to_thread(site_checks.previous_report, db.DATA_DIR, report)
+    report["diff"] = site_checks.diff_reports(previous, report) if previous else None
+    return report
 
 
 @app.get("/api/site-checks/{report_id}/files/{name}")
