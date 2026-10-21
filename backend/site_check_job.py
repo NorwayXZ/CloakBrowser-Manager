@@ -1,5 +1,6 @@
-"""One fingerprint check at a time: open the profile in debug mode, visit the
-detection sites, save the report, close the browser again."""
+"""One fingerprint check at a time: open the profile in debug mode, run the
+local consistency probe and visit the detection sites, save the combined
+report, close the browser again."""
 
 from __future__ import annotations
 
@@ -33,6 +34,7 @@ def describe_environment(
     geo = getattr(running, "proxy_geo", None) or {}
     proxy = str(profile.get("proxy") or "")
     return {
+        "profile_id": profile.get("id"),
         "profile_name": profile.get("name"),
         "app_version": app_version,
         "kernel_version": kernel_version,
@@ -90,6 +92,27 @@ class SiteCheckJob:
                 raise RuntimeError("调试模式没有拿到浏览器上下文")
             report_dir = site_checks.new_report_dir(data_dir, profile.get("name") or profile_id)
             self.state.update(phase="checking", report_id=report_dir.name)
+            env = environment(profile, running)
+
+            # The Manager's own consistency probe runs on the same debug
+            # context first; its items are folded into the stored report
+            # ahead of the site verdicts. A probe failure must not cost the
+            # whole check — the sites still run.
+            local_results: list[site_checks.CheckResult] = []
+            try:
+                probe = await browser_mgr.fingerprint_report(profile)
+                local_results = site_checks.local_probe_results(
+                    probe.get("analysis") or {},
+                    probe.get("raw") or {},
+                    exit_ip=env.get("exit_ip"),
+                )
+            except Exception:
+                logger.exception(
+                    "Local fingerprint probe failed for %s; continuing with sites only",
+                    profile_id,
+                )
+            if local_results:
+                self.state["results"] = [asdict(r) for r in local_results]
 
             def progress(site_id, index, total, result):
                 self.state.update(site=site_id, index=index, total=total)
@@ -98,8 +121,9 @@ class SiteCheckJob:
 
             report = await site_checks.run_checks(
                 running.context, report_dir,
-                environment=environment(profile, running),
+                environment=env,
                 progress=progress, sites=sites,
+                extra_results=local_results,
             )
             self.state.update(phase="closing", overall=report["overall"])
         except Exception as exc:
