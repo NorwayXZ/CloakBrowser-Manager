@@ -95,6 +95,50 @@ class CheckResult:
     details: list[str] = field(default_factory=list)
     screenshot: str | None = None
     seconds: float = 0.0
+    # "site" for the public detection sites, "local" for the Manager's own
+    # probe items folded into the same report.
+    source: str = "site"
+    # Set on items whose verdict depends on the egress IP's reputation.
+    ip_note: str | None = None
+
+
+# Verdicts that say as much about the egress IP as about the browser: a
+# datacenter or proxy-pool address gets flagged even when every browser
+# signal is clean (the scorecard practice is to annotate, not to hide).
+IP_RESULT_NOTE = (
+    "这一项的结论受出口 IP 信誉影响：机房或代理池 IP 常被标记，"
+    "与浏览器指纹本身无关；换住宅 IP 后结果可能不同。"
+)
+IP_DEPENDENT_SITES = frozenset({"fingerprint", "iphey", "pixelscan"})
+
+
+def status_counts(results: list[Any]) -> dict[str, int]:
+    """pass/warn/fail/unknown/error tallies over CheckResults or dicts."""
+    counts = {"pass": 0, "warn": 0, "fail": 0, "unknown": 0, "error": 0}
+    for result in results:
+        status = result.get("status") if isinstance(result, dict) else getattr(result, "status", None)
+        if status in counts:
+            counts[status] += 1
+    counts["total"] = len(results)
+    return counts
+
+
+def egress_note(environment: dict[str, Any] | None) -> str:
+    """The report-level egress caveat, mirroring the scorecard's annotation."""
+    env = environment or {}
+    ip = env.get("exit_ip")
+    proxy_type = env.get("proxy_type") or "direct"
+    if ip:
+        where = f"{proxy_type} 出口 {ip}"
+        country = env.get("exit_country")
+        if country:
+            where += f"（{country}）"
+    else:
+        where = "未取到出口 IP"
+    return (
+        f"本次{where}。标注「IP 信誉」的条目结论受出口 IP 影响："
+        "机房或代理池 IP 常被检测站标记，与浏览器指纹本身无关，换住宅 IP 后结果可能不同。"
+    )
 
 
 Verdict = tuple[str, str, list[str]]
@@ -301,6 +345,158 @@ def overall_status(results: list[CheckResult]) -> str:
     return "warn" if "warn" in statuses else "pass"
 
 
+# ── The Manager's own probe, as report items ────────────────────────────────
+#
+# The one-click report combines the public sites with the local consistency
+# probe (fingerprint_report.analyze_fingerprint): each probe signal becomes
+# one report item, so the report shows UA/platform/GPU/timezone/... rows
+# next to the site verdicts. An item's status is the worst severity the
+# analysis recorded for its signals; issues it does not recognise land in
+# the cross-scope consistency item.
+
+_LOCAL_ITEM_SPECS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("local_user_agent", "UA（User-Agent）", ("userAgent", "ua_ua_ch_version", "navigator.userAgentData", "network.user_agent_header")),
+    ("local_platform", "平台", ("platform", "navigator.userAgentData.platform", "scope_consistency.userAgentData.platform")),
+    ("local_language", "语言", ("navigator.language", "navigator.languages", "Intl.", "network.accept_language", "scope_consistency.navigator.language", "scope_consistency.navigator.languages")),
+    ("local_timezone", "时区", ("timezone", "scope_consistency.timezone")),
+    ("local_screen", "屏幕", ("screen.", "window.outer")),
+    ("local_cpu", "CPU 核数", ("hardwareConcurrency",)),
+    ("local_memory", "内存", ("deviceMemory",)),
+    ("local_gpu", "GPU / WebGL", ("webgl.",)),
+    ("local_canvas", "Canvas 稳定性", ("canvas_stability",)),
+    ("local_audio", "Audio 稳定性", ("audio_stability",)),
+    ("local_fonts", "字体", ("fonts.",)),
+    ("local_webrtc", "WebRTC 本地候选", ("webrtc.",)),
+    ("local_egress_ip", "出口 IP", ("network.egress_ip", "network.external_probe")),
+    ("local_webdriver", "webdriver 标记", ("navigator.webdriver",)),
+    ("local_storage", "存储", ("storage.", "cookies")),
+    ("local_native", "原生函数完整性", ("native_string.",)),
+    ("local_scope", "跨作用域一致性", ("scope_consistency.", "scope_error", "probe_url")),
+)
+_LOCAL_FALLBACK_ITEM = "local_scope"
+_LOCAL_ALWAYS_SHOWN = frozenset({
+    "local_user_agent", "local_platform", "local_language", "local_timezone",
+    "local_screen", "local_cpu", "local_memory", "local_gpu", "local_canvas",
+    "local_audio", "local_fonts", "local_webrtc", "local_egress_ip", "local_webdriver",
+})
+
+
+def _local_item_for_signal(signal: str) -> str:
+    """The report item a probe signal belongs to (longest prefix wins)."""
+    best_item, best_length = _LOCAL_FALLBACK_ITEM, -1
+    for item_id, _name, prefixes in _LOCAL_ITEM_SPECS:
+        for prefix in prefixes:
+            if (signal == prefix or signal.startswith(prefix)) and len(prefix) > best_length:
+                best_item, best_length = item_id, len(prefix)
+    return best_item
+
+
+def _local_item_value(item_id: str, main: dict[str, Any], exit_ip: str | None) -> str | None:
+    nav = main.get("navigator") if isinstance(main.get("navigator"), dict) else {}
+    graphics = main.get("graphics") if isinstance(main.get("graphics"), dict) else {}
+    if item_id == "local_user_agent":
+        return str(nav["userAgent"]) if nav.get("userAgent") else None
+    if item_id == "local_platform":
+        return str(nav["platform"]) if nav.get("platform") else None
+    if item_id == "local_language":
+        languages = nav.get("languages")
+        if nav.get("language"):
+            suffix = f"（共 {len(languages)} 种）" if isinstance(languages, list) and len(languages) > 1 else ""
+            return f"{nav['language']}{suffix}"
+        return None
+    if item_id == "local_timezone":
+        date = main.get("date") if isinstance(main.get("date"), dict) else {}
+        return str(date["timezone"]) if date.get("timezone") else None
+    if item_id == "local_screen":
+        screen = main.get("screen") if isinstance(main.get("screen"), dict) else {}
+        if screen.get("width") and screen.get("height"):
+            return f"{screen['width']}×{screen['height']}"
+        return None
+    if item_id == "local_cpu":
+        return str(nav["hardwareConcurrency"]) if nav.get("hardwareConcurrency") else None
+    if item_id == "local_memory":
+        return f"{nav['deviceMemory']} GB" if nav.get("deviceMemory") else None
+    if item_id == "local_gpu":
+        webgl = graphics.get("webgl") if isinstance(graphics.get("webgl"), dict) else {}
+        if webgl.get("renderer"):
+            return f"{webgl.get('vendor') or ''} / {webgl['renderer']}".strip(" /")
+        return None
+    if item_id == "local_canvas":
+        return f"哈希 {graphics['canvasHashA']}" if graphics.get("canvasHashA") else None
+    if item_id == "local_audio":
+        return f"哈希 {graphics['audioHashA']}" if graphics.get("audioHashA") else None
+    if item_id == "local_fonts":
+        fonts = main.get("fonts") if isinstance(main.get("fonts"), dict) else {}
+        available = fonts.get("available")
+        if isinstance(available, list):
+            return f"可测字体：{'、'.join(map(str, available))}" if available else "候选字体均不可测"
+        return None
+    if item_id == "local_webrtc":
+        network = main.get("network") if isinstance(main.get("network"), dict) else {}
+        candidates = network.get("webrtcCandidates")
+        if isinstance(candidates, list):
+            return f"{len(candidates)} 个候选地址"
+        return None
+    if item_id == "local_egress_ip":
+        return str(exit_ip) if exit_ip else None
+    if item_id == "local_webdriver":
+        return f"webdriver = {nav['webdriver']}" if "webdriver" in nav else None
+    return None
+
+
+def local_probe_results(
+    analysis: dict[str, Any] | None,
+    raw: dict[str, Any] | None,
+    *,
+    exit_ip: str | None = None,
+) -> list[CheckResult]:
+    """``analyze_fingerprint`` output (plus the raw probe values) as items."""
+    analysis = analysis or {}
+    raw = raw or {}
+    main = raw.get("main") if isinstance(raw.get("main"), dict) else {}
+    issues_by_item: dict[str, list[dict[str, Any]]] = {}
+    for issue in analysis.get("issues") or []:
+        if isinstance(issue, dict):
+            issues_by_item.setdefault(_local_item_for_signal(str(issue.get("signal") or "")), []).append(issue)
+
+    results: list[CheckResult] = []
+    for item_id, name, _prefixes in _LOCAL_ITEM_SPECS:
+        issues = issues_by_item.get(item_id, [])
+        value = _local_item_value(item_id, main, exit_ip)
+        if item_id not in _LOCAL_ALWAYS_SHOWN and not issues:
+            continue
+        if value is None and not issues:
+            continue
+        severities = {str(issue.get("severity")) for issue in issues}
+        status = "fail" if "error" in severities else "warn" if "warning" in severities else "pass"
+        details = []
+        for issue in issues:
+            scope = str(issue.get("scope") or "main")
+            message = str(issue.get("message") or issue.get("signal") or "")
+            details.append(message if scope == "main" else f"[{scope}] {message}")
+        if issues:
+            first = details[0]
+            summary = first if len(details) == 1 else f"{first}（共 {len(details)} 个问题）"
+        else:
+            summary = value or "未检出问题"
+            if item_id == "local_gpu":
+                webgl = (main.get("graphics") or {}).get("webgl") or {}
+                if isinstance(webgl, dict) and webgl.get("version"):
+                    details.append(f"WebGL 版本：{webgl['version']}")
+        results.append(CheckResult(
+            site=item_id,
+            name=name,
+            url="",
+            criteria="与画像配置一致" if item_id != "local_egress_ip" else "与画像代理出口一致",
+            status=status,
+            summary=summary,
+            details=details,
+            source="local",
+            ip_note=IP_RESULT_NOTE if item_id == "local_egress_ip" else None,
+        ))
+    return results
+
+
 # ── Running ─────────────────────────────────────────────────────────────────
 
 
@@ -375,9 +571,14 @@ async def run_checks(
     environment: dict[str, Any],
     progress: Progress | None = None,
     sites: tuple[SiteCheck, ...] = SITES,
+    extra_results: list[CheckResult] | None = None,
 ) -> dict[str, Any]:
-    """Visit every site in turn and write report.json; returns the report."""
-    results: list[CheckResult] = []
+    """Visit every site in turn and write report.json; returns the report.
+
+    ``extra_results`` (the local probe items) are folded in ahead of the
+    site verdicts so one stored report carries the whole battery.
+    """
+    results: list[CheckResult] = list(extra_results or [])
     for index, site in enumerate(sites):
         if progress:
             maybe = progress(site.id, index, len(sites), None)
@@ -389,10 +590,15 @@ async def run_checks(
             maybe = progress(site.id, index + 1, len(sites), result)
             if asyncio.iscoroutine(maybe):
                 await maybe
+    for result in results:
+        if result.site in IP_DEPENDENT_SITES and result.ip_note is None:
+            result.ip_note = IP_RESULT_NOTE
     report = {
         "id": report_dir.name,
         "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "overall": overall_status(results),
+        "summary": status_counts(results),
+        "egress_note": egress_note(environment),
         "environment": environment,
         "results": [asdict(r) for r in results],
     }
@@ -423,20 +629,96 @@ def list_reports(data_dir: Path) -> list[dict[str, Any]]:
         except (OSError, ValueError):
             continue
         env = report.get("environment", {})
+        results = report.get("results", [])
         reports.append({
             "id": report.get("id", path.name),
             "created_at": report.get("created_at"),
             "overall": report.get("overall"),
+            "profile_id": env.get("profile_id"),
             "profile_name": env.get("profile_name"),
             "host_os": env.get("host_os"),
-            "passed": sum(1 for r in report.get("results", []) if r.get("status") == "pass"),
-            "total": len(report.get("results", [])),
+            "passed": sum(1 for r in results if r.get("status") == "pass"),
+            "total": len(results),
+            "counts": status_counts(results),
         })
     return reports
 
 
 def load_report(data_dir: Path, report_id: str) -> dict[str, Any]:
     return json.loads((_report_path(data_dir, report_id) / REPORT_FILE).read_text(encoding="utf-8"))
+
+
+# ── Comparing two reports of the same profile ───────────────────────────────
+
+
+def _same_profile(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    env_a, env_b = a.get("environment") or {}, b.get("environment") or {}
+    id_a, id_b = env_a.get("profile_id"), env_b.get("profile_id")
+    if id_a and id_b:
+        return id_a == id_b
+    name_a, name_b = env_a.get("profile_name"), env_b.get("profile_name")
+    return bool(name_a) and name_a == name_b
+
+
+def previous_report(data_dir: Path, report: dict[str, Any]) -> dict[str, Any] | None:
+    """The newest stored report for the same profile older than ``report``."""
+    root = reports_dir(data_dir)
+    if not root.is_dir():
+        return None
+    created = str(report.get("created_at") or "")
+    candidates: list[dict[str, Any]] = []
+    for path in root.iterdir():
+        if path.name == report.get("id"):
+            continue
+        try:
+            other = json.loads((path / REPORT_FILE).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not _same_profile(other, report):
+            continue
+        if str(other.get("created_at") or "") >= created:
+            continue
+        candidates.append(other)
+    if not candidates:
+        return None
+    return max(candidates, key=lambda r: str(r.get("created_at") or ""))
+
+
+def diff_reports(previous: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+    """Status changes between two reports of one profile, keyed by item id."""
+    def by_site(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        return {
+            str(r["site"]): r
+            for r in report.get("results", [])
+            if isinstance(r, dict) and r.get("site")
+        }
+
+    before, after = by_site(previous), by_site(current)
+    changes: list[dict[str, Any]] = []
+    for site_id, result in after.items():
+        old = before.get(site_id)
+        if old is None:
+            changes.append({
+                "site": site_id, "name": result.get("name"),
+                "from": None, "to": result.get("status"), "summary": result.get("summary"),
+            })
+        elif old.get("status") != result.get("status"):
+            changes.append({
+                "site": site_id, "name": result.get("name"),
+                "from": old.get("status"), "to": result.get("status"),
+                "summary": result.get("summary"),
+            })
+    for site_id, result in before.items():
+        if site_id not in after:
+            changes.append({
+                "site": site_id, "name": result.get("name"),
+                "from": result.get("status"), "to": None, "summary": result.get("summary"),
+            })
+    return {
+        "previous_id": previous.get("id"),
+        "previous_created_at": previous.get("created_at"),
+        "changes": changes,
+    }
 
 
 def report_file(data_dir: Path, report_id: str, name: str) -> Path:
