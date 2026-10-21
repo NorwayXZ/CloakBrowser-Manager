@@ -655,6 +655,37 @@ async def _wait_for_xray(process: asyncio.subprocess.Process, port: int) -> None
     raise XrayProxyError("Xray 启动超时，请检查代理链接或查看 xray.log")
 
 
+def _xray_env(xray_asset_dir: Path) -> dict[str, str]:
+    """Minimal environment for the Xray child process.
+
+    Deliberately does not inherit the Manager's environment (which may
+    contain GITHUB_TOKEN / AUTH_TOKEN and other secrets). Windows still
+    needs SystemRoot: without it Winsock cannot load its service provider
+    and Xray exits immediately with "The requested service provider could
+    not be loaded or initialized" before it ever listens — every Xray
+    proxy link (VLESS/VMess/Trojan/Shadowsocks) was broken on Windows.
+    """
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "HOME": os.environ.get("HOME", ""),
+        "TMPDIR": os.environ.get("TMPDIR", ""),
+        "XRAY_LOCATION_ASSET": str(xray_asset_dir),
+    }
+    if os.name == "nt":
+        system_root = (
+            os.environ.get("SystemRoot")
+            or os.environ.get("windir")
+            or r"C:\Windows"
+        )
+        env["SystemRoot"] = system_root
+        env["windir"] = system_root
+        for name in ("TEMP", "TMP", "LOCALAPPDATA", "USERPROFILE"):
+            value = os.environ.get(name)
+            if value:
+                env[name] = value
+    return env
+
+
 async def start_xray_proxy(
     link: str,
     *,
@@ -686,13 +717,9 @@ async def start_xray_proxy(
             cwd=str(xray_asset_dir),
             # Only pass the minimal environment Xray needs; do NOT inherit the
             # Manager's full environment (which may contain GITHUB_TOKEN /
-            # AUTH_TOKEN and other secrets).
-            env={
-                "PATH": os.environ.get("PATH", ""),
-                "HOME": os.environ.get("HOME", ""),
-                "TMPDIR": os.environ.get("TMPDIR", ""),
-                "XRAY_LOCATION_ASSET": str(xray_asset_dir),
-            },
+            # AUTH_TOKEN and other secrets). See _xray_env for why Windows
+            # still gets SystemRoot and friends.
+            env=_xray_env(xray_asset_dir),
         )
         await _wait_for_xray(process, local_port)
     except BaseException:
