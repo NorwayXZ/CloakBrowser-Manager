@@ -1303,6 +1303,36 @@ async def export_profile_cookies(profile_id: str, format: str = "json"):
     return Response(content=body, media_type=media_type, headers={"Content-Disposition": disposition})
 
 
+# ── Cookie pull-back channel for manual (no-CDP) launches ───────────────────
+# Spoken only by the profile's own local extension, which carries the
+# per-launch token the Manager embedded in it. Deliberately outside /api/:
+# the launched browser has no panel session, and the token is the credential.
+
+
+@app.get("/ext/cookie-pull/{profile_id}/pending", include_in_schema=False)
+async def cookie_pull_pending(profile_id: str, request: Request):
+    """The extension's poll: is a cookie pull waiting for this profile?"""
+    _require_local(request)
+    token = request.headers.get("x-profile-token")
+    return {"request_id": browser_mgr.cookie_pulls.pending_request(profile_id, token)}
+
+
+@app.post("/ext/cookie-pull/{profile_id}/result", include_in_schema=False)
+async def cookie_pull_result(profile_id: str, request: Request, raw: dict = Body(...)):
+    """The extension's post-back: the cookies for a pending pull."""
+    _require_local(request)
+    token = request.headers.get("x-profile-token")
+    accepted = browser_mgr.cookie_pulls.submit_result(
+        profile_id,
+        token,
+        raw.get("request_id"),
+        raw.get("cookies"),
+    )
+    if not accepted:
+        raise HTTPException(status_code=403, detail="导回请求无效或已过期")
+    return {"ok": True}
+
+
 @app.get("/api/profiles/{profile_id}/fingerprint-report")
 async def get_fingerprint_report(profile_id: str):
     profile = db.get_profile(profile_id)
