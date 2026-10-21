@@ -44,6 +44,11 @@ jobs:
           # (GitHub sign-in, 1 concurrent session) unlocks the latest 154
           # build, which is what the scorecard should be measuring.
           CLOAKBROWSER_LICENSE_KEY: ${{ secrets.CLOAKBROWSER_LICENSE_KEY }}
+          # Optional repo secret with a proxy URL (any scheme the Manager
+          # supports, e.g. a residential vless:// link). When set, the
+          # scorecard profile egresses through it so IP-reputation verdicts
+          # measure the profile, not the runner's datacenter IP.
+          SCORECARD_PROXY: ${{ secrets.SCORECARD_PROXY }}
         run: |
           # Server and checks must live in one step: a process started in an
           # earlier step is reaped when that step ends on Windows runners
