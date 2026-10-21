@@ -353,6 +353,26 @@ class GroupCreate(BaseModel):
     color: str | None = None
 
 
+class DeviceTemplateResponse(BaseModel):
+    """One entry from the Windows device template library (backend/device_templates.py)."""
+
+    id: str
+    name: str
+    family: str
+    cpu: str
+    gpu_vendor: str
+    gpu_renderer: str
+    screen_width: int
+    screen_height: int
+    hardware_concurrency: int
+    device_memory: int
+    device_scale_factor: float
+
+
+class ApplyDeviceTemplateRequest(BaseModel):
+    template_id: str = Field(min_length=1)
+
+
 class GroupResponse(BaseModel):
     id: str
     name: str
