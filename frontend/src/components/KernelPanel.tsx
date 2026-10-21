@@ -1,5 +1,18 @@
-import { CheckCircle2, Cpu, Download, HardDrive, KeyRound, RefreshCw, Save, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import {
+  CheckCircle2,
+  Cpu,
+  Download,
+  HardDrive,
+  Info,
+  KeyRound,
+  RefreshCw,
+  Save,
+  Settings2,
+  Trash2,
+  XCircle,
+  type LucideIcon,
+} from "lucide-react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { api, type KernelOverview, type KernelSettings } from "../lib/api";
 import { formatBytes } from "./BackupPanel";
 
@@ -9,6 +22,50 @@ interface KernelPanelProps {
 
 type Notice = { tone: "success" | "info" | "error"; text: string };
 type Busy = "load" | "check" | "update" | "save" | "delete" | "license-save" | "license-remove" | null;
+
+const NOTICE_STYLES: Record<Notice["tone"], { classes: string; Icon: LucideIcon }> = {
+  success: { classes: "bg-emerald-50 text-emerald-800", Icon: CheckCircle2 },
+  info: { classes: "bg-blue-50 text-blue-800", Icon: Info },
+  error: { classes: "bg-red-50 text-red-800", Icon: XCircle },
+};
+
+function Card({ children }: { children: ReactNode }) {
+  return <div className="max-w-4xl overflow-hidden rounded-md border border-border bg-white">{children}</div>;
+}
+
+function CardHeader({
+  icon: Icon,
+  title,
+  subtitle,
+  action,
+}: {
+  icon: LucideIcon;
+  title: string;
+  subtitle?: string;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-3.5">
+      <div className="min-w-0">
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+          <Icon className="h-4 w-4 shrink-0 text-slate-500" />
+          {title}
+        </h2>
+        {subtitle && <p className="mt-1 pl-6 text-xs leading-5 text-slate-500">{subtitle}</p>}
+      </div>
+      {action}
+    </div>
+  );
+}
+
+function MetaItem({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex gap-3">
+      <dt className="w-16 shrink-0 text-slate-500">{label}</dt>
+      <dd className="min-w-0 flex-1 leading-5 text-slate-700">{children}</dd>
+    </div>
+  );
+}
 
 export function licenseText(license: KernelOverview["license"]): { label: string; detail: string } {
   switch (license.tier) {
@@ -155,10 +212,11 @@ export function KernelPanel({ runningCount }: KernelPanelProps) {
   const reclaimable = oldKernels.reduce((sum, kernel) => sum + kernel.size_bytes, 0);
   const settingsChanged = JSON.stringify(draft) !== JSON.stringify(info.settings);
   const pinChoices = info.installed_kernels.filter((kernel) => kernel.pro === (info.license.tier === "paid"));
+  const noticeStyle = notice ? NOTICE_STYLES[notice.tone] : null;
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
-      <div className="max-w-4xl overflow-hidden rounded-md border border-border bg-white">
+    <section className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
+      <Card>
         <div className="flex flex-wrap items-start justify-between gap-4 p-5">
           <div className="flex items-start gap-3">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-blue-50 text-blue-700">
@@ -166,10 +224,10 @@ export function KernelPanel({ runningCount }: KernelPanelProps) {
             </div>
             <div>
               <div className="text-xs text-slate-500">当前使用的 CloakBrowser 内核</div>
-              <div className="mt-0.5 text-xl font-semibold tracking-tight text-slate-900">
+              <div className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">
                 {info.version ?? "未下载"}
               </div>
-              <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
+              <div className="mt-2.5 flex flex-wrap gap-1.5 text-xs">
                 <span className="rounded bg-slate-100 px-2 py-0.5 text-slate-700">{license.label}</span>
                 {info.pinned && <span className="rounded bg-amber-100 px-2 py-0.5 text-amber-800">已锁定版本</span>}
                 {info.settings.release_channel === "preview" && (
@@ -198,58 +256,45 @@ export function KernelPanel({ runningCount }: KernelPanelProps) {
             </button>
           </div>
         </div>
-        <div className="grid gap-x-6 gap-y-1 border-t border-border bg-slate-50 px-5 py-3 text-xs text-slate-600 sm:grid-cols-2">
-          <div>授权：{license.detail}</div>
-          <div>官方最新：{latest ?? "点「检查更新」查看"}</div>
-          <div>平台：{info.platform ?? "未知"}</div>
-          <div>Wrapper：{info.wrapper_version ?? "未知"}（随 Manager 安装包更新）</div>
-        </div>
-        <div className="border-t border-border px-5 py-3 text-xs leading-5 text-slate-500">
+        <dl className="grid gap-x-8 gap-y-2.5 border-t border-border bg-slate-50 px-5 py-4 text-[13px] sm:grid-cols-2">
+          <MetaItem label="授权">{license.detail}</MetaItem>
+          <MetaItem label="官方最新">{latest ?? "点「检查更新」查看"}</MetaItem>
+          <MetaItem label="平台">{info.platform ?? "未知"}</MetaItem>
+          <MetaItem label="Wrapper">{info.wrapper_version ?? "未知"}（随 Manager 安装包更新）</MetaItem>
+        </dl>
+        <p className="px-5 py-3.5 text-xs leading-5 text-slate-500">
           只有「伪装画像」引擎使用这个内核；「稳定原生」用的是电脑上的 Google Chrome，跟着 Chrome 自己更新。更新内核后，已打开的浏览器要关掉重开才会用上新内核。
-        </div>
-      </div>
+        </p>
+        {notice && noticeStyle && (
+          <div className={`flex items-start gap-2 border-t border-border px-5 py-3 text-[13px] leading-5 ${noticeStyle.classes}`}>
+            <noticeStyle.Icon className="mt-0.5 h-4 w-4 shrink-0" />
+            <span className="min-w-0 whitespace-pre-line break-words">{notice.text}</span>
+          </div>
+        )}
+      </Card>
 
-      {notice && (
-        <div
-          className={`max-w-4xl whitespace-pre-line break-words rounded-md border px-4 py-3 text-sm ${
-            notice.tone === "success"
-              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-              : notice.tone === "info"
-              ? "border-blue-200 bg-blue-50 text-blue-800"
-              : "border-red-200 bg-red-50 text-red-800"
-          }`}
-        >
-          {notice.text}
-        </div>
-      )}
-
-      <div className="max-w-4xl overflow-hidden rounded-md border border-border bg-white">
-        <div className="border-b border-border px-5 py-4">
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-            <KeyRound className="h-4 w-4 text-slate-500" />
-            授权密钥
-          </h2>
-        </div>
+      <Card>
+        <CardHeader icon={KeyRound} title="授权密钥" />
         <div className="p-5">
-          <div className="max-w-3xl text-sm text-slate-600">
+          <div className="text-sm leading-6 text-slate-600">
             {info.license.key_stored ? (
               <p>
                 已保存授权密钥（内容不显示），当前授权：{license.label}。
-                要更换时直接在下面输入新密钥保存；新密钥验证不通过时不会覆盖现有的。
+                更换时在下方输入新密钥保存；新密钥验证不通过时，不会覆盖现有密钥。
               </p>
             ) : info.license.tier === "free" || info.license.tier === "paid" ? (
               <p>
-                当前授权来自环境变量 CLOAKBROWSER_LICENSE_KEY，不是面板保存的，所以在这里保存的密钥不会生效；
-                要用面板管理，先移除该环境变量并重启 Manager。
+                当前授权来自环境变量 CLOAKBROWSER_LICENSE_KEY，不是面板保存的，面板里保存的密钥不会生效。
+                要改用面板管理，请先移除该环境变量并重启 Manager。
               </p>
             ) : (
               <p>
-                还没有保存授权密钥。免费密钥在 cloakbrowser.dev/free 用 GitHub 账号登录领取；
-                把密钥粘贴到下面保存，会立即向官方验证，通过后就能使用最新内核。
+                还没有保存授权密钥。免费密钥可在 cloakbrowser.dev/free 用 GitHub 账号领取；
+                粘贴到下方保存后会立即向官方验证，通过即可使用最新内核。
               </p>
             )}
           </div>
-          <div className="mt-3 flex max-w-3xl flex-wrap items-center gap-2">
+          <div className="mt-4 flex flex-wrap items-center gap-2">
             <input
               type="password"
               className="input min-w-64 flex-1"
@@ -281,17 +326,15 @@ export function KernelPanel({ runningCount }: KernelPanelProps) {
               </button>
             )}
           </div>
-          <div className="mt-2 text-xs text-slate-500">
+          <p className="mt-2.5 text-xs leading-5 text-slate-500">
             密钥只保存在运行 Manager 的这台电脑上（CloakBrowser 密钥文件），不会显示在面板里，也不会写进画像或备份。
-          </div>
+          </p>
         </div>
-      </div>
+      </Card>
 
-      <div className="max-w-4xl overflow-hidden rounded-md border border-border bg-white">
-        <div className="border-b border-border px-5 py-4">
-          <h2 className="text-sm font-semibold text-slate-900">更新方式</h2>
-        </div>
-        <div className="grid max-w-3xl grid-cols-[120px_minmax(0,1fr)] items-start gap-x-5 gap-y-4 p-5">
+      <Card>
+        <CardHeader icon={Settings2} title="更新方式" />
+        <div className="grid grid-cols-[120px_minmax(0,1fr)] items-start gap-x-5 gap-y-5 p-5">
           <label className="pt-0.5 text-right text-sm font-medium text-slate-600">自动更新</label>
           <div>
             <label className="flex items-center gap-2 text-sm text-slate-800">
@@ -302,7 +345,7 @@ export function KernelPanel({ runningCount }: KernelPanelProps) {
               />
               <span>启动浏览器时自动下载新内核</span>
             </label>
-            <div className="mt-1 text-xs text-slate-500">关闭后一直用已下载的版本，需要时到这里手动更新。</div>
+            <div className="mt-1.5 text-xs leading-5 text-slate-500">关闭后一直用已下载的版本，需要时到这里手动更新。</div>
           </div>
 
           <label className="pt-2 text-right text-sm font-medium text-slate-600">更新渠道</label>
@@ -315,7 +358,7 @@ export function KernelPanel({ runningCount }: KernelPanelProps) {
               <option value="stable">稳定版（推荐）</option>
               <option value="preview">预览版</option>
             </select>
-            <div className="mt-1 text-xs text-slate-500">预览版更早拿到新 Chrome 版本，但可能不稳定；没有预览版时自动用稳定版。</div>
+            <div className="mt-1.5 text-xs leading-5 text-slate-500">预览版更早拿到新 Chrome 版本，但可能不稳定；没有预览版时自动用稳定版。</div>
           </div>
 
           <label className="pt-2 text-right text-sm font-medium text-slate-600">锁定版本</label>
@@ -334,7 +377,7 @@ export function KernelPanel({ runningCount }: KernelPanelProps) {
                 <option value={draft.pinned_version}>{draft.pinned_version}</option>
               )}
             </select>
-            <div className="mt-1 text-xs text-slate-500">
+            <div className="mt-1.5 text-xs leading-5 text-slate-500">
               {info.license.can_pin
                 ? "新内核出问题时，可以锁定到一个已下载的旧版本；锁定期间不会自动更新。"
                 : "免费 GitHub 密钥总是使用最新内核，官方不允许锁定版本。"}
@@ -353,33 +396,42 @@ export function KernelPanel({ runningCount }: KernelPanelProps) {
             </button>
           </div>
         </div>
-      </div>
+      </Card>
 
-      <div className="max-w-4xl overflow-hidden rounded-md border border-border bg-white">
-        <div className="flex items-center justify-between border-b border-border px-5 py-3">
-          <div>
-            <h2 className="text-sm font-semibold text-slate-900">已下载的内核</h2>
-            <p className="mt-0.5 text-xs text-slate-500">
-              {oldKernels.length > 0
-                ? `${oldKernels.length} 个旧版本没在用，共 ${formatBytes(reclaimable)}，可以删除释放空间。`
-                : "没有可清理的旧版本。"}
-            </p>
-          </div>
-          <button className="btn-secondary flex items-center gap-1.5 px-3" disabled={busy !== null} onClick={() => void load()}>
-            <RefreshCw className="h-4 w-4" />
-            <span>刷新</span>
-          </button>
-        </div>
+      <Card>
+        <CardHeader
+          icon={HardDrive}
+          title="已下载的内核"
+          subtitle={
+            oldKernels.length > 0
+              ? `${oldKernels.length} 个旧版本没在用，共 ${formatBytes(reclaimable)}，可以删除释放空间。`
+              : "没有可清理的旧版本。"
+          }
+          action={
+            <button className="btn-secondary flex shrink-0 items-center gap-1.5 px-3" disabled={busy !== null} onClick={() => void load()}>
+              <RefreshCw className="h-4 w-4" />
+              <span>刷新</span>
+            </button>
+          }
+        />
         {info.installed_kernels.length === 0 ? (
           <div className="px-5 py-6 text-sm text-slate-500">还没有下载内核，第一次启动伪装画像时会自动下载。</div>
         ) : (
           <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border text-left text-xs text-slate-500">
+                <th className="px-5 py-2 font-medium">版本</th>
+                <th className="w-28 px-3 py-2 text-right font-medium">大小</th>
+                <th className="w-28 px-5 py-2">
+                  <span className="sr-only">操作</span>
+                </th>
+              </tr>
+            </thead>
             <tbody>
               {info.installed_kernels.map((kernel) => (
                 <tr key={kernel.name} className="border-b border-border last:border-b-0">
-                  <td className="px-5 py-2.5">
-                    <div className="flex items-center gap-2">
-                      <HardDrive className="h-4 w-4 text-slate-400" />
+                  <td className="px-5 py-3">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="font-medium text-slate-800">{kernel.version}</span>
                       <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">{kernel.pro ? "Pro" : "免费版"}</span>
                       {kernel.in_use && (
@@ -390,8 +442,10 @@ export function KernelPanel({ runningCount }: KernelPanelProps) {
                       )}
                     </div>
                   </td>
-                  <td className="px-3 py-2.5 text-xs text-slate-500">{formatBytes(kernel.size_bytes)}</td>
-                  <td className="px-5 py-2.5">
+                  <td className="w-28 px-3 py-3 text-right text-[13px] tabular-nums text-slate-500">
+                    {formatBytes(kernel.size_bytes)}
+                  </td>
+                  <td className="w-28 px-5 py-3">
                     <div className="flex justify-end">
                       {!kernel.in_use && (
                         <button
@@ -413,7 +467,7 @@ export function KernelPanel({ runningCount }: KernelPanelProps) {
           </table>
         )}
         <div className="border-t border-border px-5 py-2.5 text-xs text-slate-400">位置：{info.cache_dir}</div>
-      </div>
+      </Card>
     </section>
   );
 }
