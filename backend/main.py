@@ -36,7 +36,7 @@ from . import auto_backup
 from . import backup as backups
 from . import database as db
 from . import device_templates
-from .fingerprint_options import parse_fingerprint_options
+from .fingerprint_options import RECOMMENDED_NEW_PROFILE_OPTIONS, parse_fingerprint_options
 from .host_display import primary_screen_size
 from .cookie_formats import CookieFormatError, merge_cookies, normalize_cookie_text, parse_cookie_text
 from . import kernel
@@ -549,6 +549,15 @@ def _normalize_profile_cookies(data: dict) -> None:
 async def create_profile(req: ProfileCreate):
     data = req.model_dump()
     _normalize_profile_cookies(data)
+    if "fingerprint_options" not in req.model_fields_set:
+        # New-profile default preset (2026-10-21): noise off + 50 GB storage
+        # quota. Only when the caller did not send fingerprint_options at
+        # all — explicit choices (including {}) are honoured as-is, and
+        # existing profiles are never rewritten.
+        data["fingerprint_options"] = {
+            **data.get("fingerprint_options", {}),
+            **RECOMMENDED_NEW_PROFILE_OPTIONS,
+        }
     tags = data.pop("tags", None)
     if tags:
         data["tags"] = [t.model_dump() if hasattr(t, "model_dump") else t for t in tags]
