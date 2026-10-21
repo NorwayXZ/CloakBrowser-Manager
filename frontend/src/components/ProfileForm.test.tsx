@@ -1,8 +1,59 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { api } from "../lib/api";
+import { api, type Profile } from "../lib/api";
 import { ProfileForm } from "./ProfileForm";
+
+function makeProfile(overrides: Partial<Profile> = {}): Profile {
+  return {
+    id: "profile-1",
+    name: "Awscnn",
+    browser_engine: "cloakbrowser",
+    device_profile: null,
+    fingerprint_seed: 12345,
+    proxy: null,
+    timezone: null,
+    locale: null,
+    platform: "macos",
+    user_agent: null,
+    screen_width: 1440,
+    screen_height: 900,
+    gpu_vendor: null,
+    gpu_renderer: null,
+    hardware_concurrency: null,
+    device_memory: null,
+    humanize: true,
+    human_preset: "default",
+    headless: false,
+    geoip: true,
+    clipboard_sync: true,
+    auto_launch: false,
+    group_name: "未分组",
+    account_platform: null,
+    cookies_json: null,
+    startup_urls: [],
+    color_scheme: null,
+    launch_args: [],
+    fingerprint_options: {},
+    notes: null,
+    user_data_dir: "/tmp/profiles/profile-1",
+    created_at: "2026-10-21T00:00:00Z",
+    updated_at: "2026-10-21T00:00:00Z",
+    last_opened_at: null,
+    last_exit_at: null,
+    last_exit_reason: null,
+    deleted_at: null,
+    tags: [],
+    status: "stopped",
+    runtime_mode: "native",
+    viewer_mode: "native-window",
+    vnc_ws_port: null,
+    cdp_url: null,
+    launch_mode: null,
+    proxy_geo: null,
+    ...overrides,
+  };
+}
 
 describe("ProfileForm proxy mode", () => {
   it("creates a direct profile without a proxy value", async () => {
@@ -220,6 +271,50 @@ describe("ProfileForm cookies and layout", () => {
     fireEvent.click(screen.getByRole("button", { name: "合并" }));
 
     expect(await screen.findByText("Name=Value 格式不带域名")).toBeTruthy();
+  });
+
+  it("pulls the running browser's cookies back into the form", async () => {
+    const pulledJson = '[{"name":"sid","value":"abc","domain":".example.com","path":"/"}]';
+    const pull = vi.spyOn(api, "pullProfileCookies").mockResolvedValue({
+      cookies: [{ name: "sid", value: "abc", domain: ".example.com", path: "/" }],
+      cookies_json: pulledJson,
+      count: 1,
+    });
+    render(<ProfileForm profile={makeProfile()} hostOS="macos" onSave={vi.fn()} onCancel={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /从浏览器导回 Cookie/ }));
+
+    await waitFor(() => expect(pull).toHaveBeenCalledWith("profile-1"));
+    expect(await screen.findByText(/已从浏览器导回 1 条 Cookie/)).toBeTruthy();
+    expect((screen.getByPlaceholderText(/支持 JSON、Netscape/) as HTMLTextAreaElement).value).toBe(pulledJson);
+  });
+
+  it("shows the backend error when the browser cannot be read", async () => {
+    vi.spyOn(api, "pullProfileCookies").mockRejectedValue(new Error("浏览器没有在运行：请先用「调试模式」启动这个浏览器，再导回它的 Cookie"));
+    render(<ProfileForm profile={makeProfile()} hostOS="macos" onSave={vi.fn()} onCancel={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /从浏览器导回 Cookie/ }));
+
+    expect(await screen.findByText(/浏览器没有在运行/)).toBeTruthy();
+    expect((screen.getByPlaceholderText(/支持 JSON、Netscape/) as HTMLTextAreaElement).value).toBe("");
+  });
+
+  it("exports cookies in the chosen format", async () => {
+    const download = vi.spyOn(api, "downloadCookieExport").mockResolvedValue(undefined);
+    render(<ProfileForm profile={makeProfile()} hostOS="macos" onSave={vi.fn()} onCancel={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("导出格式"), { target: { value: "netscape" } });
+    fireEvent.click(screen.getByRole("button", { name: /导出 Cookie/ }));
+
+    await waitFor(() => expect(download).toHaveBeenCalledWith("profile-1", "netscape", "Awscnn-cookies.txt"));
+    expect(await screen.findByText("Cookie 文件已开始下载")).toBeTruthy();
+  });
+
+  it("hides pull and export until the profile exists", () => {
+    render(<ProfileForm profile={null} hostOS="macos" onSave={vi.fn()} onCancel={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: /从浏览器导回 Cookie/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /导出 Cookie/ })).toBeNull();
   });
 
   it("lists every form section in the top navigation", () => {
