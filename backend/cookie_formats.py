@@ -145,3 +145,131 @@ def normalize_cookie_text(text: str | None, domain: str | None = None) -> str | 
     if not cookies:
         raise CookieFormatError("没有读到任何 Cookie")
     return json.dumps(cookies, ensure_ascii=False, indent=2)
+
+
+# --- Cookies read back from a live browser, and export serializers ---------
+#
+# A cookie pulled from a running browser starts out in Playwright's shape
+# (``expires`` as unix seconds, -1 for session cookies; capitalised
+# ``sameSite``). Everything is normalised to the stored profile shape first
+# (Cookie-Editor style ``expirationDate`` / ``session``), so the pull result
+# can be saved as ``cookies_json`` as-is and the exporters share one input.
+
+_LIVE_SAMESITE = {"strict": "strict", "lax": "lax", "none": "none"}
+_EDITOR_SAMESITE = {
+    "strict": "strict",
+    "lax": "lax",
+    "none": "no_restriction",
+    "no_restriction": "no_restriction",
+}
+
+
+def _valid_cookie(item: Any) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    name, value, domain = item.get("name"), item.get("value"), item.get("domain")
+    if not isinstance(name, str) or not name or not isinstance(value, str) or not isinstance(domain, str) or not domain:
+        return None
+    return item
+
+
+def _expiry_of(item: dict[str, Any]) -> int | None:
+    """Positive unix expiry from a stored-shape cookie, else None (session)."""
+    if item.get("session"):
+        return None
+    expiry = item.get("expirationDate", item.get("expires"))
+    if isinstance(expiry, (int, float)) and expiry > 0:
+        return int(expiry)
+    return None
+
+
+def live_cookies_to_profile(raw_cookies: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Playwright ``BrowserContext.cookies()`` output in the stored shape."""
+    cookies: list[dict[str, Any]] = []
+    for item in raw_cookies or []:
+        if _valid_cookie(item) is None:
+            continue
+        domain = str(item["domain"])
+        cookie: dict[str, Any] = {
+            "name": item["name"],
+            "value": item["value"],
+            "domain": domain,
+            "path": str(item.get("path") or "/"),
+            "secure": bool(item.get("secure", False)),
+            "httpOnly": bool(item.get("httpOnly", False)),
+            "hostOnly": not domain.startswith("."),
+        }
+        same_site = str(item.get("sameSite") or "").strip().lower()
+        if same_site in _LIVE_SAMESITE:
+            cookie["sameSite"] = same_site
+        expires = item.get("expires")
+        if isinstance(expires, (int, float)) and expires > 0:
+            cookie["expirationDate"] = int(expires)
+        else:
+            cookie["session"] = True
+        cookies.append(cookie)
+    return cookies
+
+
+def cookie_editor_cookies(cookies: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Stored-shape cookies as the array the Cookie-Editor extension imports."""
+    exported: list[dict[str, Any]] = []
+    for raw in cookies or []:
+        item = _valid_cookie(raw)
+        if item is None:
+            continue
+        domain = str(item["domain"])
+        expiry = _expiry_of(item)
+        entry: dict[str, Any] = {
+            "name": item["name"],
+            "value": item["value"],
+            "domain": domain,
+            "path": str(item.get("path") or "/"),
+        }
+        if expiry is not None:
+            entry["expirationDate"] = expiry
+        entry["httpOnly"] = bool(item.get("httpOnly", False))
+        entry["secure"] = bool(item.get("secure", False))
+        entry["hostOnly"] = bool(item.get("hostOnly", not domain.startswith(".")))
+        same_site = str(item.get("sameSite") or "").strip().lower()
+        entry["sameSite"] = _EDITOR_SAMESITE.get(same_site, "unspecified")
+        entry["session"] = expiry is None
+        exported.append(entry)
+    return exported
+
+
+def to_cookie_editor_json(cookies: list[dict[str, Any]] | None) -> str:
+    """Export document Cookie-Editor can import directly."""
+    return json.dumps(cookie_editor_cookies(cookies), ensure_ascii=False, indent=2)
+
+
+def _netscape_field(value: Any) -> str:
+    # The tab-separated format cannot carry tabs or line breaks in values.
+    return str(value or "").replace("\t", " ").replace("\r", "").replace("\n", "")
+
+
+def to_netscape(cookies: list[dict[str, Any]] | None) -> str:
+    """Stored-shape cookies as a Netscape cookies.txt document."""
+    lines = [
+        "# Netscape HTTP Cookie File",
+        "# Exported by CloakBrowser Manager",
+        "",
+    ]
+    for raw in cookies or []:
+        item = _valid_cookie(raw)
+        if item is None:
+            continue
+        domain = str(item["domain"])
+        line = "\t".join([
+            _netscape_field(domain),
+            "TRUE" if domain.startswith(".") else "FALSE",
+            _netscape_field(item.get("path") or "/"),
+            "TRUE" if item.get("secure") else "FALSE",
+            str(_expiry_of(item) or 0),
+            _netscape_field(item["name"]),
+            _netscape_field(item["value"]),
+        ])
+        if item.get("httpOnly"):
+            line = NETSCAPE_HTTPONLY_PREFIX + line
+        lines.append(line)
+    return "\n".join(lines) + "\n"
