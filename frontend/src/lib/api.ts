@@ -185,7 +185,13 @@ export interface KernelOverview {
   wrapper_version: string | null;
   platform: string | null;
   cache_dir: string;
-  license: { tier: KernelLicenseTier; plan: string | null; expires: string | null; can_pin: boolean };
+  license: {
+    tier: KernelLicenseTier;
+    plan: string | null;
+    expires: string | null;
+    can_pin: boolean;
+    key_stored: boolean;
+  };
   settings: KernelSettings;
   version: string | null;
   installed: boolean;
@@ -641,6 +647,15 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(settings),
     }),
+
+  saveLicenseKey: (licenseKey: string) =>
+    request<KernelOverview>("/api/kernel/license", {
+      method: "POST",
+      body: JSON.stringify({ license_key: licenseKey }),
+    }),
+
+  removeLicenseKey: () =>
+    request<KernelOverview>("/api/kernel/license", { method: "DELETE" }),
 
   deleteKernel: (name: string) =>
     request<{ ok: boolean; freed_bytes: number }>(`/api/kernel/versions/${encodeURIComponent(name)}`, {
