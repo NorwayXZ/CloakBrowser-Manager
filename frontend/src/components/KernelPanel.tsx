@@ -1,4 +1,4 @@
-import { CheckCircle2, Cpu, Download, HardDrive, RefreshCw, Save, Trash2 } from "lucide-react";
+import { CheckCircle2, Cpu, Download, HardDrive, KeyRound, RefreshCw, Save, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { api, type KernelOverview, type KernelSettings } from "../lib/api";
 import { formatBytes } from "./BackupPanel";
@@ -8,7 +8,7 @@ interface KernelPanelProps {
 }
 
 type Notice = { tone: "success" | "info" | "error"; text: string };
-type Busy = "load" | "check" | "update" | "save" | "delete" | null;
+type Busy = "load" | "check" | "update" | "save" | "delete" | "license-save" | "license-remove" | null;
 
 export function licenseText(license: KernelOverview["license"]): { label: string; detail: string } {
   switch (license.tier) {
@@ -37,6 +37,7 @@ export function licenseText(license: KernelOverview["license"]): { label: string
 export function KernelPanel({ runningCount }: KernelPanelProps) {
   const [info, setInfo] = useState<KernelOverview | null>(null);
   const [draft, setDraft] = useState<KernelSettings | null>(null);
+  const [keyDraft, setKeyDraft] = useState("");
   const [latest, setLatest] = useState<string | null>(null);
   const [busy, setBusy] = useState<Busy>("load");
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -96,6 +97,35 @@ export function KernelPanel({ runningCount }: KernelPanelProps) {
     void run("save", async () => {
       applyOverview(await api.saveKernelSettings(draft));
       return { tone: "success", text: "内核设置已保存，下次启动浏览器时生效。" };
+    });
+  };
+
+  const handleSaveLicense = () => {
+    const key = keyDraft.trim();
+    if (!key) return;
+    void run("license-save", async () => {
+      const overview = await api.saveLicenseKey(key);
+      applyOverview(overview);
+      setKeyDraft("");
+      if (overview.license.tier === "free" || overview.license.tier === "paid") {
+        return {
+          tone: "success",
+          text: `授权密钥已保存并通过验证：${licenseText(overview.license).label}。下次启动浏览器时使用对应内核；要马上换内核，关掉浏览器后点「立即更新」。`,
+        };
+      }
+      return {
+        tone: "info",
+        text: "授权密钥已保存，但暂时没连上官方服务器验证；下次启动浏览器时会再确认。",
+      };
+    });
+  };
+
+  const handleRemoveLicense = () => {
+    if (!confirm("移除保存的授权密钥？\n之后将退回未登录授权的免费内核。")) return;
+    void run("license-remove", async () => {
+      applyOverview(await api.removeLicenseKey());
+      setKeyDraft("");
+      return { tone: "success", text: "已移除保存的授权密钥，下次启动浏览器时生效。" };
     });
   };
 
@@ -192,6 +222,70 @@ export function KernelPanel({ runningCount }: KernelPanelProps) {
           {notice.text}
         </div>
       )}
+
+      <div className="max-w-4xl overflow-hidden rounded-md border border-border bg-white">
+        <div className="border-b border-border px-5 py-4">
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+            <KeyRound className="h-4 w-4 text-slate-500" />
+            授权密钥
+          </h2>
+        </div>
+        <div className="p-5">
+          <div className="max-w-3xl text-sm text-slate-600">
+            {info.license.key_stored ? (
+              <p>
+                已保存授权密钥（内容不显示），当前授权：{license.label}。
+                要更换时直接在下面输入新密钥保存；新密钥验证不通过时不会覆盖现有的。
+              </p>
+            ) : info.license.tier === "free" || info.license.tier === "paid" ? (
+              <p>
+                当前授权来自环境变量 CLOAKBROWSER_LICENSE_KEY，不是面板保存的，所以在这里保存的密钥不会生效；
+                要用面板管理，先移除该环境变量并重启 Manager。
+              </p>
+            ) : (
+              <p>
+                还没有保存授权密钥。免费密钥在 cloakbrowser.dev/free 用 GitHub 账号登录领取；
+                把密钥粘贴到下面保存，会立即向官方验证，通过后就能使用最新内核。
+              </p>
+            )}
+          </div>
+          <div className="mt-3 flex max-w-3xl flex-wrap items-center gap-2">
+            <input
+              type="password"
+              className="input min-w-64 flex-1"
+              aria-label="CloakBrowser 授权密钥"
+              placeholder="cb_..."
+              autoComplete="off"
+              spellCheck={false}
+              value={keyDraft}
+              onChange={(e) => setKeyDraft(e.target.value)}
+            />
+            <button
+              className="btn-primary flex items-center gap-1.5 px-4 disabled:opacity-60"
+              disabled={busy !== null || !keyDraft.trim()}
+              onClick={handleSaveLicense}
+            >
+              <Save className="h-4 w-4" />
+              <span>
+                {busy === "license-save" ? "验证并保存中..." : info.license.key_stored ? "更换密钥" : "保存密钥"}
+              </span>
+            </button>
+            {info.license.key_stored && (
+              <button
+                className="btn-secondary flex items-center gap-1 px-3 text-red-600 disabled:opacity-60"
+                disabled={busy !== null}
+                onClick={handleRemoveLicense}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                <span>{busy === "license-remove" ? "移除中..." : "移除密钥"}</span>
+              </button>
+            )}
+          </div>
+          <div className="mt-2 text-xs text-slate-500">
+            密钥只保存在运行 Manager 的这台电脑上（CloakBrowser 密钥文件），不会显示在面板里，也不会写进画像或备份。
+          </div>
+        </div>
+      </div>
 
       <div className="max-w-4xl overflow-hidden rounded-md border border-border bg-white">
         <div className="border-b border-border px-5 py-4">
