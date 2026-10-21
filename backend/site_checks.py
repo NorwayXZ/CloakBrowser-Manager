@@ -42,6 +42,10 @@ IPHEY_JS = """({
 CREEPJS_JS = """({
   text: document.body ? document.body.innerText.slice(0, 40000) : '',
   lies: document.querySelectorAll('.lies').length,
+  lieTexts: [...document.querySelectorAll('.lies')].slice(0, 12).map(el => {
+    const box = el.closest('div') || el;
+    return (box.innerText || el.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 160);
+  }),
 })"""
 
 
@@ -113,6 +117,11 @@ def judge_creepjs(raw: Any) -> Verdict | None:
         return None
     lies = int(raw.get("lies", 0)) if isinstance(raw, dict) else 0
     details = [f"lies：{lies} 处", f"headless：{headless}%", f"stealth：{stealth}%", f"像 headless：{like}%"]
+    if isinstance(raw, dict):
+        for item in raw.get("lieTexts") or []:
+            item = str(item).strip()
+            if item:
+                details.append(f"lie 明细：{item}")
     problems = []
     if lies:
         problems.append(f"{lies} 处 lies")
@@ -318,6 +327,10 @@ async def run_site(context: Any, site: SiteCheck, report_dir: Path, *, poll: flo
         if verdict is not None:
             result.status, result.summary, result.details = verdict
         screenshot = report_dir / f"{site.id}.png"
+        try:
+            await page.evaluate("window.scrollTo(0, 0)")
+        except Exception:
+            pass
         await page.screenshot(path=str(screenshot), full_page=site.id == "sannysoft")
         result.screenshot = screenshot.name
     except Exception as exc:  # network, site down, browser closed
