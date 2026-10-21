@@ -45,11 +45,17 @@ def main() -> int:
     except Exception:
         pass
     OUT.mkdir(parents=True, exist_ok=True)
-    profile = call("POST", "/api/profiles", {
+    payload = {
         "name": "windows-scorecard",
         "browser_engine": "cloakbrowser",
         "platform": "windows",
-    })
+    }
+    proxy = os.environ.get("SCORECARD_PROXY", "").strip()
+    if proxy:
+        # Value comes from a GitHub Actions secret; never print it.
+        payload["proxy"] = proxy
+        print("profile will use the configured proxy (value hidden)", flush=True)
+    profile = call("POST", "/api/profiles", payload)
     profile_id = profile["id"]
     print(f"created profile {profile_id}", flush=True)
     try:
