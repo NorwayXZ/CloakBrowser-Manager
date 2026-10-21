@@ -55,6 +55,12 @@ def main() -> int:
         # Value comes from a GitHub Actions secret; never print it.
         payload["proxy"] = proxy
         print("profile will use the configured proxy (value hidden)", flush=True)
+    fp_options = os.environ.get("SCORECARD_FP_OPTIONS", "").strip()
+    if fp_options:
+        # A/B experiments: JSON object of fingerprint_options from the
+        # workflow_dispatch input, e.g. {"noise": false}.
+        payload["fingerprint_options"] = json.loads(fp_options)
+        print(f"fingerprint_options override: {fp_options}", flush=True)
     profile = call("POST", "/api/profiles", payload)
     profile_id = profile["id"]
     print(f"created profile {profile_id}", flush=True)
