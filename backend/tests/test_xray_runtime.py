@@ -228,6 +228,24 @@ async def test_start_xray_proxy_sets_working_directory_and_asset_env(tmp_path, m
     await process.close()
 
 
+def test_xray_env_includes_systemroot_on_windows(tmp_path, monkeypatch):
+    # Regression: without SystemRoot, Winsock cannot load its service
+    # provider and Xray exits before listening on Windows.
+    monkeypatch.setattr(xray_runtime.os, "name", "nt")
+    monkeypatch.setenv("SystemRoot", r"C:\Windows")
+    monkeypatch.setenv("GITHUB_TOKEN", "must-not-leak")
+    env = xray_runtime._xray_env(tmp_path)
+    assert env["SystemRoot"] == r"C:\Windows"
+    assert env["windir"] == r"C:\Windows"
+    assert "GITHUB_TOKEN" not in env
+
+
+def test_xray_env_has_no_systemroot_off_windows(tmp_path, monkeypatch):
+    monkeypatch.setattr(xray_runtime.os, "name", "posix")
+    env = xray_runtime._xray_env(tmp_path)
+    assert "SystemRoot" not in env
+
+
 @pytest.mark.parametrize("link", [
     "vless://example.com:443",
     "trojan://example.com:443",
