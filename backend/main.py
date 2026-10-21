@@ -23,7 +23,7 @@ from datetime import datetime
 from contextlib import asynccontextmanager
 from http.cookies import SimpleCookie
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import httpx
 from fastapi import Body, FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
@@ -38,10 +38,17 @@ from . import database as db
 from . import device_templates
 from .fingerprint_options import RECOMMENDED_NEW_PROFILE_OPTIONS, parse_fingerprint_options
 from .host_display import primary_screen_size
-from .cookie_formats import CookieFormatError, merge_cookies, normalize_cookie_text, parse_cookie_text
+from .cookie_formats import (
+    CookieFormatError,
+    merge_cookies,
+    normalize_cookie_text,
+    parse_cookie_text,
+    to_cookie_editor_json,
+    to_netscape,
+)
 from . import kernel
 from . import secrets_crypto
-from .browser_manager import BrowserLaunchError, BrowserManager, _normalize_proxy, _validate_proxy
+from .browser_manager import BrowserLaunchError, BrowserManager, CookiePullError, _normalize_proxy, _validate_proxy
 from .cloak_runtime import get_effective_chromium_version
 from . import desktop_app, self_update, site_checks
 from .site_check_job import SiteCheckJob, describe_environment
@@ -64,6 +71,7 @@ from .models import (
     BrowserUpdateResponse,
     CookieMergeRequest,
     CookieMergeResponse,
+    CookiePullResponse,
     DeviceTemplateResponse,
     KernelCheckResponse,
     KernelLicenseKeyRequest,
@@ -1235,6 +1243,64 @@ async def get_profile_status(profile_id: str):
         raise HTTPException(status_code=404, detail="Profile not found")
     status = browser_mgr.get_status(profile_id, profile)
     return ProfileStatusResponse(**status)
+
+
+async def _pull_cookies_or_409(profile_id: str) -> list[dict]:
+    """Live cookies for the pull/export endpoints, with readable failures."""
+    try:
+        return await browser_mgr.pull_profile_cookies(profile_id)
+    except CookiePullError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Cookie pull failed for %s: %s", profile_id, exc)
+        raise HTTPException(status_code=500, detail="读取 Cookie 失败") from exc
+
+
+@app.post("/api/profiles/{profile_id}/cookies/pull", response_model=CookiePullResponse)
+async def pull_profile_cookies(profile_id: str):
+    """Read the running browser's current cookies back into the edit form.
+
+    The stored profile config is deliberately NOT updated here: the panel
+    fills the form with the result, and saving stays an explicit user act.
+    """
+    profile = db.get_profile(profile_id)
+    if not profile or profile.get("deleted_at"):
+        raise HTTPException(status_code=404, detail="Profile not found")
+    cookies = await _pull_cookies_or_409(profile_id)
+    return CookiePullResponse(
+        cookies=cookies,
+        cookies_json=json.dumps(cookies, ensure_ascii=False, indent=2),
+        count=len(cookies),
+    )
+
+
+def _cookie_export_filename(profile_name: str | None, extension: str) -> str:
+    raw = (profile_name or "").strip()
+    safe = "".join(ch if (ch.isalnum() or ch in "-_ ") else "_" for ch in raw).strip()
+    return f"{safe or 'profile'}-cookies.{extension}"
+
+
+@app.get("/api/profiles/{profile_id}/cookies/export")
+async def export_profile_cookies(profile_id: str, format: str = "json"):
+    """Download the running browser's cookies as JSON or a cookies.txt."""
+    profile = db.get_profile(profile_id)
+    if not profile or profile.get("deleted_at"):
+        raise HTTPException(status_code=404, detail="Profile not found")
+    fmt = format.strip().lower()
+    if fmt not in {"json", "netscape"}:
+        raise HTTPException(status_code=422, detail="format 只支持 json 或 netscape")
+    cookies = await _pull_cookies_or_409(profile_id)
+    if fmt == "json":
+        body, media_type, extension = to_cookie_editor_json(cookies), "application/json", "json"
+    else:
+        body, media_type, extension = to_netscape(cookies), "text/plain; charset=utf-8", "txt"
+    filename = _cookie_export_filename(profile.get("name"), extension)
+    ascii_fallback = filename.encode("ascii", "ignore").decode() or f"profile-cookies.{extension}"
+    disposition = (
+        f'attachment; filename="{ascii_fallback}"; '
+        f"filename*=UTF-8''{quote(filename)}"
+    )
+    return Response(content=body, media_type=media_type, headers={"Content-Disposition": disposition})
 
 
 @app.get("/api/profiles/{profile_id}/fingerprint-report")
