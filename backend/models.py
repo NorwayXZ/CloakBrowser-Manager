@@ -433,6 +433,13 @@ class KernelLicenseResponse(BaseModel):
     plan: str | None = None
     expires: str | None = None
     can_pin: bool = False
+    # True when a key is saved in the wrapper's license.key file (the key
+    # itself is never exposed); False when keyless or env-provided.
+    key_stored: bool = False
+
+
+class KernelLicenseKeyRequest(BaseModel):
+    license_key: str = Field(min_length=1, max_length=1024)
 
 
 class KernelSettingsModel(BaseModel):
