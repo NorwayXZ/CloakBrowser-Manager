@@ -59,6 +59,37 @@ def test_create_profile_invalid_platform(app_client: TestClient):
     assert resp.status_code == 422
 
 
+def test_create_profile_applies_recommended_fingerprint_defaults(app_client: TestClient):
+    # 2026-10-21 WEI-approved preset: new profiles get noise off +
+    # 50 GB storage quota when the caller sends no fingerprint_options.
+    resp = app_client.post("/api/profiles", json={"name": "Defaults"})
+    assert resp.status_code == 201
+    options = resp.json()["fingerprint_options"]
+    assert options["noise"] is False
+    assert options["storage_quota_mb"] == 50000
+
+
+def test_create_profile_keeps_explicit_fingerprint_options(app_client: TestClient):
+    # An explicit choice (even {} sent deliberately) is never overwritten.
+    resp = app_client.post(
+        "/api/profiles",
+        json={"name": "Explicit", "fingerprint_options": {"noise": True}},
+    )
+    assert resp.status_code == 201
+    options = resp.json()["fingerprint_options"]
+    assert options["noise"] is True
+    assert options["storage_quota_mb"] is None
+
+
+def test_update_profile_does_not_rewrite_fingerprint_options(app_client: TestClient):
+    pid = app_client.post("/api/profiles", json={"name": "Original"}).json()["id"]
+    resp = app_client.put(f"/api/profiles/{pid}", json={"name": "Renamed"})
+    assert resp.status_code == 200
+    options = resp.json()["fingerprint_options"]
+    assert options["noise"] is False
+    assert options["storage_quota_mb"] == 50000
+
+
 def test_get_profile(app_client: TestClient):
     create = app_client.post("/api/profiles", json={"name": "Get Me"})
     pid = create.json()["id"]
