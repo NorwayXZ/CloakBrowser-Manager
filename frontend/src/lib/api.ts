@@ -279,6 +279,33 @@ export interface SiteCheckResult {
   details: string[];
   screenshot: string | null;
   seconds: number;
+  /** "site" for public detection sites, "local" for the Manager's own probe items. */
+  source?: "site" | "local";
+  /** Caveat for verdicts that depend on the egress IP's reputation. */
+  ip_note?: string | null;
+}
+
+export interface SiteCheckCounts {
+  pass: number;
+  warn: number;
+  fail: number;
+  unknown: number;
+  error: number;
+  total: number;
+}
+
+export interface SiteCheckDiffChange {
+  site: string;
+  name?: string | null;
+  from: SiteCheckStatus | null;
+  to: SiteCheckStatus | null;
+  summary?: string | null;
+}
+
+export interface SiteCheckDiff {
+  previous_id?: string | null;
+  previous_created_at?: string | null;
+  changes: SiteCheckDiffChange[];
 }
 
 export interface SiteCheckState {
@@ -298,10 +325,12 @@ export interface SiteCheckReportSummary {
   id: string;
   created_at: string | null;
   overall: "pass" | "warn" | "fail" | null;
+  profile_id?: string | null;
   profile_name: string | null;
   host_os: string | null;
   passed: number;
   total: number;
+  counts?: SiteCheckCounts;
 }
 
 export interface SiteCheckReport {
@@ -310,6 +339,12 @@ export interface SiteCheckReport {
   overall: "pass" | "warn" | "fail";
   environment: Record<string, unknown>;
   results: SiteCheckResult[];
+  /** Per-status tallies; absent on reports written before they were recorded. */
+  summary?: SiteCheckCounts;
+  /** Egress-IP caveat for the whole report; absent on older reports. */
+  egress_note?: string;
+  /** Status changes vs the previous report of the same profile (detail view only). */
+  diff?: SiteCheckDiff | null;
 }
 
 export interface PreflightIssue {
