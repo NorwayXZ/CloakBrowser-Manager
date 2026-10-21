@@ -66,6 +66,7 @@ from .models import (
     CookieMergeResponse,
     DeviceTemplateResponse,
     KernelCheckResponse,
+    KernelLicenseKeyRequest,
     KernelOverviewResponse,
     KernelSettingsModel,
     ClipboardRequest,
@@ -1538,7 +1539,11 @@ def _kernel_overview_response() -> KernelOverviewResponse:
     return KernelOverviewResponse(
         **{
             **dataclasses.asdict(info),
-            "license": {**dataclasses.asdict(info.license), "can_pin": info.license.can_pin},
+            "license": {
+                **dataclasses.asdict(info.license),
+                "can_pin": info.license.can_pin,
+                "key_stored": kernel.license_key_stored(),
+            },
         },
         running_count=len(browser_mgr.running),
     )
@@ -1583,6 +1588,29 @@ async def update_kernel_settings(body: KernelSettingsModel):
     else:
         db.delete_setting(kernel.SETTING_PINNED_VERSION)
     kernel.apply_settings(settings)
+    return await asyncio.to_thread(_kernel_overview_response)
+
+
+@app.post("/api/kernel/license", response_model=KernelOverviewResponse)
+async def save_kernel_license_key(body: KernelLicenseKeyRequest):
+    """Save a CloakBrowser license key where the wrapper resolves it.
+
+    The key is only ever written to the wrapper's license.key file; it is
+    never logged or echoed back. An invalid key rolls back (see kernel.py).
+    """
+    try:
+        await asyncio.to_thread(kernel.save_license_key, body.license_key)
+    except kernel.KernelError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return await asyncio.to_thread(_kernel_overview_response)
+
+
+@app.delete("/api/kernel/license", response_model=KernelOverviewResponse)
+async def remove_kernel_license_key():
+    try:
+        await asyncio.to_thread(kernel.remove_license_key)
+    except kernel.KernelError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return await asyncio.to_thread(_kernel_overview_response)
 
 
