@@ -38,6 +38,10 @@ IPHEY_JS = """({
   text: document.body ? document.body.innerText.slice(0, 40000) : '',
   flagged: [...document.querySelectorAll('.code-block--error h4')].map(e => e.innerText.trim()),
   signals: (document.getElementById('signals') || {}).innerText || '',
+  diag: (() => {
+    const h = [...document.querySelectorAll('h1')].find(e => e.innerText.includes('Digital Identity'));
+    return h ? (h.parentElement || h).outerHTML.slice(0, 1500) : 'no heading found';
+  })(),
 })"""
 CREEPJS_JS = """({
   text: document.body ? document.body.innerText.slice(0, 40000) : '',
@@ -313,8 +317,10 @@ async def run_site(context: Any, site: SiteCheck, report_dir: Path, *, poll: flo
         verdict = None
         loaded = time.monotonic()
         previous = None
+        last_raw: Any = None
         while time.monotonic() - started < site.timeout:
-            current = JUDGES[site.id](await page.evaluate(site.collect_js))
+            last_raw = await page.evaluate(site.collect_js)
+            current = JUDGES[site.id](last_raw)
             settled = time.monotonic() - loaded >= site.min_wait
             # Take a verdict once the page had time to finish scoring and two
             # reads in a row agree; otherwise keep the latest one seen.
@@ -326,6 +332,10 @@ async def run_site(context: Any, site: SiteCheck, report_dir: Path, *, poll: flo
             await asyncio.sleep(poll)
         if verdict is not None:
             result.status, result.summary, result.details = verdict
+        elif isinstance(last_raw, dict) and last_raw.get("diag"):
+            # No verdict before the timeout: keep the collector's diagnostic
+            # snapshot so an "unknown" result explains what the page showed.
+            result.details = [f"诊断：{str(last_raw['diag'])[:1500]}"]
         screenshot = report_dir / f"{site.id}.png"
         try:
             await page.evaluate("window.scrollTo(0, 0)")
