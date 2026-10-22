@@ -24,7 +24,7 @@ CONFIGURATION_PROFILE_FIELDS = (
     "user_agent", "screen_width", "screen_height", "gpu_vendor", "gpu_renderer", "hardware_concurrency",
     "device_memory", "humanize", "human_preset", "headless", "geoip", "clipboard_sync", "auto_launch",
     "color_scheme", "group_name", "account_platform", "cookies_json", "startup_urls", "launch_args",
-    "fingerprint_options", "notes", "tags",
+    "fingerprint_options", "notes", "tags", "disposable",
 )
 
 
@@ -164,6 +164,9 @@ def init_db():
             conn.commit()
         if "fingerprint_options_json" not in cols:
             conn.execute("ALTER TABLE profiles ADD COLUMN fingerprint_options_json TEXT")
+            conn.commit()
+        if "disposable" not in cols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN disposable INTEGER DEFAULT 0")
             conn.commit()
 
         # Older releases stored Retina panel pixels instead of the logical CSS
@@ -358,9 +361,9 @@ def create_profile(
                 user_agent, screen_width, screen_height, gpu_vendor, gpu_renderer,
                 hardware_concurrency, device_memory, humanize, human_preset, headless, geoip,
                 clipboard_sync, auto_launch, color_scheme, group_name, account_platform,
-                cookies_json, startup_urls, launch_args, fingerprint_options_json, notes,
+                cookies_json, startup_urls, launch_args, fingerprint_options_json, notes, disposable,
                 user_data_dir, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 profile_id, name,
                 fields.get("browser_engine", "auto"),
@@ -391,6 +394,7 @@ def create_profile(
                 json.dumps(fields.get("launch_args") or []),
                 _dump_json_dict(fields.get("fingerprint_options")),
                 fields.get("notes"),
+                1 if fields.get("disposable") else 0,
                 user_data_dir, now, now,
             ),
         )
@@ -486,7 +490,7 @@ def update_profile(profile_id: str, **fields: Any) -> dict[str, Any] | None:
         "user_agent", "screen_width", "screen_height", "gpu_vendor", "gpu_renderer",
         "hardware_concurrency", "device_memory", "humanize", "human_preset", "headless", "geoip",
         "clipboard_sync", "auto_launch", "color_scheme", "group_name", "account_platform", "cookies_json",
-        "startup_urls", "launch_args", "fingerprint_options_json", "notes",
+        "startup_urls", "launch_args", "fingerprint_options_json", "notes", "disposable",
     ):
         if col in fields:
             value = fields[col]
