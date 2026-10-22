@@ -1002,10 +1002,13 @@ def _launch_cloakbrowser_manual_process(
     start_urls: list[str] | None = None,
     **_: Any,
 ) -> subprocess.Popen[Any]:
-    """Launch the patched CloakBrowser binary without Playwright or CDP."""
-    if headless:
-        raise ValueError("Manual CloakBrowser launch does not support headless mode")
+    """Launch the patched CloakBrowser binary without Playwright or CDP.
 
+    Headless is supported for the debug-attach path (Manager automation):
+    the binary gets ``--headless=new`` and no window is ever created.
+    Plain manual launches never pass it — BrowserManager routes those to
+    a visible window.
+    """
     from cloakbrowser import build_args
     from cloakbrowser.download import ensure_binary
     from cloakbrowser.license import build_launch_env, mint_denial_file, resolve_license_key
@@ -1032,7 +1035,7 @@ def _launch_cloakbrowser_manual_process(
     if sys.platform == "darwin":
         from cloakbrowser.config import binary_supports_maximized_window
 
-        start_maximized = binary_supports_maximized_window()
+        start_maximized = binary_supports_maximized_window() and not headless
     else:
         start_maximized = False
 
@@ -1041,9 +1044,14 @@ def _launch_cloakbrowser_manual_process(
         extra_args,
         timezone=timezone,
         locale=locale,
-        headless=False,
+        headless=headless,
         start_maximized=start_maximized,
     )
+    if headless:
+        # build_args only *configures* headless (arg selection); the
+        # Playwright flows get the switch from Playwright itself. A direct
+        # process launch must add it explicitly.
+        _append_chrome_arg_once(chrome_args, "--headless", "new")
     chrome_args.extend(start_urls or [])
     # The Playwright wrapper injects the Pro license key before launching the
     # binary. Manual native launches bypass Playwright, so they must do the
@@ -1064,7 +1072,8 @@ def _launch_cloakbrowser_manual_process(
             # Cocoa reads per-app language defaults during early startup. Keep
             # them in place until the browser process has initialized them.
             time.sleep(0.35)
-        _sync_macos_window_after_launch(process, viewport)
+        if not headless:
+            _sync_macos_window_after_launch(process, viewport)
         return process
 
 
@@ -2234,6 +2243,8 @@ class RunningProfile:
     window_watch_task: asyncio.Task | None = None
     # Restarts the browser when the user changes its first language.
     language_watch_task: asyncio.Task | None = None
+    # True when this instance runs headless (automation launches force it).
+    headless: bool = False
 
 
 class BrowserManager:
@@ -2462,10 +2473,26 @@ class BrowserManager:
             await asyncio.sleep(0.1)
         return self.running.get(profile_id)
 
-    async def launch(self, profile: dict[str, Any], launch_mode: str = "manual") -> RunningProfile:
-        """Launch a browser instance using the configured host runtime."""
+    async def launch(
+        self,
+        profile: dict[str, Any],
+        launch_mode: str = "manual",
+        *,
+        headless: bool | None = None,
+    ) -> RunningProfile:
+        """Launch a browser instance using the configured host runtime.
+
+        ``headless`` overrides the profile's stored preference for this
+        launch only (the stored setting is never changed). Manager
+        automation (site checks, warm-up, evolution) passes True so its
+        sessions never open a window on the user's desktop; user-initiated
+        launches pass None and behave exactly as the profile says.
+        """
         profile_id = profile["id"]
         requested_launch_mode = "debug" if launch_mode == "debug" else "manual"
+        effective_headless = (
+            bool(profile.get("headless", False)) if headless is None else bool(headless)
+        )
 
         async with self._lock:
             if profile_id in self.running or profile_id in self._launching:
@@ -2501,7 +2528,7 @@ class BrowserManager:
             if (
                 requested_launch_mode == "manual"
                 and self.runtime.runtime_mode == "native"
-                and not bool(profile.get("headless", False))
+                and not effective_headless
             ):
                 _sync_native_window_placement(
                     user_data_dir,
@@ -2680,7 +2707,7 @@ class BrowserManager:
 
             launch_options: dict[str, Any] = {
                 "user_data_dir": profile["user_data_dir"],
-                "headless": bool(profile.get("headless", False)),
+                "headless": effective_headless,
                 "proxy": browser_proxy,
                 "args": extra_args,
                 "timezone": resolved_timezone,
@@ -2700,7 +2727,6 @@ class BrowserManager:
                 }
             elif (
                 self.runtime.runtime_mode == "native"
-                and not bool(profile.get("headless", False))
                 and (
                     requested_launch_mode == "manual"
                     # Debug mode also starts these browsers as a plain process
@@ -2711,7 +2737,8 @@ class BrowserManager:
                     or self.runtime.host_os == "macos"
                 )
             ):
-                # Headed native launches need an explicit outer window size.
+                # Native process launches need an explicit outer window size
+                # (in headless mode it becomes the headless window size).
                 # Without it, older macOS CloakBrowser builds can report
                 # outerWidth/outerHeight as zero and create a content area
                 # larger than the profile's screen geometry.
@@ -2725,14 +2752,14 @@ class BrowserManager:
                 and self.runtime.runtime_mode == "native"
                 and browser_engine == "system_chrome"
                 and display is None
-                and not bool(profile.get("headless", False))
+                and not effective_headless
             )
             use_manual_cloakbrowser = (
                 requested_launch_mode == "manual"
                 and self.runtime.runtime_mode == "native"
                 and browser_engine == "cloakbrowser"
                 and display is None
-                and not bool(profile.get("headless", False))
+                and not effective_headless
             )
 
             effective_launch_mode = (
@@ -2780,10 +2807,12 @@ class BrowserManager:
                     try:
                         if browser_engine == "system_chrome":
                             launcher = _launch_system_chrome_persistent_context_async
-                        elif self.runtime.host_os == "macos" and not bool(profile.get("headless", False)):
+                        elif self.runtime.host_os == "macos":
                             # Playwright rejects Cocoa's two-part locale values
                             # before launching. Direct process startup preserves
                             # them, then debug mode attaches to the requested CDP.
+                            # The process launcher supports headless as well, so
+                            # macOS stays on this path in both modes.
                             launcher = _launch_cloakbrowser_persistent_context_async
                         else:
                             launcher = launch_persistent_context_async
@@ -2886,6 +2915,7 @@ class BrowserManager:
                 xray_process=xray_process,
                 browser_process=browser_process,
                 screen=(int(profile.get("screen_width") or 0), int(profile.get("screen_height") or 0)),
+                headless=effective_headless,
             )
             if context is not None:
                 context.on(
@@ -2920,7 +2950,7 @@ class BrowserManager:
             if (
                 self.runtime.runtime_mode == "native"
                 and browser_engine == "system_chrome"
-                and not bool(profile.get("headless", False))
+                and not effective_headless
                 and context is not None
             ):
                 await _open_native_start_page(context, profile_id, startup_urls)
