@@ -25,6 +25,7 @@ CONFIGURATION_PROFILE_FIELDS = (
     "device_memory", "humanize", "human_preset", "headless", "geoip", "clipboard_sync", "auto_launch",
     "color_scheme", "group_name", "account_platform", "cookies_json", "startup_urls", "launch_args",
     "fingerprint_options", "notes", "tags", "disposable",
+    "warmup_enabled", "warmup_daily_max", "warmup_targets",
 )
 
 
@@ -112,6 +113,18 @@ def init_db():
                 value TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS warmup_runs (
+                id TEXT PRIMARY KEY,
+                profile_id TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                finished_at TEXT,
+                duration_s REAL,
+                pages_visited INTEGER DEFAULT 0,
+                status TEXT NOT NULL,
+                reason TEXT,
+                detail_json TEXT
+            );
         """)
         conn.commit()
 
@@ -167,6 +180,15 @@ def init_db():
             conn.commit()
         if "disposable" not in cols:
             conn.execute("ALTER TABLE profiles ADD COLUMN disposable INTEGER DEFAULT 0")
+            conn.commit()
+        if "warmup_enabled" not in cols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN warmup_enabled INTEGER DEFAULT 0")
+            conn.commit()
+        if "warmup_daily_max" not in cols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN warmup_daily_max INTEGER DEFAULT 1")
+            conn.commit()
+        if "warmup_targets" not in cols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN warmup_targets TEXT DEFAULT '[]'")
             conn.commit()
 
         # Older releases stored Retina panel pixels instead of the logical CSS
@@ -362,8 +384,9 @@ def create_profile(
                 hardware_concurrency, device_memory, humanize, human_preset, headless, geoip,
                 clipboard_sync, auto_launch, color_scheme, group_name, account_platform,
                 cookies_json, startup_urls, launch_args, fingerprint_options_json, notes, disposable,
+                warmup_enabled, warmup_daily_max, warmup_targets,
                 user_data_dir, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 profile_id, name,
                 fields.get("browser_engine", "auto"),
@@ -395,6 +418,9 @@ def create_profile(
                 _dump_json_dict(fields.get("fingerprint_options")),
                 fields.get("notes"),
                 1 if fields.get("disposable") else 0,
+                1 if fields.get("warmup_enabled") else 0,
+                int(fields.get("warmup_daily_max") or 1),
+                json.dumps(fields.get("warmup_targets") or []),
                 user_data_dir, now, now,
             ),
         )
@@ -418,6 +444,7 @@ def get_profile(profile_id: str) -> dict[str, Any] | None:
         profile["launch_args"] = _load_json_list(profile.get("launch_args"))
         profile["proxy_geo"] = _load_json_dict(profile.get("proxy_geo_json"))
         profile["fingerprint_options"] = _load_json_dict(profile.get("fingerprint_options_json")) or {}
+        profile["warmup_targets"] = _load_json_list(profile.get("warmup_targets"))
         profile["proxy"] = decrypt_value(profile.get("proxy"))
         profile["cookies_json"] = decrypt_value(profile.get("cookies_json"))
         tags = conn.execute(
@@ -434,6 +461,7 @@ def _hydrate_profile(row: sqlite3.Row) -> dict[str, Any]:
     profile["launch_args"] = _load_json_list(profile.get("launch_args"))
     profile["proxy_geo"] = _load_json_dict(profile.get("proxy_geo_json"))
     profile["fingerprint_options"] = _load_json_dict(profile.get("fingerprint_options_json")) or {}
+    profile["warmup_targets"] = _load_json_list(profile.get("warmup_targets"))
     profile["proxy"] = decrypt_value(profile.get("proxy"))
     profile["cookies_json"] = decrypt_value(profile.get("cookies_json"))
     with get_db() as conn:
@@ -476,6 +504,10 @@ def update_profile(profile_id: str, **fields: Any) -> dict[str, Any] | None:
         fields["startup_urls"] = json.dumps(fields["startup_urls"] or [])
     if "launch_args" in fields:
         fields["launch_args"] = json.dumps(fields["launch_args"] or [])
+    if "warmup_targets" in fields:
+        fields["warmup_targets"] = json.dumps(fields["warmup_targets"] or [])
+    if "warmup_enabled" in fields:
+        fields["warmup_enabled"] = 1 if fields["warmup_enabled"] else 0
     if "fingerprint_options" in fields:
         fields["fingerprint_options_json"] = _dump_json_dict(fields.pop("fingerprint_options"))
     if fields.get("fingerprint_seed") is None:
@@ -491,6 +523,7 @@ def update_profile(profile_id: str, **fields: Any) -> dict[str, Any] | None:
         "hardware_concurrency", "device_memory", "humanize", "human_preset", "headless", "geoip",
         "clipboard_sync", "auto_launch", "color_scheme", "group_name", "account_platform", "cookies_json",
         "startup_urls", "launch_args", "fingerprint_options_json", "notes", "disposable",
+        "warmup_enabled", "warmup_daily_max", "warmup_targets",
     ):
         if col in fields:
             value = fields[col]
@@ -659,3 +692,77 @@ def delete_proxy_preset(preset_id: str) -> bool:
         cursor = conn.execute("DELETE FROM proxy_presets WHERE id = ?", (preset_id,))
         conn.commit()
         return cursor.rowcount > 0
+
+
+# ── Warm-up （养号） run history ──────────────────────────────────────────────
+
+
+def record_warmup_run(
+    profile_id: str,
+    *,
+    started_at: str,
+    finished_at: str | None,
+    duration_s: float | None,
+    pages_visited: int,
+    status: str,
+    reason: str | None = None,
+    detail: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    run_id = str(uuid.uuid4())
+    with get_db() as conn:
+        conn.execute(
+            """INSERT INTO warmup_runs (
+                id, profile_id, started_at, finished_at, duration_s,
+                pages_visited, status, reason, detail_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                run_id, profile_id, started_at, finished_at, duration_s,
+                pages_visited, status, reason,
+                json.dumps(detail, ensure_ascii=False) if detail else None,
+            ),
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM warmup_runs WHERE id = ?", (run_id,)).fetchone()
+    run = dict(row)
+    run["detail"] = _load_json_dict(run.pop("detail_json", None))
+    return run
+
+
+def list_warmup_runs(profile_id: str, limit: int = 20) -> list[dict[str, Any]]:
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM warmup_runs WHERE profile_id = ? ORDER BY started_at DESC LIMIT ?",
+            (profile_id, int(limit)),
+        ).fetchall()
+    runs = []
+    for row in rows:
+        run = dict(row)
+        run["detail"] = _load_json_dict(run.pop("detail_json", None))
+        runs.append(run)
+    return runs
+
+
+def count_warmup_runs_since(profile_id: str, since_iso: str, *, status: str | None = None) -> int:
+    query = "SELECT COUNT(*) FROM warmup_runs WHERE profile_id = ? AND started_at >= ?"
+    params: list[Any] = [profile_id, since_iso]
+    if status:
+        query += " AND status = ?"
+        params.append(status)
+    with get_db() as conn:
+        return int(conn.execute(query, params).fetchone()[0])
+
+
+def warmup_stats(profile_id: str) -> dict[str, Any]:
+    with get_db() as conn:
+        total = conn.execute(
+            "SELECT COUNT(*) FROM warmup_runs WHERE profile_id = ?", (profile_id,)
+        ).fetchone()[0]
+        ok = conn.execute(
+            "SELECT COUNT(*) FROM warmup_runs WHERE profile_id = ? AND status = 'ok'",
+            (profile_id,),
+        ).fetchone()[0]
+        last = conn.execute(
+            "SELECT MAX(started_at) FROM warmup_runs WHERE profile_id = ? AND status = 'ok'",
+            (profile_id,),
+        ).fetchone()[0]
+    return {"total_runs": int(total), "ok_runs": int(ok), "last_run_at": last}
