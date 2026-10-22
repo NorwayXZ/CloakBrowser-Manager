@@ -420,6 +420,20 @@ export interface EvolutionStatus {
   pending_proposals: number;
 }
 
+export interface AutomationStatus {
+  active: boolean;
+  kind: "site_check" | "warmup" | "evolution" | null;
+  label: string | null;
+  profile_id: string | null;
+  profile_name: string | null;
+}
+
+export interface AutomationHours {
+  // Local-time "HH-HH" range (may wrap midnight); null = no restriction.
+  hours: string | null;
+  open_now: boolean;
+}
+
 export interface SiteCheckSite {
   id: string;
   name: string;
@@ -889,6 +903,16 @@ export const api = {
       `/api/profiles/${encodeURIComponent(profileId)}/warmup/run`,
       { method: "POST" },
     ),
+
+  getAutomationStatus: () => request<AutomationStatus>("/api/automation/status"),
+
+  getAutomationHours: () => request<AutomationHours>("/api/automation/hours"),
+
+  updateAutomationHours: (hours: string | null) =>
+    request<AutomationHours>("/api/automation/hours", {
+      method: "PUT",
+      body: JSON.stringify({ hours }),
+    }),
 
   getEvolutionStatus: () => request<EvolutionStatus>("/api/evolution/status"),
 
