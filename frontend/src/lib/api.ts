@@ -53,6 +53,9 @@ export interface Profile {
   device_memory: number | null;
   humanize: boolean;
   human_preset: string;
+  warmup_enabled?: boolean | number;
+  warmup_daily_max?: number;
+  warmup_targets?: string[];
   headless: boolean;
   geoip: boolean;
   clipboard_sync: boolean;
@@ -101,6 +104,9 @@ export interface ProfileCreateData {
   device_memory?: number | null;
   humanize?: boolean;
   human_preset?: string;
+  warmup_enabled?: boolean;
+  warmup_daily_max?: number;
+  warmup_targets?: string[];
   headless?: boolean;
   geoip?: boolean;
   clipboard_sync?: boolean;
@@ -301,6 +307,38 @@ export interface AppUpdateState {
 }
 
 export type SiteCheckStatus = "pass" | "warn" | "fail" | "unknown" | "error";
+
+export interface WarmupTarget {
+  id: string;
+  name: string;
+}
+
+export interface WarmupRun {
+  id: string;
+  profile_id: string;
+  started_at: string;
+  finished_at: string | null;
+  duration_s: number | null;
+  pages_visited: number;
+  status: "ok" | "skipped" | "failed" | string;
+  reason: string | null;
+  detail: { targets?: string[]; urls?: string[] } | null;
+}
+
+export interface WarmupInfo {
+  enabled: boolean;
+  daily_max: number;
+  targets: string[];
+  age: {
+    created_at: string | null;
+    age_days: number | null;
+    warmup_sessions: number;
+    warmup_runs_total: number;
+    last_warmup_at: string | null;
+  };
+  runs: WarmupRun[];
+  warming: boolean;
+}
 
 export interface SiteCheckSite {
   id: string;
@@ -760,6 +798,17 @@ export const api = {
     `/api/site-checks/${encodeURIComponent(id)}/files/${encodeURIComponent(name)}`,
 
   siteCheckDownloadUrl: (id: string) => `/api/site-checks/${encodeURIComponent(id)}/download`,
+
+  listWarmupTargets: () => request<WarmupTarget[]>("/api/warmup/targets"),
+
+  getProfileWarmup: (profileId: string) =>
+    request<WarmupInfo>(`/api/profiles/${encodeURIComponent(profileId)}/warmup`),
+
+  runProfileWarmupNow: (profileId: string) =>
+    request<{ ok: boolean; started: boolean }>(
+      `/api/profiles/${encodeURIComponent(profileId)}/warmup/run`,
+      { method: "POST" },
+    ),
 
   getKernel: () => request<KernelOverview>("/api/kernel"),
 
