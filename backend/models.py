@@ -133,6 +133,8 @@ class ProfileCreate(BaseModel):
     warmup_enabled: bool = False
     warmup_daily_max: int = Field(default=1, ge=1, le=5)
     warmup_targets: list[str] = Field(default_factory=list)
+    evolution_enabled: bool = False
+    evolution_interval_hours: int = Field(default=24, ge=1, le=24 * 30)
     headless: bool = False
     geoip: bool = True
     clipboard_sync: bool = True
@@ -169,6 +171,8 @@ class ProfileUpdate(BaseModel):
     warmup_enabled: bool | None = None
     warmup_daily_max: int | None = Field(default=None, ge=1, le=5)
     warmup_targets: list[str] | None = None
+    evolution_enabled: bool | None = None
+    evolution_interval_hours: int | None = Field(default=None, ge=1, le=24 * 30)
     headless: bool | None = None
     geoip: bool | None = None
     clipboard_sync: bool | None = None
@@ -216,6 +220,20 @@ class ProfileResponse(BaseModel):
     warmup_enabled: bool = False
     warmup_daily_max: int = 1
     warmup_targets: list[str] = Field(default_factory=list)
+    evolution_enabled: bool = False
+
+    @field_validator("evolution_enabled", mode="before")
+    @classmethod
+    def coerce_evolution_enabled(cls, v: object) -> bool:
+        return bool(v)
+
+    evolution_interval_hours: int = 24
+
+    @field_validator("evolution_interval_hours", mode="before")
+    @classmethod
+    def coerce_evolution_interval(cls, v: object) -> int:
+        return int(v) if v else 24
+
     headless: bool = False
     geoip: bool = True
     clipboard_sync: bool = True
@@ -439,6 +457,47 @@ class LinkabilityResponse(BaseModel):
     profile_count: int
     unclustered_count: int
     clusters: list[LinkabilityCluster] = []
+
+
+class EvolutionProposalResponse(BaseModel):
+    """A verified config fix waiting for the user's approval.
+
+    Experiments only ever run on disposable clones; a proposal is the sole
+    bridge back to the real profile, and it moves only when approved.
+    """
+
+    id: str
+    profile_id: str
+    profile_name: str | None = None
+    knob: str
+    label: str | None = None
+    from_value: object = None
+    to_value: object = None
+    targets: list[str] = []
+    evidence: dict = {}
+    status: str  # pending | applied | dismissed
+    created_at: str
+    decided_at: str | None = None
+
+
+class EvolutionLogResponse(BaseModel):
+    id: str
+    profile_id: str | None = None
+    profile_name: str | None = None
+    started_at: str
+    finished_at: str | None = None
+    trigger: str | None = None  # scheduled | manual
+    outcome: str | None = None  # running | clean | unfixable_only | experiments | check_failed | deferred
+    summary: str | None = None
+    detail: dict = {}
+
+
+class EvolutionStatusResponse(BaseModel):
+    busy: bool
+    profile_id: str | None = None
+    profile_name: str | None = None
+    lock_owner: str | None = None  # site_check | warmup | evolution
+    pending_proposals: int = 0
 
 
 class GroupResponse(BaseModel):
