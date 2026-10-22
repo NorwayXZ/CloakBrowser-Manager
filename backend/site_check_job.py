@@ -11,7 +11,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable
 
-from . import site_checks
+from . import behavior, behavior_traces, site_checks
 
 logger = logging.getLogger(__name__)
 
@@ -119,11 +119,31 @@ class SiteCheckJob:
                 if result is not None:
                     self.state["results"] = [*self.state["results"], asdict(result)]
 
+            # Behavior layer: the check session browses with the profile's
+            # human personality (and its recorded rhythm, when a trace
+            # exists) instead of teleporting between detection pages. The
+            # kernel `humanize` profile option gates it — same switch the
+            # user already controls for launch-time input patching.
+            human_factory = None
+            if profile.get("humanize", True):
+                trace_stats = None
+                try:
+                    trace_stats = behavior_traces.latest_trace_stats(data_dir, profile_id)
+                except Exception:
+                    trace_stats = None
+                seed = f"{profile_id}:{profile.get('fingerprint_seed')}"
+
+                def human_factory(page, _seed=seed, _stats=trace_stats):
+                    return behavior.HumanSession(
+                        page, seed=_seed, strength="subtle", trace_stats=_stats
+                    )
+
             report = await site_checks.run_checks(
                 running.context, report_dir,
                 environment=env,
                 progress=progress, sites=sites,
                 extra_results=local_results,
+                human_factory=human_factory,
             )
             self.state.update(phase="closing", overall=report["overall"])
         except Exception as exc:
