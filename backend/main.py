@@ -52,7 +52,7 @@ from . import secrets_crypto
 from .browser_manager import BrowserLaunchError, BrowserManager, CookiePullError, _normalize_proxy, _validate_proxy
 from .cloak_runtime import get_effective_chromium_version
 from . import desktop_app, self_update, site_checks
-from . import behavior_traces
+from . import behavior_traces, warmup
 from .behavior_traces import BehaviorRecorder
 from .site_check_job import SiteCheckJob, describe_environment
 from .desktop_app import app_version as desktop_app_version
@@ -410,11 +410,13 @@ async def lifespan(app: FastAPI):
     await browser_mgr.cleanup_stale()
     browser_mgr._auto_launch_task = asyncio.create_task(browser_mgr.auto_launch_all())
     auto_backup_task = asyncio.create_task(_auto_backup_loop())
+    warmup_task = asyncio.create_task(_warmup_loop())
     logger.info("CloakBrowser Manager started")
     yield
     logger.info("Shutting down — stopping all browsers...")
     auto_backup_task.cancel()
-    await asyncio.gather(auto_backup_task, return_exceptions=True)
+    warmup_task.cancel()
+    await asyncio.gather(auto_backup_task, warmup_task, return_exceptions=True)
     if browser_mgr._auto_launch_task and not browser_mgr._auto_launch_task.done():
         browser_mgr._auto_launch_task.cancel()
         await asyncio.gather(browser_mgr._auto_launch_task, return_exceptions=True)
@@ -1185,6 +1187,118 @@ async def _auto_backup_loop() -> None:
         except Exception:
             logger.exception("Automatic backup failed")
         await asyncio.sleep(AUTO_BACKUP_CHECK_SECONDS)
+
+
+# ── Warm-up （养号） scheduler ────────────────────────────────────────────────
+
+WARMUP_FIRST_CHECK_SECONDS = 240
+WARMUP_CHECK_SECONDS = 15 * 60
+_warmup_current: dict[str, Any] = {"task": None, "profile_id": None}
+
+
+def _record_warmup(rec: dict) -> None:
+    db.record_warmup_run(
+        rec["profile_id"],
+        started_at=rec["started_at"],
+        finished_at=rec["finished_at"],
+        duration_s=rec["duration_s"],
+        pages_visited=rec["pages_visited"],
+        status=rec["status"],
+        reason=rec["reason"],
+        detail=rec["detail"],
+    )
+
+
+def _start_warmup_task(profile: dict, targets_done: set) -> None:
+    task = asyncio.create_task(
+        warmup.run_warmup(
+            profile,
+            browser_mgr=browser_mgr,
+            record_run=_record_warmup,
+            targets_done=targets_done,
+        )
+    )
+    _warmup_current.update(task=task, profile_id=profile["id"])
+
+
+def _warmup_busy() -> bool:
+    task = _warmup_current.get("task")
+    return task is not None and not task.done()
+
+
+async def _warmup_tick() -> None:
+    if _warmup_busy():
+        return
+    now = datetime.now().astimezone()
+    today = warmup.start_of_today(now)
+    for profile in await asyncio.to_thread(db.list_profiles):
+        if not profile.get("warmup_enabled"):
+            continue
+        profile_id = profile["id"]
+        runs_today = await asyncio.to_thread(
+            db.count_warmup_runs_since, profile_id, today, status="ok"
+        )
+        recent = await asyncio.to_thread(db.list_warmup_runs, profile_id, 50)
+        last_run_at = None
+        if recent:
+            try:
+                last_run_at = datetime.fromisoformat(str(recent[0]["started_at"]))
+            except (ValueError, KeyError):
+                last_run_at = None
+        if not warmup.is_due(profile, runs_today=runs_today, last_run_at=last_run_at, now=now):
+            continue
+        todays = [r for r in recent if (r.get("started_at") or "") >= today]
+        _start_warmup_task(profile, warmup.targets_done_today(todays))
+        return  # one profile at a time
+
+
+async def _warmup_loop() -> None:
+    await asyncio.sleep(WARMUP_FIRST_CHECK_SECONDS)
+    while True:
+        try:
+            await _warmup_tick()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Warm-up scheduler tick failed")
+        await asyncio.sleep(WARMUP_CHECK_SECONDS)
+
+
+@app.get("/api/warmup/targets")
+async def list_warmup_targets():
+    return warmup.catalog_public()
+
+
+@app.get("/api/profiles/{profile_id}/warmup")
+async def get_profile_warmup(profile_id: str):
+    profile = db.get_profile(profile_id)
+    if not profile or profile.get("deleted_at"):
+        raise HTTPException(status_code=404, detail="Profile not found")
+    stats = await asyncio.to_thread(db.warmup_stats, profile_id)
+    runs = await asyncio.to_thread(db.list_warmup_runs, profile_id, 20)
+    return {
+        "enabled": bool(profile.get("warmup_enabled")),
+        "daily_max": int(profile.get("warmup_daily_max") or 1),
+        "targets": profile.get("warmup_targets") or [],
+        "age": warmup.identity_age(profile, stats, now=datetime.now().astimezone()),
+        "runs": runs,
+        "warming": _warmup_busy() and _warmup_current.get("profile_id") == profile_id,
+    }
+
+
+@app.post("/api/profiles/{profile_id}/warmup/run")
+async def run_profile_warmup_now(profile_id: str):
+    profile = db.get_profile(profile_id)
+    if not profile or profile.get("deleted_at"):
+        raise HTTPException(status_code=404, detail="Profile not found")
+    if _warmup_busy():
+        raise HTTPException(status_code=409, detail="已经有一个画像在养号中，请等它结束。")
+    now = datetime.now().astimezone()
+    today = warmup.start_of_today(now)
+    recent = await asyncio.to_thread(db.list_warmup_runs, profile_id, 50)
+    todays = [r for r in recent if (r.get("started_at") or "") >= today]
+    _start_warmup_task(profile, warmup.targets_done_today(todays))
+    return {"ok": True, "started": True}
 
 
 def _auto_backup_status() -> AutoBackupStatusResponse:
