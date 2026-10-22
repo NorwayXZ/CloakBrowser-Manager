@@ -1,5 +1,6 @@
 import { Check, ChevronDown, ChevronRight, Dna, Loader2, Play, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { AutomationHoursHint } from "./AutomationHours";
 import {
   api,
   type EvolutionLogEntry,
@@ -259,6 +260,7 @@ export function EvolutionPanel({ profiles, onRefresh }: EvolutionPanelProps) {
           <span>刷新</span>
         </button>
         {running && <span className="text-xs text-amber-700">这个浏览器正在运行，进化会推迟。</span>}
+        <AutomationHoursHint />
       </div>
 
       {error && (
