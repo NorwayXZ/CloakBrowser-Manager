@@ -56,6 +56,8 @@ export interface Profile {
   warmup_enabled?: boolean | number;
   warmup_daily_max?: number;
   warmup_targets?: string[];
+  evolution_enabled?: boolean | number;
+  evolution_interval_hours?: number;
   headless: boolean;
   geoip: boolean;
   clipboard_sync: boolean;
@@ -107,6 +109,8 @@ export interface ProfileCreateData {
   warmup_enabled?: boolean;
   warmup_daily_max?: number;
   warmup_targets?: string[];
+  evolution_enabled?: boolean;
+  evolution_interval_hours?: number;
   headless?: boolean;
   geoip?: boolean;
   clipboard_sync?: boolean;
@@ -338,6 +342,82 @@ export interface WarmupInfo {
   };
   runs: WarmupRun[];
   warming: boolean;
+}
+
+export type EvolutionOutcome =
+  | "running" | "clean" | "unfixable_only" | "experiments" | "check_failed" | "deferred" | "error";
+
+export type ExperimentVerdict = "improved" | "no_change" | "regressed" | "error" | "deferred";
+
+export interface EvolutionExperiment {
+  knob: string;
+  label: string;
+  from_value: unknown;
+  to_value: unknown;
+  targets: string[];
+  rationale: string;
+  verdict: ExperimentVerdict;
+  targets_detail: Record<string, { from: SiteCheckStatus | null; to: SiteCheckStatus | null }>;
+  regressions: { site: string; name?: string; from: SiteCheckStatus | null; to: SiteCheckStatus | null }[];
+  clone_report_id?: string | null;
+  proposal_id?: string;
+  note?: string | null;
+}
+
+export interface EvolutionUnfixable {
+  site: string;
+  name: string;
+  status: SiteCheckStatus;
+  reason: string;
+}
+
+export interface EvolutionLogDetail {
+  source_report_id?: string;
+  problem_count?: number;
+  experiments?: EvolutionExperiment[];
+  unfixable?: EvolutionUnfixable[];
+  proposals?: string[];
+}
+
+export interface EvolutionLogEntry {
+  id: string;
+  profile_id: string | null;
+  profile_name: string | null;
+  started_at: string;
+  finished_at: string | null;
+  trigger: "scheduled" | "manual" | string | null;
+  outcome: EvolutionOutcome | string | null;
+  summary: string | null;
+  detail: EvolutionLogDetail;
+}
+
+export interface EvolutionProposal {
+  id: string;
+  profile_id: string;
+  profile_name: string | null;
+  knob: string;
+  label: string | null;
+  from_value: unknown;
+  to_value: unknown;
+  targets: string[];
+  evidence: {
+    verdict?: string;
+    rationale?: string;
+    source_report_id?: string;
+    clone_report_id?: string;
+    targets?: Record<string, { from: SiteCheckStatus | null; to: SiteCheckStatus | null }>;
+  };
+  status: "pending" | "applied" | "dismissed";
+  created_at: string;
+  decided_at: string | null;
+}
+
+export interface EvolutionStatus {
+  busy: boolean;
+  profile_id: string | null;
+  profile_name: string | null;
+  lock_owner: string | null;
+  pending_proposals: number;
 }
 
 export interface SiteCheckSite {
@@ -807,6 +887,28 @@ export const api = {
   runProfileWarmupNow: (profileId: string) =>
     request<{ ok: boolean; started: boolean }>(
       `/api/profiles/${encodeURIComponent(profileId)}/warmup/run`,
+      { method: "POST" },
+    ),
+
+  getEvolutionStatus: () => request<EvolutionStatus>("/api/evolution/status"),
+
+  listEvolutionProposals: (status?: string) =>
+    request<EvolutionProposal[]>(`/api/evolution/proposals${status ? `?status=${encodeURIComponent(status)}` : ""}`),
+
+  approveEvolutionProposal: (id: string) =>
+    request<EvolutionProposal>(`/api/evolution/proposals/${encodeURIComponent(id)}/approve`, { method: "POST" }),
+
+  dismissEvolutionProposal: (id: string) =>
+    request<EvolutionProposal>(`/api/evolution/proposals/${encodeURIComponent(id)}/dismiss`, { method: "POST" }),
+
+  listEvolutionLogs: (profileId?: string, limit = 30) =>
+    request<EvolutionLogEntry[]>(
+      `/api/evolution/logs?limit=${limit}${profileId ? `&profile_id=${encodeURIComponent(profileId)}` : ""}`,
+    ),
+
+  runEvolutionNow: (profileId: string) =>
+    request<{ ok: boolean; started: boolean }>(
+      `/api/profiles/${encodeURIComponent(profileId)}/evolution/run`,
       { method: "POST" },
     ),
 
