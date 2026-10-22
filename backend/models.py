@@ -373,6 +373,35 @@ class ApplyDeviceTemplateRequest(BaseModel):
     template_id: str = Field(min_length=1)
 
 
+class LinkabilityProfileRef(BaseModel):
+    id: str
+    name: str
+
+
+class LinkabilityLink(BaseModel):
+    a_id: str
+    b_id: str
+    a_name: str
+    b_name: str
+    score: int
+    level: str  # "strong" | "medium"
+    reasons: list[str] = []
+    suggestions: list[str] = []
+
+
+class LinkabilityCluster(BaseModel):
+    id: str
+    risk: str  # "high" | "medium"
+    profiles: list[LinkabilityProfileRef] = []
+    links: list[LinkabilityLink] = []
+
+
+class LinkabilityResponse(BaseModel):
+    profile_count: int
+    unclustered_count: int
+    clusters: list[LinkabilityCluster] = []
+
+
 class GroupResponse(BaseModel):
     id: str
     name: str
