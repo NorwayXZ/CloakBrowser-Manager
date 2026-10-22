@@ -308,6 +308,33 @@ async def test_cycle_clean_report_makes_no_clone():
 
 
 @pytest.mark.asyncio
+async def test_scheduled_cycle_defers_when_window_gate_closes():
+    source = profile()
+    world = FakeWorld({"src-1": CheckOutcome(make_report(("creepjs", "pass")))})
+    engine = EvolutionEngine(
+        world.deps(), lock=AutomationLock(),
+        scheduled_defer=lambda: "不在自动化允许时段内（09:00–18:00），本轮推迟",
+    )
+    entry = await engine.run_cycle(source, trigger="scheduled")
+    assert entry["outcome"] == "deferred"
+    assert "时段" in entry["summary"]
+    assert world.checked == []  # no check (and no browser) ever ran
+
+
+@pytest.mark.asyncio
+async def test_manual_cycle_ignores_window_gate():
+    source = profile()
+    world = FakeWorld({"src-1": CheckOutcome(make_report(("creepjs", "pass")))})
+    engine = EvolutionEngine(
+        world.deps(), lock=AutomationLock(),
+        scheduled_defer=lambda: "不在自动化允许时段内（09:00–18:00），本轮推迟",
+    )
+    entry = await engine.run_cycle(source, trigger="manual")
+    assert entry["outcome"] == "clean"
+    assert world.checked == ["src-1"]
+
+
+@pytest.mark.asyncio
 async def test_cycle_win_becomes_proposal_and_clone_is_burned():
     source = profile()
     world = FakeWorld({
