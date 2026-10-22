@@ -38,6 +38,40 @@ COUNTRY_LOCALE_DEFAULTS: dict[str, str] = {
 }
 
 
+COUNTRY_TIMEZONE_DEFAULTS: dict[str, str] = {
+    "AR": "America/Argentina/Buenos_Aires",
+    "AU": "Australia/Sydney",
+    "BR": "America/Sao_Paulo",
+    "CA": "America/Toronto",
+    "CN": "Asia/Shanghai",
+    "DE": "Europe/Berlin",
+    "ES": "Europe/Madrid",
+    "FR": "Europe/Paris",
+    "GB": "Europe/London",
+    "HK": "Asia/Hong_Kong",
+    "ID": "Asia/Jakarta",
+    "IN": "Asia/Kolkata",
+    "IT": "Europe/Rome",
+    "JP": "Asia/Tokyo",
+    "KR": "Asia/Seoul",
+    "MX": "America/Mexico_City",
+    "MY": "Asia/Kuala_Lumpur",
+    "NL": "Europe/Amsterdam",
+    "PH": "Asia/Manila",
+    "RU": "Europe/Moscow",
+    "SG": "Asia/Singapore",
+    "TH": "Asia/Bangkok",
+    "TR": "Europe/Istanbul",
+    "TW": "Asia/Taipei",
+    "US": "America/New_York",
+    "VN": "Asia/Ho_Chi_Minh",
+}
+
+
+def suggested_timezone(country_code: str | None) -> str | None:
+    return COUNTRY_TIMEZONE_DEFAULTS.get(str(country_code or "").upper())
+
+
 class ProxyGeoError(RuntimeError):
     pass
 
