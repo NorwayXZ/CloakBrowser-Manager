@@ -38,6 +38,7 @@ import { AutomationIndicator } from "./AutomationIndicator";
 import { BackupPanel } from "./BackupPanel";
 import { GroupsPanel } from "./GroupsPanel";
 import { KernelPanel } from "./KernelPanel";
+import { LlmSettingsCard } from "./LlmSettingsCard";
 import { LinkabilityPanel } from "./LinkabilityPanel";
 import { SiteCheckPanel } from "./SiteCheckPanel";
 import { ProxyPresetsPanel } from "./ProxyPresetsPanel";
@@ -75,7 +76,7 @@ interface EnvironmentManagerProps {
   onLogout: () => void;
 }
 
-type ManagerSection = "profiles" | "groups" | "proxies" | "kernel" | "checks" | "links" | "backup" | "trash";
+type ManagerSection = "profiles" | "groups" | "proxies" | "kernel" | "ai" | "checks" | "links" | "backup" | "trash";
 type UpdateNotice = {
   tone: "success" | "info" | "error";
   text: string;
@@ -103,6 +104,7 @@ const navItems: { id: ManagerSection; label: string; icon: typeof LayoutGrid }[]
   { id: "groups", label: "分组管理", icon: Folder },
   { id: "proxies", label: "代理管理", icon: Globe2 },
   { id: "kernel", label: "浏览器内核", icon: Cpu },
+  { id: "ai", label: "AI 设置", icon: Sparkles },
   { id: "checks", label: "指纹检测", icon: ShieldCheck },
   { id: "links", label: "关联分析", icon: Network },
   { id: "backup", label: "数据备份", icon: Database },
@@ -276,6 +278,7 @@ export function EnvironmentManager({
     groups: "分组管理",
     proxies: "代理管理",
     kernel: "浏览器内核",
+    ai: "AI 设置",
     checks: "指纹检测",
     links: "关联分析",
     backup: "数据备份",
@@ -286,6 +289,7 @@ export function EnvironmentManager({
     groups: `共 ${groups.length} 个分组`,
     proxies: `共 ${proxyPresets.length} 个保存代理`,
     kernel: "查看、更新和清理 CloakBrowser 内核",
+    ai: "配置 AI 功能共用的 LLM 接口（自备密钥）",
     checks: "用公开检测网站验收画像，导出报告",
     links: "哪些画像会被检测方关联成同一个人",
     backup: "完整备份 Cookie 与登录状态，或只导出配置",
@@ -1055,6 +1059,7 @@ export function EnvironmentManager({
         )}
 
         {section === "kernel" && <KernelPanel runningCount={runningCount} />}
+        {section === "ai" && <LlmSettingsCard />}
         {section === "checks" && <SiteCheckPanel profiles={profiles} onRefresh={onRefresh} />}
         {section === "links" && <LinkabilityPanel />}
         {section === "backup" && <BackupPanel runningCount={runningCount} onRefresh={onRefresh} />}

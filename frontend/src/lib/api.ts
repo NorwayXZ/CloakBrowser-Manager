@@ -56,6 +56,7 @@ export interface Profile {
   warmup_enabled?: boolean | number;
   warmup_daily_max?: number;
   warmup_targets?: string[];
+  warmup_persona?: string | null;
   evolution_enabled?: boolean | number;
   evolution_interval_hours?: number;
   headless: boolean;
@@ -109,6 +110,7 @@ export interface ProfileCreateData {
   warmup_enabled?: boolean;
   warmup_daily_max?: number;
   warmup_targets?: string[];
+  warmup_persona?: string | null;
   evolution_enabled?: boolean;
   evolution_interval_hours?: number;
   headless?: boolean;
@@ -326,7 +328,56 @@ export interface WarmupRun {
   pages_visited: number;
   status: "ok" | "skipped" | "failed" | string;
   reason: string | null;
-  detail: { targets?: string[]; urls?: string[] } | null;
+  detail: { targets?: string[]; urls?: string[]; script_id?: string | null } | null;
+}
+
+export interface WarmupScriptStep {
+  kind: "target" | "generic" | string;
+  platform: string | null;
+  platform_name: string | null;
+  search_query: string | null;
+  dwell: "short" | "medium" | "long" | string;
+  follow_link: boolean;
+}
+
+export interface WarmupScript {
+  id: string;
+  theme: string;
+  steps: WarmupScriptStep[];
+}
+
+export interface WarmupScriptBatch {
+  batch_id: string;
+  created_at: string;
+  status: "draft" | "approved" | "rejected" | "archived" | string;
+  model: string | null;
+  persona: string | null;
+  scripts: WarmupScript[];
+}
+
+export interface WarmupScriptsInfo {
+  llm_configured: boolean;
+  generating: boolean;
+  last_generation: {
+    status: "done" | "error" | string;
+    batch_id: string | null;
+    at: string;
+    error: string | null;
+  } | null;
+  batches: WarmupScriptBatch[];
+}
+
+export interface LlmSettings {
+  configured: boolean;
+  base_url: string | null;
+  model: string | null;
+  has_api_key: boolean;
+}
+
+export interface LlmSettingsUpdate {
+  base_url: string;
+  model: string;
+  api_key?: string | null;
 }
 
 export interface WarmupInfo {
@@ -903,6 +954,35 @@ export const api = {
       `/api/profiles/${encodeURIComponent(profileId)}/warmup/run`,
       { method: "POST" },
     ),
+
+  getWarmupScripts: (profileId: string) =>
+    request<WarmupScriptsInfo>(`/api/profiles/${encodeURIComponent(profileId)}/warmup/scripts`),
+
+  generateWarmupScripts: (profileId: string) =>
+    request<{ ok: boolean; started: boolean }>(
+      `/api/profiles/${encodeURIComponent(profileId)}/warmup/scripts/generate`,
+      { method: "POST" },
+    ),
+
+  approveWarmupScriptBatch: (profileId: string, batchId: string) =>
+    request<{ ok: boolean; status: string; count: number }>(
+      `/api/profiles/${encodeURIComponent(profileId)}/warmup/scripts/batches/${encodeURIComponent(batchId)}/approve`,
+      { method: "POST" },
+    ),
+
+  rejectWarmupScriptBatch: (profileId: string, batchId: string) =>
+    request<{ ok: boolean; status: string; count: number }>(
+      `/api/profiles/${encodeURIComponent(profileId)}/warmup/scripts/batches/${encodeURIComponent(batchId)}/reject`,
+      { method: "POST" },
+    ),
+
+  getLlmSettings: () => request<LlmSettings>("/api/settings/llm"),
+
+  updateLlmSettings: (data: LlmSettingsUpdate) =>
+    request<LlmSettings>("/api/settings/llm", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
 
   getAutomationStatus: () => request<AutomationStatus>("/api/automation/status"),
 
