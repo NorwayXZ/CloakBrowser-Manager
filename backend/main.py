@@ -47,6 +47,7 @@ from .cookie_formats import (
     to_netscape,
 )
 from . import kernel
+from . import linkability
 from . import secrets_crypto
 from .browser_manager import BrowserLaunchError, BrowserManager, CookiePullError, _normalize_proxy, _validate_proxy
 from .cloak_runtime import get_effective_chromium_version
@@ -82,6 +83,7 @@ from .models import (
     GroupResponse,
     LaunchRequest,
     LaunchResponse,
+    LinkabilityResponse,
     LoginRequest,
     ManagerUpdateResponse,
     ProfileCreate,
@@ -702,6 +704,16 @@ async def apply_device_template(profile_id: str, req: ApplyDeviceTemplateRequest
     if not updated:
         raise HTTPException(status_code=404, detail="Profile not found")
     return _profile_response(updated)
+
+
+@app.get("/api/linkability", response_model=LinkabilityResponse)
+async def get_linkability():
+    """Which stored profiles look correlatable as the same person, and why.
+
+    Pure analysis over stored records — no browser is launched and no
+    profile is modified.
+    """
+    return linkability.analyze(db.list_profiles())
 
 
 @app.post("/api/cookies/merge", response_model=CookieMergeResponse)
