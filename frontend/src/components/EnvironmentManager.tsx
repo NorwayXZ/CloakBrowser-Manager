@@ -17,6 +17,7 @@ import {
   LogOut,
   MapPin,
   MoreVertical,
+  Network,
   Pencil,
   Play,
   Plus,
@@ -34,6 +35,7 @@ import { AppUpdateStatus } from "./AppUpdateStatus";
 import { BackupPanel } from "./BackupPanel";
 import { GroupsPanel } from "./GroupsPanel";
 import { KernelPanel } from "./KernelPanel";
+import { LinkabilityPanel } from "./LinkabilityPanel";
 import { SiteCheckPanel } from "./SiteCheckPanel";
 import { ProxyPresetsPanel } from "./ProxyPresetsPanel";
 import { TrashPanel } from "./TrashPanel";
@@ -70,7 +72,7 @@ interface EnvironmentManagerProps {
   onLogout: () => void;
 }
 
-type ManagerSection = "profiles" | "groups" | "proxies" | "kernel" | "checks" | "backup" | "trash";
+type ManagerSection = "profiles" | "groups" | "proxies" | "kernel" | "checks" | "links" | "backup" | "trash";
 type UpdateNotice = {
   tone: "success" | "info" | "error";
   text: string;
@@ -84,6 +86,7 @@ const navItems: { id: ManagerSection; label: string; icon: typeof LayoutGrid }[]
   { id: "proxies", label: "代理管理", icon: Globe2 },
   { id: "kernel", label: "浏览器内核", icon: Cpu },
   { id: "checks", label: "指纹检测", icon: ShieldCheck },
+  { id: "links", label: "关联分析", icon: Network },
   { id: "backup", label: "数据备份", icon: Database },
   { id: "trash", label: "回收站", icon: Archive },
 ];
@@ -253,6 +256,7 @@ export function EnvironmentManager({
     proxies: "代理管理",
     kernel: "浏览器内核",
     checks: "指纹检测",
+    links: "关联分析",
     backup: "数据备份",
     trash: "回收站",
   }[section];
@@ -262,6 +266,7 @@ export function EnvironmentManager({
     proxies: `共 ${proxyPresets.length} 个保存代理`,
     kernel: "查看、更新和清理 CloakBrowser 内核",
     checks: "用公开检测网站验收画像，导出报告",
+    links: "哪些画像会被检测方关联成同一个人",
     backup: "完整备份 Cookie 与登录状态，或只导出配置",
     trash: `共 ${trashProfiles.length} 个待清理浏览器 · 7 天后自动清理`,
   }[section];
@@ -963,6 +968,7 @@ export function EnvironmentManager({
 
         {section === "kernel" && <KernelPanel runningCount={runningCount} />}
         {section === "checks" && <SiteCheckPanel profiles={profiles} onRefresh={onRefresh} />}
+        {section === "links" && <LinkabilityPanel />}
         {section === "backup" && <BackupPanel runningCount={runningCount} onRefresh={onRefresh} />}
       </main>
     </div>
