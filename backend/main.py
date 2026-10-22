@@ -46,6 +46,7 @@ from .cookie_formats import (
     to_cookie_editor_json,
     to_netscape,
 )
+from . import automation_window
 from . import evolution
 from . import kernel
 from . import linkability
@@ -72,6 +73,9 @@ from .models import (
     AuthAccountUpdate,
     AutoBackupSettingsModel,
     AutoBackupStatusResponse,
+    AutomationHoursRequest,
+    AutomationHoursResponse,
+    AutomationStatusResponse,
     BrowserUpdateResponse,
     BurnRequest,
     BurnResponse,
@@ -1213,11 +1217,93 @@ async def _auto_backup_loop() -> None:
         await asyncio.sleep(AUTO_BACKUP_CHECK_SECONDS)
 
 
+# ── Automation hours + live automation status ────────────────────────────────
+#
+# Scheduled automation (warm-up ticks, evolution cycles) only runs inside
+# the user's allowed-hours window; outside it, a run defers — recorded,
+# but never advancing its cadence clock. Manual triggers ignore the
+# window. All automation also runs headless (see BrowserManager.launch),
+# so even an in-window run never opens a window on the user's desktop.
+
+
+def _automation_window() -> automation_window.Window | None:
+    return automation_window.read_window(db.get_setting)
+
+
+def _automation_window_open() -> bool:
+    return automation_window.is_open(datetime.now().astimezone(), _automation_window())
+
+
+def _automation_hours_payload() -> AutomationHoursResponse:
+    window = _automation_window()
+    return AutomationHoursResponse(
+        hours=automation_window.format_window(window) if window else None,
+        open_now=automation_window.is_open(datetime.now().astimezone(), window),
+    )
+
+
+@app.get("/api/automation/hours", response_model=AutomationHoursResponse)
+async def get_automation_hours():
+    return _automation_hours_payload()
+
+
+@app.put("/api/automation/hours", response_model=AutomationHoursResponse)
+async def update_automation_hours(body: AutomationHoursRequest):
+    raw = (body.hours or "").strip()
+    if raw and not automation_window.is_valid_window_text(raw):
+        raise HTTPException(
+            status_code=422,
+            detail="时段格式不对，请用 HH-HH，例如 09-18 或 23-07；留空表示不限制。",
+        )
+    window = automation_window.parse_window(raw)
+    db.set_setting(
+        automation_window.SETTING_KEY,
+        automation_window.format_window(window) if window else "",
+    )
+    return _automation_hours_payload()
+
+
+_AUTOMATION_LABELS = {"site_check": "指纹检测", "warmup": "养号", "evolution": "进化实验"}
+
+
+def _automation_activity() -> AutomationStatusResponse:
+    """Which automation is running right now, for the panel's indicator.
+
+    Evolution is checked first: its cycles drive the site-check job
+    internally, and the cycle is the meaningful unit to display.
+    """
+    if _evolution_busy():
+        return AutomationStatusResponse(
+            active=True, kind="evolution", label=_AUTOMATION_LABELS["evolution"],
+            profile_id=_evolution_current.get("profile_id"),
+            profile_name=_evolution_current.get("profile_name"),
+        )
+    if _warmup_busy():
+        return AutomationStatusResponse(
+            active=True, kind="warmup", label=_AUTOMATION_LABELS["warmup"],
+            profile_id=_warmup_current.get("profile_id"),
+            profile_name=_warmup_current.get("profile_name"),
+        )
+    if site_check_job.busy:
+        snap = site_check_job.snapshot()
+        return AutomationStatusResponse(
+            active=True, kind="site_check", label=_AUTOMATION_LABELS["site_check"],
+            profile_id=snap.get("profile_id"),
+            profile_name=snap.get("profile_name"),
+        )
+    return AutomationStatusResponse()
+
+
+@app.get("/api/automation/status", response_model=AutomationStatusResponse)
+async def get_automation_status():
+    return _automation_activity()
+
+
 # ── Warm-up （养号） scheduler ────────────────────────────────────────────────
 
 WARMUP_FIRST_CHECK_SECONDS = 240
 WARMUP_CHECK_SECONDS = 15 * 60
-_warmup_current: dict[str, Any] = {"task": None, "profile_id": None}
+_warmup_current: dict[str, Any] = {"task": None, "profile_id": None, "profile_name": None}
 
 
 def _record_warmup(rec: dict) -> None:
@@ -1249,13 +1335,40 @@ def _start_warmup_task(profile: dict, targets_done: set) -> bool:
             evolution.AUTOMATION_LOCK.release("warmup")
 
     task = asyncio.create_task(_run())
-    _warmup_current.update(task=task, profile_id=profile["id"])
+    _warmup_current.update(
+        task=task, profile_id=profile["id"], profile_name=profile.get("name")
+    )
     return True
 
 
 def _warmup_busy() -> bool:
     task = _warmup_current.get("task")
     return task is not None and not task.done()
+
+
+def _record_warmup_window_deferred(profile: dict, recent: list, now: datetime) -> None:
+    """Leave one deferred marker per outside-window stretch.
+
+    The marker is a skipped run, not an attempt: the cadence math below
+    ignores it, so the first in-window tick runs the warm-up right away
+    instead of three hours after the window opens.
+    """
+    if recent and (recent[0].get("detail") or {}).get("deferred") == "automation_hours":
+        return
+    window = _automation_window()
+    if window is None:
+        return
+    stamp = now.isoformat(timespec="seconds")
+    _record_warmup({
+        "profile_id": profile["id"],
+        "started_at": stamp,
+        "finished_at": stamp,
+        "duration_s": 0.0,
+        "pages_visited": 0,
+        "status": "skipped",
+        "reason": f"不在自动化允许时段内（{automation_window.describe_window(window)}），本轮推迟",
+        "detail": {"deferred": "automation_hours", "targets": [], "urls": []},
+    })
 
 
 async def _warmup_tick() -> None:
@@ -1272,12 +1385,20 @@ async def _warmup_tick() -> None:
         )
         recent = await asyncio.to_thread(db.list_warmup_runs, profile_id, 50)
         last_run_at = None
-        if recent:
+        for run in recent:
+            # Window-deferred markers are not attempts; they must not
+            # push the cadence clock forward.
+            if (run.get("detail") or {}).get("deferred") == "automation_hours":
+                continue
             try:
-                last_run_at = datetime.fromisoformat(str(recent[0]["started_at"]))
+                last_run_at = datetime.fromisoformat(str(run["started_at"]))
             except (ValueError, KeyError):
                 last_run_at = None
+            break
         if not warmup.is_due(profile, runs_today=runs_today, last_run_at=last_run_at, now=now):
+            continue
+        if not _automation_window_open():
+            _record_warmup_window_deferred(profile, recent, now)
             continue
         todays = [r for r in recent if (r.get("started_at") or "") >= today]
         if _start_warmup_task(profile, warmup.targets_done_today(todays)):
@@ -1450,6 +1571,14 @@ def _evo_file_proposal(payload: dict) -> str:
     return row["id"]
 
 
+def _evolution_window_defer() -> str | None:
+    """Scheduled-cycle gate: outside the automation hours, defer."""
+    window = _automation_window()
+    if window is None or automation_window.is_open(datetime.now().astimezone(), window):
+        return None
+    return f"不在自动化允许时段内（{automation_window.describe_window(window)}），本轮推迟"
+
+
 def _evolution_engine() -> evolution.EvolutionEngine:
     return evolution.EvolutionEngine(evolution.EngineDeps(
         run_check=_evo_run_check,
@@ -1459,7 +1588,7 @@ def _evolution_engine() -> evolution.EvolutionEngine:
         record_log=_evo_record_log,
         update_log=_evo_update_log,
         file_proposal=_evo_file_proposal,
-    ))
+    ), scheduled_defer=_evolution_window_defer)
 
 
 def _start_evolution_task(profile: dict, trigger: str) -> bool:
