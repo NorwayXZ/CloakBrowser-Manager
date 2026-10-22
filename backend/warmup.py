@@ -397,7 +397,10 @@ async def run_warmup(
     rng = random.Random(f"cbm-warmup:{seed if seed is not None else profile_id}:{started.date()}")
     launched = False
     try:
-        running = await browser_mgr.launch(profile, launch_mode="debug")
+        # Always headless: a scheduled warm-up must never open a window on
+        # the user's desktop. Cookies and history still accrue — the run
+        # uses the same user data dir, only the window is gone.
+        running = await browser_mgr.launch(profile, launch_mode="debug", headless=True)
         launched = True
         context = getattr(running, "context", None)
         if context is None:
