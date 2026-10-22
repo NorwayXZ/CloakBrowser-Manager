@@ -9,6 +9,7 @@ import {
   Database,
   Download,
   Edit3,
+  Flame,
   Folder,
   Globe2,
   KeyRound,
@@ -24,6 +25,7 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
+  Sparkles,
   Square,
   StickyNote,
   Trash2,
@@ -79,6 +81,21 @@ type UpdateNotice = {
   result?: ManagerUpdateResult;
   browser?: BrowserUpdateResult;
 };
+
+const DISPOSABLE_REGIONS: { code: string; label: string }[] = [
+  { code: "US", label: "美国" },
+  { code: "JP", label: "日本" },
+  { code: "GB", label: "英国" },
+  { code: "DE", label: "德国" },
+  { code: "FR", label: "法国" },
+  { code: "NL", label: "荷兰" },
+  { code: "TW", label: "台湾" },
+  { code: "HK", label: "香港" },
+  { code: "SG", label: "新加坡" },
+  { code: "KR", label: "韩国" },
+  { code: "AU", label: "澳大利亚" },
+  { code: "CA", label: "加拿大" },
+];
 
 const navItems: { id: ManagerSection; label: string; icon: typeof LayoutGrid }[] = [
   { id: "profiles", label: "环境管理", icon: LayoutGrid },
@@ -197,6 +214,9 @@ export function EnvironmentManager({
   const [noteErrorId, setNoteErrorId] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
   const [updateNotice, setUpdateNotice] = useState<UpdateNotice | null>(null);
+  const [disposableRegion, setDisposableRegion] = useState("US");
+  const [disposableBusy, setDisposableBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
@@ -388,6 +408,30 @@ export function EnvironmentManager({
   const handleDelete = async (profile: Profile) => {
     if (!confirm(`确定删除「${profile.name}」吗？删除后会进入回收站，7 天内可以恢复。`)) return;
     await runRowAction(profile.id, () => onDelete(profile.id));
+  };
+
+  const handleCreateDisposable = async () => {
+    setDisposableBusy(true);
+    setActionError(null);
+    try {
+      await api.createDisposable({ region: disposableRegion });
+      await onRefresh();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "一次性身份创建失败");
+    } finally {
+      setDisposableBusy(false);
+    }
+  };
+
+  const handleBurn = async (profile: Profile) => {
+    if (!confirm(`确定焚毁「${profile.name}」吗？\n焚毁会永久删除这个一次性画像的全部数据（Cookie、登录状态、历史记录和本地文件），不可恢复，也不会进入回收站。`)) return;
+    setActionError(null);
+    try {
+      await api.burnProfile(profile.id);
+      await onRefresh();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "焚毁失败");
+    }
   };
 
   const handleUpdateManager = async () => {
@@ -704,6 +748,29 @@ export function EnvironmentManager({
                 </div>
               )}
             </div>
+            <div className="ml-auto flex items-center gap-2">
+              {actionError && <span className="text-xs text-red-600">{actionError}</span>}
+              <select
+                className="input h-9 w-[104px] text-sm"
+                value={disposableRegion}
+                onChange={(event) => setDisposableRegion(event.target.value)}
+                title="一次性身份的地区（决定时区与语言）"
+                aria-label="一次性身份地区"
+              >
+                {DISPOSABLE_REGIONS.map((region) => (
+                  <option key={region.code} value={region.code}>{region.label}</option>
+                ))}
+              </select>
+              <button
+                className="btn-secondary flex items-center gap-1.5 disabled:opacity-50"
+                disabled={disposableBusy}
+                onClick={() => void handleCreateDisposable()}
+                title="一键创建一个一次性的全新身份：独立设备模板，时区/语言按地区配套，用完可焚毁"
+              >
+                <Sparkles className="h-4 w-4" />
+                <span>{disposableBusy ? "创建中..." : "一次性身份"}</span>
+              </button>
+            </div>
           </div>
 
           <div className="min-h-0 flex-1 overflow-hidden rounded-md border border-border bg-white">
@@ -777,13 +844,20 @@ export function EnvironmentManager({
                             </span>
                           </div>
                           <div className="min-w-0">
-                            <button
-                              className="block max-w-[180px] truncate text-left font-semibold text-slate-900 hover:text-accent"
-                              onClick={() => onEdit(profile.id)}
-                              title={profile.name}
-                            >
-                              {profile.name}
-                            </button>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                className="block max-w-[180px] truncate text-left font-semibold text-slate-900 hover:text-accent"
+                                onClick={() => onEdit(profile.id)}
+                                title={profile.name}
+                              >
+                                {profile.name}
+                              </button>
+                              {profile.disposable && (
+                                <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                                  一次性
+                                </span>
+                              )}
+                            </div>
                             <button
                               className="mt-1 inline-flex items-center gap-1 text-xs text-slate-400 hover:text-accent"
                               onClick={() => onEdit(profile.id)}
@@ -931,6 +1005,18 @@ export function EnvironmentManager({
                               <Trash2 className="h-4 w-4" />
                               <span>删除</span>
                             </button>
+                            {profile.disposable && (
+                              <button
+                                className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm font-medium text-red-700 hover:bg-red-50"
+                                onClick={() => {
+                                  setMenuOpenId(null);
+                                  void handleBurn(profile);
+                                }}
+                              >
+                                <Flame className="h-4 w-4" />
+                                <span>焚毁（彻底删除）</span>
+                              </button>
+                            )}
                             <div className="my-1 border-t border-border" />
                           </div>
                         )}
