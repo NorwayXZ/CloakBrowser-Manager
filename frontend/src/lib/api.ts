@@ -230,6 +230,30 @@ export interface CookiePullResult {
 
 export type CookieExportFormat = "json" | "netscape";
 
+export interface LinkabilityLink {
+  a_id: string;
+  b_id: string;
+  a_name: string;
+  b_name: string;
+  score: number;
+  level: "strong" | "medium" | string;
+  reasons: string[];
+  suggestions: string[];
+}
+
+export interface LinkabilityCluster {
+  id: string;
+  risk: "high" | "medium" | string;
+  profiles: { id: string; name: string }[];
+  links: LinkabilityLink[];
+}
+
+export interface LinkabilityResult {
+  profile_count: number;
+  unclustered_count: number;
+  clusters: LinkabilityCluster[];
+}
+
 export interface CookieMergeResult {
   cookies_json: string;
   format: "json" | "netscape" | "header";
@@ -797,6 +821,8 @@ export const api = {
 
   getFingerprintReport: (id: string) =>
     request<FingerprintReport>(`/api/profiles/${id}/fingerprint-report`),
+
+  getLinkability: () => request<LinkabilityResult>("/api/linkability"),
 
   testProxy: (proxy: string | null) =>
     request<ProxyTestResult>("/api/proxy/test", {
