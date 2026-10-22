@@ -221,6 +221,13 @@ class ProfileResponse(BaseModel):
     def coerce_clipboard_sync(cls, v: object) -> bool:
         return True if v is None else bool(v)
 
+    disposable: bool = False
+
+    @field_validator("disposable", mode="before")
+    @classmethod
+    def coerce_disposable(cls, v: object) -> bool:
+        return bool(v)
+
     color_scheme: str | None = None
     launch_args: list[str] = []
     fingerprint_options: FingerprintOptions = Field(default_factory=FingerprintOptions)
@@ -371,6 +378,29 @@ class DeviceTemplateResponse(BaseModel):
 
 class ApplyDeviceTemplateRequest(BaseModel):
     template_id: str = Field(min_length=1)
+
+
+class DisposableCreateRequest(BaseModel):
+    """One-click throwaway identity. Everything is optional: the persona
+    defaults to US (en-US / America/New_York), region selects a coherent
+    locale + timezone pair, and explicit timezone/locale win over region."""
+
+    name: str | None = None
+    region: str | None = None  # ISO country code, e.g. "JP"
+    timezone: str | None = None
+    locale: str | None = None
+
+
+class BurnRequest(BaseModel):
+    confirm: bool = False
+
+
+class BurnResponse(BaseModel):
+    ok: bool
+    profile_id: str
+    user_data_dir: str
+    files_removed: int
+    was_running: bool
 
 
 class LinkabilityProfileRef(BaseModel):
