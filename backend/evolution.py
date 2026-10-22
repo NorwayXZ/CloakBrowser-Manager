@@ -395,9 +395,21 @@ class EngineDeps:
 
 
 class EvolutionEngine:
-    def __init__(self, deps: EngineDeps, *, lock: AutomationLock = AUTOMATION_LOCK) -> None:
+    def __init__(
+        self,
+        deps: EngineDeps,
+        *,
+        lock: AutomationLock = AUTOMATION_LOCK,
+        scheduled_defer: Callable[[], str | None] | None = None,
+    ) -> None:
         self.deps = deps
         self.lock = lock
+        # Optional gate for *scheduled* cycles only (e.g. outside the
+        # user's automation hours): returns a defer reason, or None to
+        # proceed. Manual cycles never consult it. A deferred cycle is
+        # logged like a seat-busy one and does not advance the cadence
+        # clock (see db.last_evolution_cycle_at).
+        self.scheduled_defer = scheduled_defer
 
     async def run_cycle(self, source: dict[str, Any], *, trigger: str) -> dict[str, Any]:
         """One full cycle; returns the finished log-entry fields.
@@ -435,6 +447,10 @@ class EvolutionEngine:
             return finish("deferred", f"另一个自动化（{self.lock.owner}）正在运行，本轮推迟")
 
         try:
+            if trigger == "scheduled" and self.scheduled_defer is not None:
+                defer_reason = self.scheduled_defer()
+                if defer_reason:
+                    return finish("deferred", defer_reason)
             outcome = await deps.run_check(source)
             if outcome.report is None:
                 error = outcome.error or "检测没有完成"
