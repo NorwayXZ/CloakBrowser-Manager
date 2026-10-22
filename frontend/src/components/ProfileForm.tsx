@@ -1,5 +1,6 @@
 import { ArrowLeft, ClipboardCheck, Download, FileDown, Globe, Loader2, MousePointer2, Plus, RefreshCw, Save, Settings2, Trash2, Wifi, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
+import { AutomationHoursHint } from "./AutomationHours";
 import {
   api,
   type CookieExportFormat,
@@ -1893,7 +1894,7 @@ export function ProfileForm({
                           <span className="min-w-0">
                             <span className="font-medium">养号（定时自动浏览养护）</span>
                             <span className="mt-1 block text-xs leading-5 text-slate-500">
-                              开启后，Manager 会按计划自动打开这个浏览器，像真人一样浏览与它地区相符的站点和下方勾选的目标平台，让第一方 Cookie 自然积累年龄。全程不登录、不下单、不发帖，只浏览与搜索；浏览器正在使用或授权并发已满时自动跳过。
+                              开启后，Manager 会按计划在后台无头打开这个浏览器（不弹出窗口、不打扰你），像真人一样浏览与它地区相符的站点和下方勾选的目标平台，让第一方 Cookie 自然积累年龄。全程不登录、不下单、不发帖，只浏览与搜索；浏览器正在使用或授权并发已满时自动跳过。
                             </span>
                           </span>
                         </label>
@@ -1977,6 +1978,9 @@ export function ProfileForm({
                                 >
                                   {warmupInfo.warming ? "正在养号…" : "立即养一次"}
                                 </button>
+                                <div className="mt-2">
+                                  <AutomationHoursHint />
+                                </div>
                               </div>
                             )}
                           </div>
