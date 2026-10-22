@@ -133,6 +133,7 @@ class ProfileCreate(BaseModel):
     warmup_enabled: bool = False
     warmup_daily_max: int = Field(default=1, ge=1, le=5)
     warmup_targets: list[str] = Field(default_factory=list)
+    warmup_persona: str | None = Field(default=None, max_length=200)
     evolution_enabled: bool = False
     evolution_interval_hours: int = Field(default=24, ge=1, le=24 * 30)
     headless: bool = False
@@ -171,6 +172,7 @@ class ProfileUpdate(BaseModel):
     warmup_enabled: bool | None = None
     warmup_daily_max: int | None = Field(default=None, ge=1, le=5)
     warmup_targets: list[str] | None = None
+    warmup_persona: str | None = Field(default=None, max_length=200)
     evolution_enabled: bool | None = None
     evolution_interval_hours: int | None = Field(default=None, ge=1, le=24 * 30)
     headless: bool | None = None
@@ -220,6 +222,7 @@ class ProfileResponse(BaseModel):
     warmup_enabled: bool = False
     warmup_daily_max: int = 1
     warmup_targets: list[str] = Field(default_factory=list)
+    warmup_persona: str | None = None
     evolution_enabled: bool = False
 
     @field_validator("evolution_enabled", mode="before")

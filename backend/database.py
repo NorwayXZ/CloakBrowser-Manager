@@ -25,7 +25,7 @@ CONFIGURATION_PROFILE_FIELDS = (
     "device_memory", "humanize", "human_preset", "headless", "geoip", "clipboard_sync", "auto_launch",
     "color_scheme", "group_name", "account_platform", "cookies_json", "startup_urls", "launch_args",
     "fingerprint_options", "notes", "tags", "disposable",
-    "warmup_enabled", "warmup_daily_max", "warmup_targets",
+    "warmup_enabled", "warmup_daily_max", "warmup_targets", "warmup_persona",
     "evolution_enabled", "evolution_interval_hours",
 )
 
@@ -127,6 +127,21 @@ def init_db():
                 detail_json TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS warmup_scripts (
+                id TEXT PRIMARY KEY,
+                profile_id TEXT NOT NULL,
+                batch_id TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'llm',
+                model TEXT,
+                persona TEXT,
+                theme TEXT,
+                intents_json TEXT,
+                steps_json TEXT,
+                status TEXT NOT NULL DEFAULT 'draft'
+            );
+
             CREATE TABLE IF NOT EXISTS evolution_proposals (
                 id TEXT PRIMARY KEY,
                 profile_id TEXT NOT NULL,
@@ -217,6 +232,9 @@ def init_db():
             conn.commit()
         if "warmup_targets" not in cols:
             conn.execute("ALTER TABLE profiles ADD COLUMN warmup_targets TEXT DEFAULT '[]'")
+            conn.commit()
+        if "warmup_persona" not in cols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN warmup_persona TEXT")
             conn.commit()
         if "evolution_enabled" not in cols:
             conn.execute("ALTER TABLE profiles ADD COLUMN evolution_enabled INTEGER DEFAULT 0")
@@ -418,10 +436,10 @@ def create_profile(
                 hardware_concurrency, device_memory, humanize, human_preset, headless, geoip,
                 clipboard_sync, auto_launch, color_scheme, group_name, account_platform,
                 cookies_json, startup_urls, launch_args, fingerprint_options_json, notes, disposable,
-                warmup_enabled, warmup_daily_max, warmup_targets,
+                warmup_enabled, warmup_daily_max, warmup_targets, warmup_persona,
                 evolution_enabled, evolution_interval_hours,
                 user_data_dir, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 profile_id, name,
                 fields.get("browser_engine", "auto"),
@@ -456,6 +474,7 @@ def create_profile(
                 1 if fields.get("warmup_enabled") else 0,
                 int(fields.get("warmup_daily_max") or 1),
                 json.dumps(fields.get("warmup_targets") or []),
+                fields.get("warmup_persona"),
                 1 if fields.get("evolution_enabled") else 0,
                 int(fields.get("evolution_interval_hours") or 24),
                 user_data_dir, now, now,
@@ -562,7 +581,7 @@ def update_profile(profile_id: str, **fields: Any) -> dict[str, Any] | None:
         "hardware_concurrency", "device_memory", "humanize", "human_preset", "headless", "geoip",
         "clipboard_sync", "auto_launch", "color_scheme", "group_name", "account_platform", "cookies_json",
         "startup_urls", "launch_args", "fingerprint_options_json", "notes", "disposable",
-        "warmup_enabled", "warmup_daily_max", "warmup_targets",
+        "warmup_enabled", "warmup_daily_max", "warmup_targets", "warmup_persona",
         "evolution_enabled", "evolution_interval_hours",
     ):
         if col in fields:
@@ -806,6 +825,118 @@ def warmup_stats(profile_id: str) -> dict[str, Any]:
             (profile_id,),
         ).fetchone()[0]
     return {"total_runs": int(total), "ok_runs": int(ok), "last_run_at": last}
+
+
+# ── AI warm-up scripts (AI 养号剧本） ─────────────────────────────────────────
+#
+# Scripts are generated offline by an LLM as *intents* and compiled by
+# trusted code into ordinary session plans (see warmup_script.py). They are
+# inert data until a human approves the batch; the runner only ever reads
+# approved batches and falls back to the template pool otherwise.
+
+
+def _hydrate_warmup_script(row: sqlite3.Row) -> dict[str, Any]:
+    script = dict(row)
+    script["intents"] = _load_json_value(script.pop("intents_json", None)) or []
+    script["steps"] = _load_json_value(script.pop("steps_json", None)) or []
+    return script
+
+
+def create_warmup_script_batch(
+    profile_id: str,
+    *,
+    batch_id: str,
+    source: str = "llm",
+    model: str | None,
+    persona: str | None,
+    scripts: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Store one generated batch of scripts as drafts. Returns the rows.
+
+    Each item is ``{"theme": str, "intents": [...], "steps": [...]}`` where
+    ``steps`` is the already-compiled session plan.
+    """
+    now = _now()
+    with get_db() as conn:
+        for position, item in enumerate(scripts):
+            conn.execute(
+                """INSERT INTO warmup_scripts (
+                    id, profile_id, batch_id, position, created_at, source,
+                    model, persona, theme, intents_json, steps_json, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')""",
+                (
+                    str(uuid.uuid4()), profile_id, batch_id, position, now,
+                    source, model, persona, item.get("theme"),
+                    json.dumps(item.get("intents") or [], ensure_ascii=False),
+                    json.dumps(item.get("steps") or [], ensure_ascii=False),
+                ),
+            )
+        conn.commit()
+        rows = conn.execute(
+            "SELECT * FROM warmup_scripts WHERE batch_id = ? ORDER BY position ASC",
+            (batch_id,),
+        ).fetchall()
+    return [_hydrate_warmup_script(row) for row in rows]
+
+
+def list_warmup_scripts(profile_id: str, limit: int = 100) -> list[dict[str, Any]]:
+    with get_db() as conn:
+        rows = conn.execute(
+            """SELECT * FROM warmup_scripts WHERE profile_id = ?
+               ORDER BY created_at DESC, position ASC LIMIT ?""",
+            (profile_id, int(limit)),
+        ).fetchall()
+    return [_hydrate_warmup_script(row) for row in rows]
+
+
+def get_approved_warmup_batch(profile_id: str) -> list[dict[str, Any]]:
+    """Scripts of the newest approved batch for a profile (position order).
+
+    Approving a batch archives the previously approved one, so at most one
+    batch is approved at a time; the MAX(created_at) lookup is a belt-and-
+    braces pick of the freshest if that invariant is ever violated.
+    """
+    with get_db() as conn:
+        row = conn.execute(
+            """SELECT batch_id FROM warmup_scripts
+               WHERE profile_id = ? AND status = 'approved'
+               ORDER BY created_at DESC, position ASC LIMIT 1""",
+            (profile_id,),
+        ).fetchone()
+        if not row:
+            return []
+        rows = conn.execute(
+            """SELECT * FROM warmup_scripts
+               WHERE profile_id = ? AND batch_id = ? AND status = 'approved'
+               ORDER BY position ASC""",
+            (profile_id, row["batch_id"]),
+        ).fetchall()
+    return [_hydrate_warmup_script(r) for r in rows]
+
+
+def set_warmup_batch_status(profile_id: str, batch_id: str, status: str) -> int:
+    """Approve or reject a whole draft batch. Returns rows changed.
+
+    Only draft rows transition, so re-deciding a decided batch is a no-op.
+    Approving archives any other approved batch for the profile first —
+    exactly one batch is ever live.
+    """
+    if status not in ("approved", "rejected"):
+        raise ValueError(f"unsupported batch status: {status}")
+    with get_db() as conn:
+        if status == "approved":
+            conn.execute(
+                """UPDATE warmup_scripts SET status = 'archived'
+                   WHERE profile_id = ? AND status = 'approved' AND batch_id != ?""",
+                (profile_id, batch_id),
+            )
+        cursor = conn.execute(
+            """UPDATE warmup_scripts SET status = ?
+               WHERE profile_id = ? AND batch_id = ? AND status = 'draft'""",
+            (status, profile_id, batch_id),
+        )
+        conn.commit()
+        return cursor.rowcount
 
 
 # ── Self-adversarial evolution: proposals + cycle log ────────────────────────
