@@ -500,6 +500,24 @@ class EvolutionStatusResponse(BaseModel):
     pending_proposals: int = 0
 
 
+class AutomationHoursRequest(BaseModel):
+    # Local-time "HH-HH" range (e.g. "09-18", "23-07"); null/"" = no restriction.
+    hours: str | None = None
+
+
+class AutomationHoursResponse(BaseModel):
+    hours: str | None = None
+    open_now: bool = True
+
+
+class AutomationStatusResponse(BaseModel):
+    active: bool = False
+    kind: str | None = None  # site_check | warmup | evolution
+    label: str | None = None
+    profile_id: str | None = None
+    profile_name: str | None = None
+
+
 class GroupResponse(BaseModel):
     id: str
     name: str
