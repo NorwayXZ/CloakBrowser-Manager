@@ -503,13 +503,22 @@ def local_probe_results(
 Progress = Callable[[str, int, int, CheckResult | None], Awaitable[None] | None]
 
 
-async def run_site(context: Any, site: SiteCheck, report_dir: Path, *, poll: float = POLL_SECONDS) -> CheckResult:
+async def run_site(context: Any, site: SiteCheck, report_dir: Path, *, poll: float = POLL_SECONDS, human_factory: Any = None) -> CheckResult:
     started = time.monotonic()
     result = CheckResult(site.id, site.name, site.url, site.criteria, "unknown", "页面没有显示结论")
     page = None
     try:
         page = await context.new_page()
         await page.goto(site.url, timeout=int(site.timeout * 1000), wait_until="domcontentloaded")
+        if human_factory is not None:
+            # A few seconds of human presence (drift, a glance down the
+            # page) so the check session does not look like an instant-load
+            # robot. Hard-capped: behavior can never hang a check.
+            try:
+                human = human_factory(page)
+                await asyncio.wait_for(human.settle(3.0), timeout=8)
+            except Exception:
+                pass
         verdict = None
         loaded = time.monotonic()
         previous = None
@@ -572,6 +581,7 @@ async def run_checks(
     progress: Progress | None = None,
     sites: tuple[SiteCheck, ...] = SITES,
     extra_results: list[CheckResult] | None = None,
+    human_factory: Any = None,
 ) -> dict[str, Any]:
     """Visit every site in turn and write report.json; returns the report.
 
@@ -584,7 +594,7 @@ async def run_checks(
             maybe = progress(site.id, index, len(sites), None)
             if asyncio.iscoroutine(maybe):
                 await maybe
-        result = await run_site(context, site, report_dir)
+        result = await run_site(context, site, report_dir, human_factory=human_factory)
         results.append(result)
         if progress:
             maybe = progress(site.id, index + 1, len(sites), result)
