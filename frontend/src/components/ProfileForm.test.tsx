@@ -339,3 +339,69 @@ describe("ProfileForm cookies and layout", () => {
     expect(within(screen.getByRole("radiogroup", { name: "WebRTC" })).queryByRole("radio", { name: /禁用/ })).toBeNull();
   });
 });
+
+describe("ProfileForm warm-up （养号）", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows the honest target-aging copy, age stats and saves warm-up fields", async () => {
+    vi.spyOn(api, "listWarmupTargets").mockResolvedValue([
+      { id: "amazon", name: "Amazon" },
+      { id: "facebook", name: "Facebook" },
+    ]);
+    vi.spyOn(api, "getProfileWarmup").mockResolvedValue({
+      enabled: true,
+      daily_max: 1,
+      targets: ["amazon"],
+      age: {
+        created_at: "2026-10-01T00:00:00Z",
+        age_days: 21,
+        warmup_sessions: 3,
+        warmup_runs_total: 4,
+        last_warmup_at: "2026-10-21T08:00:00Z",
+      },
+      runs: [
+        {
+          id: "run-1", profile_id: "profile-1",
+          started_at: "2026-10-21T08:00:00Z", finished_at: "2026-10-21T08:05:00Z",
+          duration_s: 300, pages_visited: 6, status: "ok", reason: null,
+          detail: { targets: ["amazon"] },
+        },
+      ],
+      warming: false,
+    });
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(
+      <ProfileForm
+        profile={makeProfile({ warmup_enabled: true, warmup_daily_max: 1, warmup_targets: ["amazon"] })}
+        hostOS="macos"
+        onSave={onSave}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText(/定向养护：在目标平台留下并积累第一方 Cookie 年龄/)).toBeTruthy();
+    expect(await screen.findByText(/已养号 3 次/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Amazon" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Facebook" })).toBeTruthy();
+    expect(screen.getByText(/6 页/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Facebook" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.warmup_enabled).toBe(true);
+    expect(saved.warmup_targets).toEqual(["amazon", "facebook"]);
+  });
+
+  it("keeps warm-up controls hidden until enabled", async () => {
+    vi.spyOn(api, "listWarmupTargets").mockResolvedValue([{ id: "amazon", name: "Amazon" }]);
+    render(<ProfileForm profile={null} hostOS="windows" onSave={vi.fn()} onCancel={vi.fn()} />);
+
+    expect(screen.getByText("养号（定时自动浏览养护）")).toBeTruthy();
+    expect(screen.queryByText(/定向养护：在目标平台/)).toBeNull();
+    fireEvent.click(screen.getByRole("checkbox", { name: /养号/ }));
+    expect(await screen.findByText(/定向养护：在目标平台/)).toBeTruthy();
+  });
+});
