@@ -52,6 +52,8 @@ from . import secrets_crypto
 from .browser_manager import BrowserLaunchError, BrowserManager, CookiePullError, _normalize_proxy, _validate_proxy
 from .cloak_runtime import get_effective_chromium_version
 from . import desktop_app, self_update, site_checks
+from . import behavior_traces
+from .behavior_traces import BehaviorRecorder
 from .site_check_job import SiteCheckJob, describe_environment
 from .desktop_app import app_version as desktop_app_version
 from .update_job import UpdateEnv, UpdateJob, platform_name
@@ -1077,6 +1079,62 @@ async def delete_site_check_report(report_id: str):
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="找不到这份报告") from exc
     return {"ok": True}
+
+
+# ── Behavior traces: opt-in rhythm recording on a running debug session ────
+# Only mouse/scroll geometry and event *timings* are captured — never key
+# values, field contents or page text (see behavior_traces.RECORDER_SCRIPT).
+
+_behavior_recorders: dict[str, BehaviorRecorder] = {}
+
+
+@app.post("/api/profiles/{profile_id}/behavior-traces/start")
+async def start_behavior_trace(profile_id: str):
+    profile = db.get_profile(profile_id)
+    if not profile or profile.get("deleted_at"):
+        raise HTTPException(status_code=404, detail="Profile not found")
+    if profile_id in _behavior_recorders:
+        raise HTTPException(status_code=409, detail="这个画像已经在录制行为了。")
+    running = browser_mgr.running.get(profile_id)
+    if running is None or getattr(running, "context", None) is None:
+        raise HTTPException(
+            status_code=409,
+            detail="请先用调试模式打开这个浏览器，再开始录制行为轨迹。",
+        )
+    context = running.context
+    pages = list(getattr(context, "pages", []) or [])
+    page = pages[0] if pages else await context.new_page()
+    recorder = BehaviorRecorder(profile_id)
+    try:
+        await recorder.start(page)
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail=f"录制启动失败：{type(exc).__name__}: {exc}") from exc
+    _behavior_recorders[profile_id] = recorder
+    return {"ok": True, "recording": True, "profile_id": profile_id}
+
+
+@app.post("/api/profiles/{profile_id}/behavior-traces/stop")
+async def stop_behavior_trace(profile_id: str):
+    recorder = _behavior_recorders.pop(profile_id, None)
+    if recorder is None:
+        raise HTTPException(status_code=409, detail="这个画像没有在录制行为。")
+    events = recorder.stop()
+    meta = await asyncio.to_thread(
+        behavior_traces.save_trace, db.DATA_DIR, profile_id, events,
+        started_at=recorder.started_at,
+    )
+    return {"ok": True, "recording": False, "trace": meta}
+
+
+@app.get("/api/profiles/{profile_id}/behavior-traces")
+async def list_behavior_traces(profile_id: str):
+    profile = db.get_profile(profile_id)
+    if not profile or profile.get("deleted_at"):
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return {
+        "recording": profile_id in _behavior_recorders,
+        "traces": await asyncio.to_thread(behavior_traces.list_traces, db.DATA_DIR, profile_id),
+    }
 
 
 AUTO_BACKUP_FIRST_CHECK_SECONDS = 120
