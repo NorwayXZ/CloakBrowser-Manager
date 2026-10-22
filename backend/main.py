@@ -57,7 +57,7 @@ from .desktop_app import app_version as desktop_app_version
 from .update_job import UpdateEnv, UpdateJob, platform_name
 from .fingerprint_report import DEFAULT_NETWORK_PROBE_URL, DIAGNOSTIC_SCRIPT
 from .proxy_bridge import HttpProxyBridge
-from .proxy_geo import fetch_proxy_geo
+from .proxy_geo import fetch_proxy_geo, suggested_locale, suggested_timezone
 from .ip_quality import check_ip_quality
 from .request_guard import RequestGuardMiddleware
 from .runtime import server_port
@@ -70,10 +70,13 @@ from .models import (
     AutoBackupSettingsModel,
     AutoBackupStatusResponse,
     BrowserUpdateResponse,
+    BurnRequest,
+    BurnResponse,
     CookieMergeRequest,
     CookieMergeResponse,
     CookiePullResponse,
     DeviceTemplateResponse,
+    DisposableCreateRequest,
     KernelCheckResponse,
     KernelLicenseKeyRequest,
     KernelOverviewResponse,
@@ -577,6 +580,47 @@ async def create_profile(req: ProfileCreate):
     return _profile_response(db.create_profile(**data))
 
 
+@app.post("/api/profiles/disposable", response_model=ProfileResponse, status_code=201)
+async def create_disposable_profile(req: DisposableCreateRequest):
+    """One-click throwaway identity: an unused device template, the
+    recommended new-profile defaults, and a coherent timezone/locale pair
+    for the chosen region — flagged disposable so it can be burned."""
+    region = (req.region or "US").strip().upper() or "US"
+    locale = req.locale or suggested_locale(region) or "en-US"
+    timezone = req.timezone or suggested_timezone(region) or "America/New_York"
+    name = (req.name or "").strip() or (
+        f"一次性身份 {region} {datetime.now().strftime('%m-%d %H:%M')}-{secrets.token_hex(2)}"
+    )
+
+    used_template_ids = {
+        profile.get("device_profile")
+        for profile in db.list_profiles()
+        if profile.get("device_profile")
+    }
+    candidates = [
+        tpl for tpl in device_templates.list_templates()
+        if tpl["id"] not in used_template_ids
+    ]
+    tpl = secrets.choice(candidates) if candidates else device_templates.random_template()
+
+    profile = db.create_profile(
+        name=name,
+        platform="windows",
+        device_profile=tpl["id"],
+        screen_width=tpl["screen_width"],
+        screen_height=tpl["screen_height"],
+        gpu_vendor=tpl["gpu_vendor"],
+        gpu_renderer=tpl["gpu_renderer"],
+        hardware_concurrency=tpl["hardware_concurrency"],
+        device_memory=tpl["device_memory"],
+        timezone=timezone,
+        locale=locale,
+        fingerprint_options={**RECOMMENDED_NEW_PROFILE_OPTIONS},
+        disposable=1,
+    )
+    return _profile_response(profile)
+
+
 @app.get("/api/profiles/{profile_id}", response_model=ProfileResponse)
 async def get_profile(profile_id: str):
     profile = db.get_profile(profile_id)
@@ -649,6 +693,61 @@ async def purge_profile(profile_id: str):
         except ValueError:
             logger.error("Refusing to purge %s: invalid path", user_data_dir)
     return {"ok": True}
+
+
+@app.post("/api/profiles/{profile_id}/burn", response_model=BurnResponse)
+async def burn_profile(profile_id: str, req: BurnRequest):
+    """Physically destroy a disposable profile — no trash, no restore.
+
+    Unlike the normal delete (soft, recoverable for 7 days), burn removes
+    the database row and the whole user data directory at once. Only
+    profiles flagged disposable can be burned, and only with an explicit
+    {"confirm": true} in the request body.
+    """
+    if req.confirm is not True:
+        raise HTTPException(status_code=400, detail="焚毁不可恢复，请带上 confirm=true 明确确认")
+    profile = db.get_profile(profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    if not profile.get("disposable"):
+        raise HTTPException(status_code=400, detail="只有一次性画像可以焚毁；普通画像请用删除（进回收站）")
+
+    was_running = profile_id in browser_mgr.running
+    if was_running:
+        await browser_mgr.stop(profile_id)
+    # The cookie pull-back channel keeps per-profile tokens in memory only;
+    # drop them so nothing of this profile survives in the Manager either.
+    browser_mgr.cookie_pulls.drop(profile_id)
+
+    user_data_dir = Path(profile["user_data_dir"])
+    files_removed = 0
+    resolved: Path | None = None
+    profiles_root = (db.DATA_DIR / "profiles").resolve()
+    if user_data_dir.exists():
+        try:
+            resolved = user_data_dir.resolve()
+        except ValueError:
+            resolved = None
+        if resolved is not None and resolved.is_relative_to(profiles_root):
+            try:
+                files_removed = sum(1 for path in resolved.rglob("*") if path.is_file())
+            except OSError:
+                files_removed = 0
+
+    if not db.purge_profile(profile_id):
+        raise HTTPException(status_code=404, detail="Profile not found")
+    if resolved is not None and resolved.exists():
+        if resolved.is_relative_to(profiles_root):
+            shutil.rmtree(resolved, ignore_errors=True)
+        else:
+            logger.error("Refusing to burn %s: outside profiles root", user_data_dir)
+    return BurnResponse(
+        ok=True,
+        profile_id=profile_id,
+        user_data_dir=str(user_data_dir),
+        files_removed=files_removed,
+        was_running=was_running,
+    )
 
 
 @app.get("/api/device-templates", response_model=list[DeviceTemplateResponse])
