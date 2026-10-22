@@ -13,6 +13,8 @@ import {
   type IpQuality,
   type IpQualityStatus,
   type ProxyTestResult,
+  type WarmupInfo,
+  type WarmupTarget,
 } from "../lib/api";
 import {
   applyDeviceProfile,
@@ -354,6 +356,9 @@ function createDefaultForm(hostOS?: HostOS | null): ProfileCreateData {
     browser_engine: "cloakbrowser",
     humanize: true,
     human_preset: "default",
+    warmup_enabled: false,
+    warmup_daily_max: 1,
+    warmup_targets: [],
     headless: false,
     geoip: true,
     clipboard_sync: true,
@@ -501,6 +506,33 @@ export function ProfileForm({
   const [cookieBusy, setCookieBusy] = useState<"pull" | "export" | null>(null);
   const [cookieNotice, setCookieNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [cookieExportFormat, setCookieExportFormat] = useState<CookieExportFormat>("json");
+  const [warmupInfo, setWarmupInfo] = useState<WarmupInfo | null>(null);
+  const [warmupCatalog, setWarmupCatalog] = useState<WarmupTarget[]>([]);
+  const [warmupRunning, setWarmupRunning] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.listWarmupTargets().then((targets) => {
+      if (!cancelled) setWarmupCatalog(targets);
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!profile) {
+      setWarmupInfo(null);
+      return;
+    }
+    let cancelled = false;
+    api.getProfileWarmup(profile.id).then((info) => {
+      if (!cancelled) setWarmupInfo(info);
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [profile?.id]);
 
   useEffect(() => {
     if (profile) {
@@ -524,6 +556,9 @@ export function ProfileForm({
         device_memory: profile.device_memory,
         humanize: profile.humanize,
         human_preset: profile.human_preset,
+        warmup_enabled: Boolean(profile.warmup_enabled),
+        warmup_daily_max: profile.warmup_daily_max ?? 1,
+        warmup_targets: profile.warmup_targets ?? [],
         headless: profile.headless,
         geoip: profile.geoip,
         clipboard_sync: profile.clipboard_sync,
@@ -1846,6 +1881,106 @@ export function ProfileForm({
                             </span>
                           </span>
                         </label>
+                      </div>
+                      <div className="pt-3">
+                        <label className="flex items-start gap-3 text-sm text-slate-800">
+                          <input
+                            type="checkbox"
+                            checked={form.warmup_enabled ?? false}
+                            onChange={(e) => set("warmup_enabled", e.target.checked)}
+                            className="mt-1 rounded border-slate-300"
+                          />
+                          <span className="min-w-0">
+                            <span className="font-medium">养号（定时自动浏览养护）</span>
+                            <span className="mt-1 block text-xs leading-5 text-slate-500">
+                              开启后，Manager 会按计划自动打开这个浏览器，像真人一样浏览与它地区相符的站点和下方勾选的目标平台，让第一方 Cookie 自然积累年龄。全程不登录、不下单、不发帖，只浏览与搜索；浏览器正在使用或授权并发已满时自动跳过。
+                            </span>
+                          </span>
+                        </label>
+                        {form.warmup_enabled && (
+                          <div className="mt-3 space-y-3 pl-7">
+                            <label className="flex items-center gap-2 text-sm text-slate-700">
+                              每天最多
+                              <select
+                                className="input w-24"
+                                value={form.warmup_daily_max ?? 1}
+                                onChange={(e) => set("warmup_daily_max", Number(e.target.value))}
+                              >
+                                {[1, 2, 3].map((n) => (
+                                  <option key={n} value={n}>{n} 次</option>
+                                ))}
+                              </select>
+                            </label>
+                            <div>
+                              <div className="text-sm font-medium text-slate-800">定向养护平台</div>
+                              <p className="mt-1 text-xs leading-5 text-slate-500">
+                                定向养护：在目标平台留下并积累第一方 Cookie 年龄（如 Facebook 的 datr、Amazon 的 session-id），让后续正式使用时不像全新设备。
+                              </p>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {warmupCatalog.map((target) => {
+                                  const active = (form.warmup_targets ?? []).includes(target.id);
+                                  return (
+                                    <button
+                                      key={target.id}
+                                      type="button"
+                                      onClick={() => {
+                                        const current = form.warmup_targets ?? [];
+                                        set("warmup_targets", active ? current.filter((t) => t !== target.id) : [...current, target.id]);
+                                      }}
+                                      className={active ? "rounded-full bg-accent px-3 py-1 text-xs font-medium text-white" : "rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-600"}
+                                    >
+                                      {target.name}
+                                    </button>
+                                  );
+                                })}
+                                {warmupCatalog.length === 0 && (
+                                  <span className="text-xs text-slate-400">平台目录加载中…</span>
+                                )}
+                              </div>
+                            </div>
+                            {profile && warmupInfo && (
+                              <div className="rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-600">
+                                <div>
+                                  创建于 {warmupInfo.age.created_at?.slice(0, 10) ?? "—"}
+                                  {warmupInfo.age.age_days != null && `（${warmupInfo.age.age_days} 天）`}
+                                  {" · "}已养号 {warmupInfo.age.warmup_sessions} 次
+                                  {" · "}最近活动 {warmupInfo.age.last_warmup_at ? warmupInfo.age.last_warmup_at.slice(0, 16).replace("T", " ") : "暂无"}
+                                </div>
+                                {warmupInfo.runs.length > 0 && (
+                                  <ul className="mt-2 space-y-1">
+                                    {warmupInfo.runs.slice(0, 5).map((run) => (
+                                      <li key={run.id}>
+                                        {run.started_at.slice(0, 16).replace("T", " ")}
+                                        {" · "}{run.status === "ok" ? "完成" : run.status === "skipped" ? "跳过" : "失败"}
+                                        {run.status === "ok" && ` · ${run.pages_visited} 页`}
+                                        {run.reason && ` · ${run.reason}`}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                )}
+                                <button
+                                  type="button"
+                                  disabled={warmupRunning || warmupInfo.warming}
+                                  onClick={async () => {
+                                    setWarmupRunning(true);
+                                    try {
+                                      await api.runProfileWarmupNow(profile.id);
+                                      const info = await api.getProfileWarmup(profile.id);
+                                      setWarmupInfo(info);
+                                    } catch {
+                                      // 下次打开表单时会看到最新状态
+                                    } finally {
+                                      setWarmupRunning(false);
+                                    }
+                                  }}
+                                  className="mt-2 rounded border border-slate-300 px-3 py-1 text-xs text-slate-700 disabled:opacity-50"
+                                >
+                                  {warmupInfo.warming ? "正在养号…" : "立即养一次"}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
 
