@@ -169,10 +169,12 @@ class _Mgr:
         self.launch_error = launch_error
         self.context_none = context_none
         self.launch_calls = 0
+        self.launch_kwargs: list[dict] = []
         self.stop_calls: list[str] = []
 
-    async def launch(self, profile, launch_mode="debug"):
+    async def launch(self, profile, launch_mode="debug", **kwargs):
         self.launch_calls += 1
+        self.launch_kwargs.append({"launch_mode": launch_mode, **kwargs})
         if self.launch_error:
             raise self.launch_error
         context = None if self.context_none else SimpleNamespace(new_page=AsyncMock(return_value=self.page))
@@ -201,6 +203,9 @@ async def test_runner_browses_plan_and_closes():
     profile = _profile(warmup_targets=["amazon"])
     result, records = await _run(profile, mgr)
     assert result["status"] == "ok" and records and records[0]["status"] == "ok"
+    # Warm-up is automation: it must always launch headless so no window
+    # ever appears on the user's desktop.
+    assert mgr.launch_kwargs == [{"launch_mode": "debug", "headless": True}]
     assert mgr.stop_calls == [profile["id"]]
     assert page.visited[0] == home
     assert all(
