@@ -66,7 +66,7 @@ def config_status(get_setting: GetSetting) -> dict[str, Any]:
     """What the settings UI may see: where/what, never the key itself."""
     return {
         "configured": read_config(get_setting) is not None,
-        "base_url": (get_setting(SETTING_BASE_URL) or "").strip() or None,
+        "base_url": (get_setting(SETTING_BASE_URL) or "").strip().rstrip("/") or None,
         "model": (get_setting(SETTING_MODEL) or "").strip() or None,
         "has_api_key": bool(decrypt_value(get_setting(SETTING_API_KEY))),
     }
