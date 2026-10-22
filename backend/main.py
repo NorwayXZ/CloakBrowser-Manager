@@ -46,6 +46,7 @@ from .cookie_formats import (
     to_cookie_editor_json,
     to_netscape,
 )
+from . import evolution
 from . import kernel
 from . import linkability
 from . import secrets_crypto
@@ -79,6 +80,9 @@ from .models import (
     CookiePullResponse,
     DeviceTemplateResponse,
     DisposableCreateRequest,
+    EvolutionLogResponse,
+    EvolutionProposalResponse,
+    EvolutionStatusResponse,
     KernelCheckResponse,
     KernelLicenseKeyRequest,
     KernelOverviewResponse,
@@ -411,12 +415,14 @@ async def lifespan(app: FastAPI):
     browser_mgr._auto_launch_task = asyncio.create_task(browser_mgr.auto_launch_all())
     auto_backup_task = asyncio.create_task(_auto_backup_loop())
     warmup_task = asyncio.create_task(_warmup_loop())
+    evolution_task = asyncio.create_task(_evolution_loop())
     logger.info("CloakBrowser Manager started")
     yield
     logger.info("Shutting down — stopping all browsers...")
     auto_backup_task.cancel()
     warmup_task.cancel()
-    await asyncio.gather(auto_backup_task, warmup_task, return_exceptions=True)
+    evolution_task.cancel()
+    await asyncio.gather(auto_backup_task, warmup_task, evolution_task, return_exceptions=True)
     if browser_mgr._auto_launch_task and not browser_mgr._auto_launch_task.done():
         browser_mgr._auto_launch_task.cancel()
         await asyncio.gather(browser_mgr._auto_launch_task, return_exceptions=True)
@@ -699,23 +705,11 @@ async def purge_profile(profile_id: str):
     return {"ok": True}
 
 
-@app.post("/api/profiles/{profile_id}/burn", response_model=BurnResponse)
-async def burn_profile(profile_id: str, req: BurnRequest):
-    """Physically destroy a disposable profile — no trash, no restore.
-
-    Unlike the normal delete (soft, recoverable for 7 days), burn removes
-    the database row and the whole user data directory at once. Only
-    profiles flagged disposable can be burned, and only with an explicit
-    {"confirm": true} in the request body.
-    """
-    if req.confirm is not True:
-        raise HTTPException(status_code=400, detail="焚毁不可恢复，请带上 confirm=true 明确确认")
-    profile = db.get_profile(profile_id)
-    if not profile:
-        raise HTTPException(status_code=404, detail="Profile not found")
-    if not profile.get("disposable"):
-        raise HTTPException(status_code=400, detail="只有一次性画像可以焚毁；普通画像请用删除（进回收站）")
-
+async def _burn_profile_now(profile: dict) -> dict:
+    """The physical destruction itself, shared by the burn endpoint and
+    the evolution loop (which burns its experiment clones). The caller
+    has already decided this profile may be burned."""
+    profile_id = profile["id"]
     was_running = profile_id in browser_mgr.running
     if was_running:
         await browser_mgr.stop(profile_id)
@@ -738,20 +732,38 @@ async def burn_profile(profile_id: str, req: BurnRequest):
             except OSError:
                 files_removed = 0
 
-    if not db.purge_profile(profile_id):
-        raise HTTPException(status_code=404, detail="Profile not found")
+    db.purge_profile(profile_id)
     if resolved is not None and resolved.exists():
         if resolved.is_relative_to(profiles_root):
             shutil.rmtree(resolved, ignore_errors=True)
         else:
             logger.error("Refusing to burn %s: outside profiles root", user_data_dir)
-    return BurnResponse(
-        ok=True,
-        profile_id=profile_id,
-        user_data_dir=str(user_data_dir),
-        files_removed=files_removed,
-        was_running=was_running,
-    )
+    return {
+        "user_data_dir": str(user_data_dir),
+        "files_removed": files_removed,
+        "was_running": was_running,
+    }
+
+
+@app.post("/api/profiles/{profile_id}/burn", response_model=BurnResponse)
+async def burn_profile(profile_id: str, req: BurnRequest):
+    """Physically destroy a disposable profile — no trash, no restore.
+
+    Unlike the normal delete (soft, recoverable for 7 days), burn removes
+    the database row and the whole user data directory at once. Only
+    profiles flagged disposable can be burned, and only with an explicit
+    {"confirm": true} in the request body.
+    """
+    if req.confirm is not True:
+        raise HTTPException(status_code=400, detail="焚毁不可恢复，请带上 confirm=true 明确确认")
+    profile = db.get_profile(profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    if not profile.get("disposable"):
+        raise HTTPException(status_code=400, detail="只有一次性画像可以焚毁；普通画像请用删除（进回收站）")
+
+    result = await _burn_profile_now(profile)
+    return BurnResponse(ok=True, profile_id=profile_id, **result)
 
 
 @app.get("/api/device-templates", response_model=list[DeviceTemplateResponse])
@@ -1026,7 +1038,19 @@ async def start_site_check(profile_id: str):
         raise HTTPException(status_code=409, detail="请先关闭这个浏览器；检测会用调试模式重新打开它，测完自动关闭。")
     if site_check_job.busy:
         raise HTTPException(status_code=409, detail="已经有一个检测在进行，请等它结束。")
-    site_check_job.start(profile, browser_mgr=browser_mgr, data_dir=db.DATA_DIR, environment=_site_check_environment)
+    if not evolution.AUTOMATION_LOCK.try_acquire("site_check"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"另一个自动化（{evolution.AUTOMATION_LOCK.owner}）正在运行，请等它结束。",
+        )
+    started = site_check_job.start(
+        profile, browser_mgr=browser_mgr, data_dir=db.DATA_DIR,
+        environment=_site_check_environment,
+        on_finish=lambda: evolution.AUTOMATION_LOCK.release("site_check"),
+    )
+    if not started:
+        evolution.AUTOMATION_LOCK.release("site_check")
+        raise HTTPException(status_code=409, detail="已经有一个检测在进行，请等它结束。")
     return site_check_job.snapshot()
 
 
@@ -1209,16 +1233,24 @@ def _record_warmup(rec: dict) -> None:
     )
 
 
-def _start_warmup_task(profile: dict, targets_done: set) -> None:
-    task = asyncio.create_task(
-        warmup.run_warmup(
-            profile,
-            browser_mgr=browser_mgr,
-            record_run=_record_warmup,
-            targets_done=targets_done,
-        )
-    )
+def _start_warmup_task(profile: dict, targets_done: set) -> bool:
+    if not evolution.AUTOMATION_LOCK.try_acquire("warmup"):
+        return False
+
+    async def _run() -> None:
+        try:
+            await warmup.run_warmup(
+                profile,
+                browser_mgr=browser_mgr,
+                record_run=_record_warmup,
+                targets_done=targets_done,
+            )
+        finally:
+            evolution.AUTOMATION_LOCK.release("warmup")
+
+    task = asyncio.create_task(_run())
     _warmup_current.update(task=task, profile_id=profile["id"])
+    return True
 
 
 def _warmup_busy() -> bool:
@@ -1248,8 +1280,8 @@ async def _warmup_tick() -> None:
         if not warmup.is_due(profile, runs_today=runs_today, last_run_at=last_run_at, now=now):
             continue
         todays = [r for r in recent if (r.get("started_at") or "") >= today]
-        _start_warmup_task(profile, warmup.targets_done_today(todays))
-        return  # one profile at a time
+        if _start_warmup_task(profile, warmup.targets_done_today(todays)):
+            return  # one profile at a time
 
 
 async def _warmup_loop() -> None:
@@ -1297,7 +1329,244 @@ async def run_profile_warmup_now(profile_id: str):
     today = warmup.start_of_today(now)
     recent = await asyncio.to_thread(db.list_warmup_runs, profile_id, 50)
     todays = [r for r in recent if (r.get("started_at") or "") >= today]
-    _start_warmup_task(profile, warmup.targets_done_today(todays))
+    if not _start_warmup_task(profile, warmup.targets_done_today(todays)):
+        raise HTTPException(
+            status_code=409,
+            detail=f"另一个自动化（{evolution.AUTOMATION_LOCK.owner}）正在运行，请等它结束。",
+        )
+    return {"ok": True, "started": True}
+
+
+# ── Self-adversarial evolution （自对抗进化闭环） ──────────────────────────────
+#
+# Detection failures are attributed to Manager-layer knobs, each candidate
+# is proven on a disposable clone, and only wins reach the real profile —
+# as proposals the user approves. Experiments never mutate real profiles.
+
+EVOLUTION_FIRST_CHECK_SECONDS = 300
+EVOLUTION_CHECK_SECONDS = 30 * 60
+_evolution_current: dict[str, Any] = {"task": None, "profile_id": None, "profile_name": None}
+
+
+def _evolution_busy() -> bool:
+    task = _evolution_current.get("task")
+    return task is not None and not task.done()
+
+
+def _automation_truth() -> str | None:
+    """Which browser automation is actually running (the lock's ground truth)."""
+    if site_check_job.busy:
+        return "site_check"
+    if _warmup_busy():
+        return "warmup"
+    if _evolution_busy():
+        return "evolution"
+    return None
+
+
+evolution.AUTOMATION_LOCK.truth = _automation_truth
+
+
+async def _evo_run_check(profile: dict) -> evolution.CheckOutcome:
+    profile_id = profile["id"]
+    if profile_id in browser_mgr.running or profile_id in browser_mgr._launching:
+        return evolution.CheckOutcome(None, "画像正在运行，请先关闭")
+    started = site_check_job.start(
+        profile, browser_mgr=browser_mgr, data_dir=db.DATA_DIR,
+        environment=_site_check_environment,
+    )
+    if not started:
+        return evolution.CheckOutcome(None, "已有检测在进行")
+    if site_check_job._task is not None:
+        await site_check_job._task
+    state = site_check_job.snapshot()
+    if state.get("phase") == "failed":
+        return evolution.CheckOutcome(None, state.get("error") or "检测失败")
+    report_id = state.get("report_id")
+    if not report_id:
+        return evolution.CheckOutcome(None, "检测没有生成报告")
+    report = await asyncio.to_thread(site_checks.load_report, db.DATA_DIR, report_id)
+    return evolution.CheckOutcome(report)
+
+
+_CLONE_COPY_FIELDS = (
+    "browser_engine", "device_profile", "fingerprint_seed", "proxy", "timezone", "locale",
+    "platform", "user_agent", "screen_width", "screen_height", "gpu_vendor", "gpu_renderer",
+    "hardware_concurrency", "device_memory", "humanize", "human_preset", "headless", "geoip",
+    "clipboard_sync", "color_scheme", "group_name", "account_platform", "cookies_json",
+    "launch_args", "fingerprint_options",
+)
+
+
+def _evo_make_clone(source: dict) -> dict:
+    """A disposable twin of the source profile — same seed, same persona —
+    so a clone experiment isolates the one knob being tested."""
+    fields = {key: source.get(key) for key in _CLONE_COPY_FIELDS}
+    fields["name"] = f"{source.get('name') or '画像'} · 进化实验"
+    fields["disposable"] = 1
+    fields["startup_urls"] = []
+    fields["notes"] = "自对抗进化实验克隆：实验结束自动焚毁，不要手动使用。"
+    return db.create_profile(**fields)
+
+
+def _evo_apply_change(profile: dict, candidate: evolution.Candidate) -> dict:
+    kwargs = evolution.update_kwargs(profile, candidate.knob, candidate.to_value)
+    return db.update_profile(profile["id"], **kwargs) or profile
+
+
+async def _evo_burn(profile: dict) -> None:
+    await _burn_profile_now(profile)
+
+
+def _evo_record_log(entry: dict) -> str:
+    row = db.record_evolution_log(
+        profile_id=entry.get("profile_id"),
+        profile_name=entry.get("profile_name"),
+        started_at=entry["started_at"],
+        finished_at=entry.get("finished_at"),
+        trigger=entry.get("trigger") or "manual",
+        outcome=entry.get("outcome") or "running",
+        summary=entry.get("summary"),
+        detail=entry.get("detail"),
+    )
+    return row["id"]
+
+
+def _evo_update_log(log_id: str, fields: dict) -> None:
+    db.update_evolution_log(log_id, **fields)
+
+
+def _evo_file_proposal(payload: dict) -> str:
+    row = db.create_evolution_proposal(
+        payload["profile_id"],
+        profile_name=payload.get("profile_name"),
+        knob=payload["knob"],
+        label=payload.get("label"),
+        from_value=payload.get("from_value"),
+        to_value=payload.get("to_value"),
+        targets=payload.get("targets") or [],
+        evidence=payload.get("evidence"),
+    )
+    return row["id"]
+
+
+def _evolution_engine() -> evolution.EvolutionEngine:
+    return evolution.EvolutionEngine(evolution.EngineDeps(
+        run_check=_evo_run_check,
+        make_clone=_evo_make_clone,
+        apply_change=_evo_apply_change,
+        burn=_evo_burn,
+        record_log=_evo_record_log,
+        update_log=_evo_update_log,
+        file_proposal=_evo_file_proposal,
+    ))
+
+
+def _start_evolution_task(profile: dict, trigger: str) -> bool:
+    if _evolution_busy():
+        return False
+    task = asyncio.create_task(_evolution_engine().run_cycle(profile, trigger=trigger))
+    _evolution_current.update(
+        task=task, profile_id=profile["id"], profile_name=profile.get("name"),
+    )
+    return True
+
+
+async def _evolution_tick() -> None:
+    if _evolution_busy() or evolution.AUTOMATION_LOCK.owner is not None:
+        return
+    now = datetime.now().astimezone()
+    for profile in await asyncio.to_thread(db.list_profiles):
+        if not profile.get("evolution_enabled"):
+            continue
+        if profile["id"] in browser_mgr.running:
+            continue
+        last = await asyncio.to_thread(db.last_evolution_cycle_at, profile["id"])
+        if not evolution.is_due(profile, last_cycle_at=last, now=now):
+            continue
+        _start_evolution_task(profile, "scheduled")
+        return  # one profile at a time
+
+
+async def _evolution_loop() -> None:
+    await asyncio.sleep(EVOLUTION_FIRST_CHECK_SECONDS)
+    while True:
+        try:
+            await _evolution_tick()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Evolution scheduler tick failed")
+        await asyncio.sleep(EVOLUTION_CHECK_SECONDS)
+
+
+@app.get("/api/evolution/status", response_model=EvolutionStatusResponse)
+async def get_evolution_status():
+    busy = _evolution_busy()
+    pending = await asyncio.to_thread(db.list_evolution_proposals, status="pending", limit=500)
+    return EvolutionStatusResponse(
+        busy=busy,
+        profile_id=_evolution_current.get("profile_id") if busy else None,
+        profile_name=_evolution_current.get("profile_name") if busy else None,
+        lock_owner=evolution.AUTOMATION_LOCK.owner,
+        pending_proposals=len(pending),
+    )
+
+
+@app.get("/api/evolution/proposals", response_model=list[EvolutionProposalResponse])
+async def list_evolution_proposals(status: str | None = None, profile_id: str | None = None):
+    return await asyncio.to_thread(
+        db.list_evolution_proposals, status=status, profile_id=profile_id
+    )
+
+
+@app.post("/api/evolution/proposals/{proposal_id}/approve", response_model=EvolutionProposalResponse)
+async def approve_evolution_proposal(proposal_id: str):
+    proposal = db.get_evolution_proposal(proposal_id)
+    if not proposal:
+        raise HTTPException(status_code=404, detail="提案不存在")
+    if proposal["status"] != "pending":
+        raise HTTPException(status_code=409, detail="这条提案已经处理过了")
+    profile = db.get_profile(proposal["profile_id"])
+    if not profile or profile.get("deleted_at"):
+        raise HTTPException(status_code=404, detail="提案对应的画像已不存在")
+    try:
+        kwargs = evolution.update_kwargs(profile, proposal["knob"], proposal["to_value"])
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    # The normal profile-update path — the same one the panel's save uses.
+    db.update_profile(profile["id"], **kwargs)
+    decided = db.decide_evolution_proposal(proposal_id, "applied")
+    if not decided:
+        raise HTTPException(status_code=409, detail="这条提案已经处理过了")
+    return decided
+
+
+@app.post("/api/evolution/proposals/{proposal_id}/dismiss", response_model=EvolutionProposalResponse)
+async def dismiss_evolution_proposal(proposal_id: str):
+    proposal = db.get_evolution_proposal(proposal_id)
+    if not proposal:
+        raise HTTPException(status_code=404, detail="提案不存在")
+    decided = db.decide_evolution_proposal(proposal_id, "dismissed")
+    if not decided:
+        raise HTTPException(status_code=409, detail="这条提案已经处理过了")
+    return decided
+
+
+@app.get("/api/evolution/logs", response_model=list[EvolutionLogResponse])
+async def list_evolution_logs(profile_id: str | None = None, limit: int = 50):
+    return await asyncio.to_thread(db.list_evolution_logs, profile_id=profile_id, limit=limit)
+
+
+@app.post("/api/profiles/{profile_id}/evolution/run")
+async def run_profile_evolution_now(profile_id: str):
+    profile = db.get_profile(profile_id)
+    if not profile or profile.get("deleted_at"):
+        raise HTTPException(status_code=404, detail="Profile not found")
+    if _evolution_busy():
+        raise HTTPException(status_code=409, detail="已经有一个进化周期在运行，请等它结束。")
+    if not _start_evolution_task(profile, "manual"):
+        raise HTTPException(status_code=409, detail="已经有一个进化周期在运行，请等它结束。")
     return {"ok": True, "started": True}
 
 
