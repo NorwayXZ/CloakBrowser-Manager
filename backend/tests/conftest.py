@@ -30,6 +30,11 @@ _mock_cloakbrowser.launch_persistent_context_async = AsyncMock()  # type: ignore
 
 _mock_config = types.ModuleType("cloakbrowser.config")
 _mock_config.CHROMIUM_VERSION = "0.0.0-test"  # type: ignore[attr-defined]
+# browser_manager's darwin launch path does
+# `from cloakbrowser.config import binary_supports_maximized_window`; the mock
+# must expose it or the macOS CI run ImportErrors (other platforms skip that
+# branch via sys.platform). Conservative default: no maximized-window support.
+_mock_config.binary_supports_maximized_window = lambda: False  # type: ignore[attr-defined]
 
 sys.modules.setdefault("cloakbrowser", _mock_cloakbrowser)
 sys.modules.setdefault("cloakbrowser.config", _mock_config)
