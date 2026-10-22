@@ -280,6 +280,23 @@ def test_environment_never_contains_proxy_credentials_or_cookies():
     assert env["fingerprint"]["fingerprint_options"] == {"brand": "Edge"}
 
 
+def test_environment_records_whether_the_check_ran_headless():
+    profile = {"name": "p", "platform": "windows"}
+    base = dict(app_version="0.6.0", kernel_version="155", host_os="windows")
+
+    def running(**extra):
+        return SimpleNamespace(
+            proxy_geo={}, effective_timezone=None, effective_locale=None, **extra
+        )
+
+    # Checks always launch headless; the report must say so, so verdicts
+    # are never read as coming from a headed session.
+    assert describe_environment(profile, running(headless=True), **base)["headless"] is True
+    assert describe_environment(profile, running(headless=False), **base)["headless"] is False
+    # Older RunningProfile-shaped objects without the field read as headed.
+    assert describe_environment(profile, running(), **base)["headless"] is False
+
+
 PROBE_MAIN = {
     "navigator": {
         "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/154.0.0.0",
@@ -312,7 +329,7 @@ async def test_job_launches_in_debug_checks_and_closes(tmp_path: Path, monkeypat
     assert job.busy
     await job._task
 
-    mgr.launch.assert_awaited_once_with({"id": "p1", "name": "P"}, launch_mode="debug")
+    mgr.launch.assert_awaited_once_with({"id": "p1", "name": "P"}, launch_mode="debug", headless=True)
     mgr.stop.assert_awaited_once_with("p1", reason="指纹检测完成")
     state = job.snapshot()
     assert state["phase"] == "done" and state["overall"] == "pass"
