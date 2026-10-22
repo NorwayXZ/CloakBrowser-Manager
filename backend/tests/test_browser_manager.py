@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import subprocess
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
@@ -1800,3 +1802,135 @@ async def test_windows_playwright_debug_launch_keeps_default_viewport(monkeypatc
         "launch_persistent_context_async",
     )
     assert "viewport" not in options
+
+
+# ── Headless override for automation launches ────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_debug_launch_headless_override_keeps_stored_setting(monkeypatch, tmp_path: Path):
+    from backend import browser_manager as module
+
+    context = MagicMock(pages=[])
+    context.add_init_script = AsyncMock()
+    manager = BrowserManager(NATIVE_RUNTIME)
+    manager._wait_for_cdp = AsyncMock()
+    package_launch = AsyncMock(return_value=context)
+    monkeypatch.setattr(module, "launch_persistent_context_async", package_launch)
+
+    profile = _launch_profile(tmp_path)  # no stored headless preference
+    running = await manager.launch(profile, launch_mode="debug", headless=True)
+
+    assert package_launch.await_args.kwargs["headless"] is True
+    assert running.headless is True
+    # The override applies to this launch only; the profile dict (and thus
+    # the stored setting) is never rewritten.
+    assert not profile.get("headless")
+
+
+@pytest.mark.asyncio
+async def test_debug_launch_without_override_uses_stored_preference(monkeypatch, tmp_path: Path):
+    from backend import browser_manager as module
+
+    context = MagicMock(pages=[])
+    context.add_init_script = AsyncMock()
+    manager = BrowserManager(NATIVE_RUNTIME)
+    manager._wait_for_cdp = AsyncMock()
+    package_launch = AsyncMock(return_value=context)
+    monkeypatch.setattr(module, "launch_persistent_context_async", package_launch)
+
+    running = await manager.launch(_launch_profile(tmp_path), launch_mode="debug")
+
+    assert package_launch.await_args.kwargs["headless"] is False
+    assert running.headless is False
+
+
+@pytest.mark.asyncio
+async def test_macos_cloak_debug_headless_stays_on_process_launcher(monkeypatch, tmp_path: Path):
+    from backend import browser_manager as module
+
+    context = MagicMock(pages=[])
+    context.add_init_script = AsyncMock()
+    manager = BrowserManager(RuntimeConfig("macos", "native", "native-window", tmp_path))
+    manager._wait_for_cdp = AsyncMock()
+    launch = AsyncMock(return_value=context)
+    package_launch = AsyncMock()
+    monkeypatch.setattr(module, "_launch_cloakbrowser_persistent_context_async", launch)
+    monkeypatch.setattr(module, "launch_persistent_context_async", package_launch)
+
+    running = await manager.launch({
+        **_launch_profile(tmp_path),
+        "locale": "en-US",
+    }, launch_mode="debug", headless=True)
+
+    # Even headless, macOS debug launches keep the direct-process path
+    # (Cocoa locale handling); the launcher itself adds --headless=new.
+    launch.assert_awaited_once()
+    assert launch.await_args.kwargs["headless"] is True
+    package_launch.assert_not_awaited()
+    assert running.headless is True
+
+
+def _fake_cloak_package(monkeypatch, calls: dict, binary: Path) -> None:
+    def fake_build_args(humanize, extra_args, **kwargs):
+        calls["build_kwargs"] = kwargs
+        return ["--fingerprint=1", *extra_args]
+
+    monkeypatch.setitem(sys.modules, "cloakbrowser", SimpleNamespace(build_args=fake_build_args))
+    monkeypatch.setitem(
+        sys.modules, "cloakbrowser.download",
+        SimpleNamespace(ensure_binary=lambda: str(binary)),
+    )
+    monkeypatch.setitem(
+        sys.modules, "cloakbrowser.license",
+        SimpleNamespace(
+            build_launch_env=lambda user_env=None, status_file=None: {},
+            mint_denial_file=lambda: None,
+            resolve_license_key=lambda: None,
+        ),
+    )
+
+
+def _run_manual_process(monkeypatch, tmp_path: Path, *, headless: bool):
+    from backend import browser_manager as module
+
+    binary = tmp_path / "chrome"
+    binary.write_bytes(b"fake")
+    calls: dict = {}
+    _fake_cloak_package(monkeypatch, calls, binary)
+
+    def fake_popen(cmd, **_kwargs):
+        calls["cmd"] = cmd
+        return SimpleNamespace(pid=4321)
+
+    monkeypatch.setattr(module.subprocess, "Popen", fake_popen)
+    window_sync = MagicMock()
+    monkeypatch.setattr(module, "_sync_macos_window_after_launch", window_sync)
+
+    process = _launch_cloakbrowser_manual_process(
+        user_data_dir=tmp_path / "data",
+        proxy=None,
+        args=[],
+        timezone=None,
+        locale=None,
+        headless=headless,
+        viewport={"width": 1440, "height": 900},
+    )
+    return process, calls, window_sync
+
+
+def test_manual_process_headless_adds_switch_and_skips_window_sync(monkeypatch, tmp_path: Path):
+    process, calls, window_sync = _run_manual_process(monkeypatch, tmp_path, headless=True)
+
+    assert process.pid == 4321
+    assert "--headless=new" in calls["cmd"]
+    assert calls["build_kwargs"]["headless"] is True
+    window_sync.assert_not_called()
+
+
+def test_manual_process_headed_has_no_headless_switch(monkeypatch, tmp_path: Path):
+    _process, calls, window_sync = _run_manual_process(monkeypatch, tmp_path, headless=False)
+
+    assert not any(arg.startswith("--headless") for arg in calls["cmd"])
+    assert calls["build_kwargs"]["headless"] is False
+    window_sync.assert_called_once()
