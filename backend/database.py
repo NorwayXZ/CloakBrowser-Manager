@@ -26,6 +26,7 @@ CONFIGURATION_PROFILE_FIELDS = (
     "color_scheme", "group_name", "account_platform", "cookies_json", "startup_urls", "launch_args",
     "fingerprint_options", "notes", "tags", "disposable",
     "warmup_enabled", "warmup_daily_max", "warmup_targets",
+    "evolution_enabled", "evolution_interval_hours",
 )
 
 
@@ -125,6 +126,33 @@ def init_db():
                 reason TEXT,
                 detail_json TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS evolution_proposals (
+                id TEXT PRIMARY KEY,
+                profile_id TEXT NOT NULL,
+                profile_name TEXT,
+                knob TEXT NOT NULL,
+                label TEXT,
+                from_value TEXT,
+                to_value TEXT,
+                targets_json TEXT,
+                evidence_json TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TEXT NOT NULL,
+                decided_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS evolution_logs (
+                id TEXT PRIMARY KEY,
+                profile_id TEXT,
+                profile_name TEXT,
+                started_at TEXT NOT NULL,
+                finished_at TEXT,
+                trigger TEXT,
+                outcome TEXT,
+                summary TEXT,
+                detail_json TEXT
+            );
         """)
         conn.commit()
 
@@ -189,6 +217,12 @@ def init_db():
             conn.commit()
         if "warmup_targets" not in cols:
             conn.execute("ALTER TABLE profiles ADD COLUMN warmup_targets TEXT DEFAULT '[]'")
+            conn.commit()
+        if "evolution_enabled" not in cols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN evolution_enabled INTEGER DEFAULT 0")
+            conn.commit()
+        if "evolution_interval_hours" not in cols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN evolution_interval_hours INTEGER DEFAULT 24")
             conn.commit()
 
         # Older releases stored Retina panel pixels instead of the logical CSS
@@ -385,8 +419,9 @@ def create_profile(
                 clipboard_sync, auto_launch, color_scheme, group_name, account_platform,
                 cookies_json, startup_urls, launch_args, fingerprint_options_json, notes, disposable,
                 warmup_enabled, warmup_daily_max, warmup_targets,
+                evolution_enabled, evolution_interval_hours,
                 user_data_dir, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 profile_id, name,
                 fields.get("browser_engine", "auto"),
@@ -421,6 +456,8 @@ def create_profile(
                 1 if fields.get("warmup_enabled") else 0,
                 int(fields.get("warmup_daily_max") or 1),
                 json.dumps(fields.get("warmup_targets") or []),
+                1 if fields.get("evolution_enabled") else 0,
+                int(fields.get("evolution_interval_hours") or 24),
                 user_data_dir, now, now,
             ),
         )
@@ -508,6 +545,8 @@ def update_profile(profile_id: str, **fields: Any) -> dict[str, Any] | None:
         fields["warmup_targets"] = json.dumps(fields["warmup_targets"] or [])
     if "warmup_enabled" in fields:
         fields["warmup_enabled"] = 1 if fields["warmup_enabled"] else 0
+    if "evolution_enabled" in fields:
+        fields["evolution_enabled"] = 1 if fields["evolution_enabled"] else 0
     if "fingerprint_options" in fields:
         fields["fingerprint_options_json"] = _dump_json_dict(fields.pop("fingerprint_options"))
     if fields.get("fingerprint_seed") is None:
@@ -524,6 +563,7 @@ def update_profile(profile_id: str, **fields: Any) -> dict[str, Any] | None:
         "clipboard_sync", "auto_launch", "color_scheme", "group_name", "account_platform", "cookies_json",
         "startup_urls", "launch_args", "fingerprint_options_json", "notes", "disposable",
         "warmup_enabled", "warmup_daily_max", "warmup_targets",
+        "evolution_enabled", "evolution_interval_hours",
     ):
         if col in fields:
             value = fields[col]
@@ -766,3 +806,196 @@ def warmup_stats(profile_id: str) -> dict[str, Any]:
             (profile_id,),
         ).fetchone()[0]
     return {"total_runs": int(total), "ok_runs": int(ok), "last_run_at": last}
+
+
+# ── Self-adversarial evolution: proposals + cycle log ────────────────────────
+
+
+def _dump_json_value(value: Any) -> str | None:
+    return json.dumps(value, ensure_ascii=False) if value is not None else None
+
+
+def _load_json_value(raw: str | None) -> Any:
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return None
+
+
+def _hydrate_proposal(row: sqlite3.Row) -> dict[str, Any]:
+    proposal = dict(row)
+    proposal["from_value"] = _load_json_value(proposal.pop("from_value", None))
+    proposal["to_value"] = _load_json_value(proposal.pop("to_value", None))
+    proposal["targets"] = _load_json_value(proposal.pop("targets_json", None)) or []
+    proposal["evidence"] = _load_json_value(proposal.pop("evidence_json", None)) or {}
+    return proposal
+
+
+def create_evolution_proposal(
+    profile_id: str,
+    *,
+    profile_name: str | None,
+    knob: str,
+    label: str | None,
+    from_value: Any,
+    to_value: Any,
+    targets: list[str],
+    evidence: dict[str, Any] | None,
+) -> dict[str, Any]:
+    proposal_id = str(uuid.uuid4())
+    now = _now()
+    with get_db() as conn:
+        conn.execute(
+            """INSERT INTO evolution_proposals (
+                id, profile_id, profile_name, knob, label, from_value, to_value,
+                targets_json, evidence_json, status, created_at, decided_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, NULL)""",
+            (
+                proposal_id, profile_id, profile_name, knob, label,
+                _dump_json_value(from_value), _dump_json_value(to_value),
+                json.dumps(targets, ensure_ascii=False),
+                json.dumps(evidence or {}, ensure_ascii=False),
+                now,
+            ),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM evolution_proposals WHERE id = ?", (proposal_id,)
+        ).fetchone()
+    return _hydrate_proposal(row)
+
+
+def get_evolution_proposal(proposal_id: str) -> dict[str, Any] | None:
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM evolution_proposals WHERE id = ?", (proposal_id,)
+        ).fetchone()
+    return _hydrate_proposal(row) if row else None
+
+
+def list_evolution_proposals(
+    *,
+    status: str | None = None,
+    profile_id: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    query = "SELECT * FROM evolution_proposals WHERE 1 = 1"
+    params: list[Any] = []
+    if status:
+        query += " AND status = ?"
+        params.append(status)
+    if profile_id:
+        query += " AND profile_id = ?"
+        params.append(profile_id)
+    query += " ORDER BY created_at DESC LIMIT ?"
+    params.append(int(limit))
+    with get_db() as conn:
+        rows = conn.execute(query, params).fetchall()
+    return [_hydrate_proposal(row) for row in rows]
+
+
+def decide_evolution_proposal(proposal_id: str, status: str) -> dict[str, Any] | None:
+    """Mark a pending proposal applied/dismissed; None if it was not pending."""
+    with get_db() as conn:
+        cursor = conn.execute(
+            "UPDATE evolution_proposals SET status = ?, decided_at = ? WHERE id = ? AND status = 'pending'",
+            (status, _now(), proposal_id),
+        )
+        conn.commit()
+        if cursor.rowcount == 0:
+            return None
+    return get_evolution_proposal(proposal_id)
+
+
+def _hydrate_evolution_log(row: sqlite3.Row) -> dict[str, Any]:
+    entry = dict(row)
+    entry["detail"] = _load_json_value(entry.pop("detail_json", None)) or {}
+    return entry
+
+
+def record_evolution_log(
+    *,
+    profile_id: str | None,
+    profile_name: str | None,
+    started_at: str,
+    finished_at: str | None,
+    trigger: str,
+    outcome: str,
+    summary: str | None,
+    detail: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    log_id = str(uuid.uuid4())
+    with get_db() as conn:
+        conn.execute(
+            """INSERT INTO evolution_logs (
+                id, profile_id, profile_name, started_at, finished_at,
+                trigger, outcome, summary, detail_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                log_id, profile_id, profile_name, started_at, finished_at,
+                trigger, outcome, summary,
+                json.dumps(detail or {}, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM evolution_logs WHERE id = ?", (log_id,)).fetchone()
+    return _hydrate_evolution_log(row)
+
+
+def update_evolution_log(log_id: str, **fields: Any) -> dict[str, Any] | None:
+    allowed = {"finished_at", "outcome", "summary", "detail"}
+    updates = {key: value for key, value in fields.items() if key in allowed}
+    if not updates:
+        return get_evolution_log(log_id)
+    cols, vals = [], []
+    for key, value in updates.items():
+        if key == "detail":
+            cols.append("detail_json = ?")
+            vals.append(json.dumps(value or {}, ensure_ascii=False))
+        else:
+            cols.append(f"{key} = ?")
+            vals.append(value)
+    vals.append(log_id)
+    with get_db() as conn:
+        conn.execute(f"UPDATE evolution_logs SET {', '.join(cols)} WHERE id = ?", vals)
+        conn.commit()
+    return get_evolution_log(log_id)
+
+
+def get_evolution_log(log_id: str) -> dict[str, Any] | None:
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM evolution_logs WHERE id = ?", (log_id,)).fetchone()
+    return _hydrate_evolution_log(row) if row else None
+
+
+def list_evolution_logs(
+    *,
+    profile_id: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    query = "SELECT * FROM evolution_logs"
+    params: list[Any] = []
+    if profile_id:
+        query += " WHERE profile_id = ?"
+        params.append(profile_id)
+    query += " ORDER BY started_at DESC LIMIT ?"
+    params.append(int(limit))
+    with get_db() as conn:
+        rows = conn.execute(query, params).fetchall()
+    return [_hydrate_evolution_log(row) for row in rows]
+
+
+def last_evolution_cycle_at(profile_id: str) -> str | None:
+    """Start time of the newest non-deferred cycle (the cadence clock).
+
+    Deferred cycles (seat busy / another automation running) never ran, so
+    they must not push the next scheduled attempt a full interval out.
+    """
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT MAX(started_at) FROM evolution_logs WHERE profile_id = ? AND outcome != 'deferred'",
+            (profile_id,),
+        ).fetchone()
+    return row[0] if row else None
