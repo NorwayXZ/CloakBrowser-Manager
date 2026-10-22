@@ -34,6 +34,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { api, type BrowserUpdateResult, type LaunchMode, type ManagerUpdateResult, type Profile, type ProfileGroup, type ProxyPreset } from "../lib/api";
 import { AppUpdateStatus } from "./AppUpdateStatus";
+import { AutomationIndicator } from "./AutomationIndicator";
 import { BackupPanel } from "./BackupPanel";
 import { GroupsPanel } from "./GroupsPanel";
 import { KernelPanel } from "./KernelPanel";
@@ -535,6 +536,7 @@ export function EnvironmentManager({
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <AutomationIndicator />
             <button
               className="btn-secondary flex items-center gap-1.5 px-3 disabled:opacity-60"
               title="从 GitHub 拉取最新代码并重建本地面板"
