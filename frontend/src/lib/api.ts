@@ -57,6 +57,7 @@ export interface Profile {
   geoip: boolean;
   clipboard_sync: boolean;
   auto_launch: boolean;
+  disposable: boolean;
   group_name: string | null;
   account_platform: string | null;
   cookies_json: string | null;
@@ -252,6 +253,21 @@ export interface LinkabilityResult {
   profile_count: number;
   unclustered_count: number;
   clusters: LinkabilityCluster[];
+}
+
+export interface DisposableCreateData {
+  name?: string | null;
+  region?: string | null;
+  timezone?: string | null;
+  locale?: string | null;
+}
+
+export interface BurnResult {
+  ok: boolean;
+  profile_id: string;
+  user_data_dir: string;
+  files_removed: number;
+  was_running: boolean;
 }
 
 export interface CookieMergeResult {
@@ -823,6 +839,18 @@ export const api = {
     request<FingerprintReport>(`/api/profiles/${id}/fingerprint-report`),
 
   getLinkability: () => request<LinkabilityResult>("/api/linkability"),
+
+  createDisposable: (data: DisposableCreateData = {}) =>
+    request<Profile>("/api/profiles/disposable", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  burnProfile: (id: string) =>
+    request<BurnResult>(`/api/profiles/${id}/burn`, {
+      method: "POST",
+      body: JSON.stringify({ confirm: true }),
+    }),
 
   testProxy: (proxy: string | null) =>
     request<ProxyTestResult>("/api/proxy/test", {
