@@ -41,6 +41,9 @@ def describe_environment(
         "host_os": host_os,
         "host_os_version": platform.platform(),
         "launch_mode": "debug",
+        # Checks always run headless (see SiteCheckJob._run); recorded so a
+        # report's verdicts are never mistaken for a headed session's.
+        "headless": bool(getattr(running, "headless", False)),
         "fingerprint": {key: profile.get(key) for key in FINGERPRINT_FIELDS},
         "effective_timezone": getattr(running, "effective_timezone", None),
         "effective_locale": getattr(running, "effective_locale", None),
@@ -89,7 +92,10 @@ class SiteCheckJob:
         profile_id = profile["id"]
         launched = False
         try:
-            running = await browser_mgr.launch(profile, launch_mode="debug")
+            # Automation always runs headless, whatever the profile's own
+            # preference: a check must never pop a window onto the desktop
+            # of someone who is working (the stored setting is untouched).
+            running = await browser_mgr.launch(profile, launch_mode="debug", headless=True)
             launched = True
             if running.context is None:
                 raise RuntimeError("调试模式没有拿到浏览器上下文")
