@@ -596,6 +596,12 @@ class KernelSettingsModel(BaseModel):
     pinned_version: str | None = None
 
 
+class LlmSettingsModel(BaseModel):
+    base_url: str = ""
+    model: str = ""
+    api_key: str | None = None  # write-only: omitted/empty keeps the stored key
+
+
 class InstalledKernelResponse(BaseModel):
     name: str
     version: str

@@ -170,3 +170,30 @@ def drop_done_targets(
         step for step in steps
         if not (step.get("kind") == "target" and step.get("platform") in targets_done)
     ]
+
+
+def select_plan(
+    batch: list[dict[str, Any]],
+    *,
+    on_date: date,
+    targets_done: set[str] | frozenset[str] = frozenset(),
+) -> tuple[list[dict[str, Any]], str] | None:
+    """Pick today's plan from an approved batch: (steps, script_id).
+
+    Returns None when there is nothing usable — an empty batch, a picked
+    script with no stored steps, or every target already done today with
+    no generic steps left — so the caller falls back to the template
+    builder. This is the only bridge between stored scripts and the
+    runner; it never raises on malformed rows.
+    """
+    picked = pick_script_for_date(batch, on_date)
+    if not picked:
+        return None
+    steps = picked.get("steps")
+    if not isinstance(steps, list) or not steps:
+        return None
+    steps = drop_done_targets([dict(s) for s in steps if isinstance(s, dict)], targets_done)
+    if not steps:
+        return None
+    script_id = picked.get("id")
+    return steps, script_id if isinstance(script_id, str) else ""

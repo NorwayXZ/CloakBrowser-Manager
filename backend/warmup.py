@@ -363,12 +363,21 @@ async def run_warmup(
     seed: Any = None,
     time_scale: float = 1.0,
     sleep: SleepFn = asyncio.sleep,
+    plan_override: list[dict[str, Any]] | None = None,
+    script_id: str | None = None,
 ) -> dict[str, Any]:
     """Run one warm-up session and record it. Returns the record dict.
 
     ``time_scale`` shrinks every dwell (tests use ~0); production uses 1,
     giving a randomized 3–8 minute session. The browser is closed in all
     outcomes once launched.
+
+    ``plan_override`` supplies an externally built plan — an approved AI
+    script compiled by :mod:`warmup_script` — in the exact step shape
+    :func:`build_session_plan` returns. Execution semantics are identical
+    either way (navigate, dwell, scroll; nothing else exists); the only
+    addition is that a step may carry a ``dwell_scale`` share of the
+    per-step budget, which template steps never set (default 1.0).
     """
     profile_id = profile["id"]
     started = datetime.now().astimezone()
@@ -380,7 +389,7 @@ async def run_warmup(
         "pages_visited": 0,
         "status": "failed",
         "reason": None,
-        "detail": {"targets": [], "urls": []},
+        "detail": {"targets": [], "urls": [], "script_id": script_id},
     }
 
     def finish() -> dict[str, Any]:
@@ -407,7 +416,9 @@ async def run_warmup(
             record.update(status="failed", reason="调试模式没有拿到浏览器上下文")
             return finish()
 
-        plan = build_session_plan(profile, rng, targets_done_today=set(targets_done))
+        plan = plan_override if plan_override else build_session_plan(
+            profile, rng, targets_done_today=set(targets_done)
+        )
         record["detail"]["targets"] = [s["platform"] for s in plan if s.get("kind") == "target"]
         budget = rng.uniform(180.0, 480.0) * time_scale
         per_step = budget / max(1, len(plan))
@@ -419,19 +430,21 @@ async def run_warmup(
             sleep=sleep,
         )
         for step in plan:
+            scale = step.get("dwell_scale")
+            scale = float(scale) if isinstance(scale, (int, float)) and scale > 0 else 1.0
             try:
                 await page.goto(step["url"], timeout=45_000, wait_until="domcontentloaded")
                 record["pages_visited"] += 1
                 record["detail"]["urls"].append(step["url"])
             except Exception:
                 continue  # a dead landing page must not kill the session
-            await session.read_page(per_step * rng.uniform(0.5, 0.8))
+            await session.read_page(per_step * scale * rng.uniform(0.5, 0.8))
             if step.get("search_url"):
                 try:
                     await page.goto(step["search_url"], timeout=45_000, wait_until="domcontentloaded")
                     record["pages_visited"] += 1
                     record["detail"]["urls"].append(step["search_url"])
-                    await session.read_page(per_step * rng.uniform(0.4, 0.7))
+                    await session.read_page(per_step * scale * rng.uniform(0.4, 0.7))
                 except Exception:
                     pass
             if step.get("follow_link"):
@@ -447,7 +460,7 @@ async def run_warmup(
                         await page.goto(link, timeout=45_000, wait_until="domcontentloaded")
                         record["pages_visited"] += 1
                         record["detail"]["urls"].append(link)
-                        await session.read_page(per_step * rng.uniform(0.3, 0.6))
+                        await session.read_page(per_step * scale * rng.uniform(0.3, 0.6))
                 except Exception:
                     pass
         record.update(status="ok")

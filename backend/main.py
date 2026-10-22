@@ -19,6 +19,7 @@ import secrets
 import subprocess
 import shutil
 import time
+import uuid
 from datetime import datetime
 from contextlib import asynccontextmanager
 from http.cookies import SimpleCookie
@@ -54,7 +55,7 @@ from . import secrets_crypto
 from .browser_manager import BrowserLaunchError, BrowserManager, CookiePullError, _normalize_proxy, _validate_proxy
 from .cloak_runtime import get_effective_chromium_version
 from . import desktop_app, self_update, site_checks
-from . import behavior_traces, warmup
+from . import behavior_traces, llm_client, warmup, warmup_script
 from .behavior_traces import BehaviorRecorder
 from .site_check_job import SiteCheckJob, describe_environment
 from .desktop_app import app_version as desktop_app_version
@@ -91,6 +92,7 @@ from .models import (
     KernelLicenseKeyRequest,
     KernelOverviewResponse,
     KernelSettingsModel,
+    LlmSettingsModel,
     ClipboardRequest,
     GroupCreate,
     GroupResponse,
@@ -1319,9 +1321,32 @@ def _record_warmup(rec: dict) -> None:
     )
 
 
+def _approved_script_plan(
+    profile: dict, targets_done: set
+) -> tuple[list[dict], str] | None:
+    """Today's plan from the profile's approved AI script batch, if any.
+
+    Any failure — no batch, malformed rows, storage hiccup — returns None
+    and the run falls back to the template pool, exactly as before AI
+    scripts existed. AI plans are an enhancement, never a dependency.
+    """
+    try:
+        batch = db.get_approved_warmup_batch(profile["id"])
+        return warmup_script.select_plan(
+            batch,
+            on_date=datetime.now().astimezone().date(),
+            targets_done=targets_done,
+        )
+    except Exception:
+        logger.exception("Approved script lookup failed for %s", profile.get("id"))
+        return None
+
+
 def _start_warmup_task(profile: dict, targets_done: set) -> bool:
     if not evolution.AUTOMATION_LOCK.try_acquire("warmup"):
         return False
+    selected = _approved_script_plan(profile, targets_done)
+    plan_override, script_id = selected if selected else (None, None)
 
     async def _run() -> None:
         try:
@@ -1330,6 +1355,8 @@ def _start_warmup_task(profile: dict, targets_done: set) -> bool:
                 browser_mgr=browser_mgr,
                 record_run=_record_warmup,
                 targets_done=targets_done,
+                plan_override=plan_override,
+                script_id=script_id,
             )
         finally:
             evolution.AUTOMATION_LOCK.release("warmup")
@@ -1456,6 +1483,170 @@ async def run_profile_warmup_now(profile_id: str):
             detail=f"另一个自动化（{evolution.AUTOMATION_LOCK.owner}）正在运行，请等它结束。",
         )
     return {"ok": True, "started": True}
+
+
+# ── AI warm-up scripts (AI 养号编排） ─────────────────────────────────────────
+#
+# Generation is user-triggered and offline: the LLM writes intent scripts,
+# trusted code compiles them (warmup_script), a human approves a batch,
+# and only then does plan selection (_approved_script_plan) pick them up.
+
+_script_gen_tasks: dict[str, asyncio.Task] = {}
+_script_gen_status: dict[str, dict[str, Any]] = {}
+
+
+def _script_generating(profile_id: str) -> bool:
+    task = _script_gen_tasks.get(profile_id)
+    return task is not None and not task.done()
+
+
+def _script_step_public(step: dict) -> dict:
+    platform = step.get("platform")
+    entry = warmup.TARGET_CATALOG.get(platform) if isinstance(platform, str) else None
+    return {
+        "kind": step.get("kind"),
+        "platform": platform,
+        "platform_name": entry["name"] if entry else None,
+        "search_query": step.get("search_query"),
+        "dwell": step.get("dwell") or "medium",
+        "follow_link": bool(step.get("follow_link")),
+    }
+
+
+def _script_batches_public(rows: list[dict]) -> list[dict]:
+    batches: list[dict] = []
+    by_id: dict[str, dict] = {}
+    statuses: dict[str, set] = {}
+    for row in rows:
+        batch = by_id.get(row["batch_id"])
+        if batch is None:
+            batch = {
+                "batch_id": row["batch_id"],
+                "created_at": row["created_at"],
+                "status": row["status"],
+                "model": row.get("model"),
+                "persona": row.get("persona"),
+                "scripts": [],
+            }
+            by_id[row["batch_id"]] = batch
+            statuses[row["batch_id"]] = set()
+            batches.append(batch)
+        statuses[row["batch_id"]].add(row["status"])
+        batch["scripts"].append({
+            "id": row["id"],
+            "theme": row.get("theme") or "",
+            "steps": [_script_step_public(s) for s in row.get("steps") or []],
+        })
+    for batch in batches:
+        seen = statuses[batch["batch_id"]]
+        for status in ("draft", "approved", "rejected", "archived"):
+            if status in seen:
+                batch["status"] = status
+                break
+    return batches
+
+
+@app.get("/api/profiles/{profile_id}/warmup/scripts")
+async def list_profile_warmup_scripts(profile_id: str):
+    profile = db.get_profile(profile_id)
+    if not profile or profile.get("deleted_at"):
+        raise HTTPException(status_code=404, detail="Profile not found")
+    rows = await asyncio.to_thread(db.list_warmup_scripts, profile_id)
+    return {
+        "llm_configured": llm_client.read_config(db.get_setting) is not None,
+        "generating": _script_generating(profile_id),
+        "last_generation": _script_gen_status.get(profile_id),
+        "batches": _script_batches_public(rows),
+    }
+
+
+@app.post("/api/profiles/{profile_id}/warmup/scripts/generate")
+async def generate_profile_warmup_scripts(profile_id: str):
+    profile = db.get_profile(profile_id)
+    if not profile or profile.get("deleted_at"):
+        raise HTTPException(status_code=404, detail="Profile not found")
+    if llm_client.read_config(db.get_setting) is None:
+        raise HTTPException(
+            status_code=400,
+            detail="尚未配置 LLM：请先在设置里填写接口地址、模型和 API 密钥。",
+        )
+    if _script_generating(profile_id):
+        raise HTTPException(status_code=409, detail="这个画像的剧本正在生成中，请稍候。")
+
+    async def _generate() -> None:
+        try:
+            result = await llm_client.generate_batch(profile, get_setting=db.get_setting)
+            batch_id = str(uuid.uuid4())
+            await asyncio.to_thread(
+                db.create_warmup_script_batch,
+                profile_id,
+                batch_id=batch_id,
+                model=result["model"],
+                persona=result["persona"],
+                scripts=result["scripts"],
+            )
+            _script_gen_status[profile_id] = {
+                "status": "done",
+                "batch_id": batch_id,
+                "at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "error": None,
+            }
+        except Exception as exc:
+            _script_gen_status[profile_id] = {
+                "status": "error",
+                "batch_id": None,
+                "at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "error": str(exc)[:300],
+            }
+            logger.info("Warm-up script generation failed for %s: %s", profile_id, exc)
+
+    _script_gen_tasks[profile_id] = asyncio.create_task(_generate())
+    return {"ok": True, "started": True}
+
+
+@app.post("/api/profiles/{profile_id}/warmup/scripts/batches/{batch_id}/approve")
+async def approve_profile_warmup_script_batch(profile_id: str, batch_id: str):
+    profile = db.get_profile(profile_id)
+    if not profile or profile.get("deleted_at"):
+        raise HTTPException(status_code=404, detail="Profile not found")
+    changed = await asyncio.to_thread(
+        db.set_warmup_batch_status, profile_id, batch_id, "approved"
+    )
+    if not changed:
+        raise HTTPException(status_code=404, detail="没有找到待审的该批次剧本。")
+    return {"ok": True, "batch_id": batch_id, "status": "approved", "count": changed}
+
+
+@app.post("/api/profiles/{profile_id}/warmup/scripts/batches/{batch_id}/reject")
+async def reject_profile_warmup_script_batch(profile_id: str, batch_id: str):
+    profile = db.get_profile(profile_id)
+    if not profile or profile.get("deleted_at"):
+        raise HTTPException(status_code=404, detail="Profile not found")
+    changed = await asyncio.to_thread(
+        db.set_warmup_batch_status, profile_id, batch_id, "rejected"
+    )
+    if not changed:
+        raise HTTPException(status_code=404, detail="没有找到待审的该批次剧本。")
+    return {"ok": True, "batch_id": batch_id, "status": "rejected", "count": changed}
+
+
+# ── LLM settings (AI 功能共用，BYOK) ──────────────────────────────────────────
+
+
+@app.get("/api/settings/llm")
+async def get_llm_settings():
+    return llm_client.config_status(db.get_setting)
+
+
+@app.put("/api/settings/llm")
+async def update_llm_settings(body: LlmSettingsModel):
+    llm_client.save_config(
+        db.set_setting,
+        base_url=body.base_url,
+        model=body.model,
+        api_key=body.api_key,
+    )
+    return llm_client.config_status(db.get_setting)
 
 
 # ── Self-adversarial evolution （自对抗进化闭环） ──────────────────────────────
