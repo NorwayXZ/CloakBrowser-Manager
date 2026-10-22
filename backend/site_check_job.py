@@ -72,6 +72,7 @@ class SiteCheckJob:
         data_dir: Path,
         environment: Callable[[dict[str, Any], Any], dict[str, Any]],
         sites: tuple[site_checks.SiteCheck, ...] = site_checks.SITES,
+        on_finish: Callable[[], None] | None = None,
     ) -> bool:
         if self.busy:
             return False
@@ -79,10 +80,12 @@ class SiteCheckJob:
             "phase": "launching", "profile_id": profile["id"], "profile_name": profile.get("name"),
             "index": 0, "total": len(sites), "site": None, "results": [],
         }
-        self._task = asyncio.create_task(self._run(profile, browser_mgr, data_dir, environment, sites))
+        self._task = asyncio.create_task(
+            self._run(profile, browser_mgr, data_dir, environment, sites, on_finish)
+        )
         return True
 
-    async def _run(self, profile, browser_mgr, data_dir, environment, sites) -> None:
+    async def _run(self, profile, browser_mgr, data_dir, environment, sites, on_finish=None) -> None:
         profile_id = profile["id"]
         launched = False
         try:
@@ -157,3 +160,8 @@ class SiteCheckJob:
                     logger.exception("Could not close %s after the check", profile_id)
             if self.state.get("phase") != "failed":
                 self.state["phase"] = "done"
+            if on_finish is not None:
+                try:
+                    on_finish()
+                except Exception:
+                    logger.exception("Site-check finish callback failed")
