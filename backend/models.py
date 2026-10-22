@@ -130,6 +130,9 @@ class ProfileCreate(BaseModel):
     device_memory: int | None = Field(default=None, ge=1, le=8)
     humanize: bool = True
     human_preset: Literal["default", "careful"] = "default"
+    warmup_enabled: bool = False
+    warmup_daily_max: int = Field(default=1, ge=1, le=5)
+    warmup_targets: list[str] = Field(default_factory=list)
     headless: bool = False
     geoip: bool = True
     clipboard_sync: bool = True
@@ -163,6 +166,9 @@ class ProfileUpdate(BaseModel):
     device_memory: int | None = Field(default=None, ge=1, le=8)
     humanize: bool | None = None
     human_preset: Literal["default", "careful"] | None = None
+    warmup_enabled: bool | None = None
+    warmup_daily_max: int | None = Field(default=None, ge=1, le=5)
+    warmup_targets: list[str] | None = None
     headless: bool | None = None
     geoip: bool | None = None
     clipboard_sync: bool | None = None
@@ -207,6 +213,9 @@ class ProfileResponse(BaseModel):
     device_memory: int | None = None
     humanize: bool = True
     human_preset: str = "default"
+    warmup_enabled: bool = False
+    warmup_daily_max: int = 1
+    warmup_targets: list[str] = Field(default_factory=list)
     headless: bool = False
     geoip: bool = True
     clipboard_sync: bool = True
