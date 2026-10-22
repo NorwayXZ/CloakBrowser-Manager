@@ -9,6 +9,7 @@ import {
   type SiteCheckState,
   type SiteCheckStatus,
 } from "../lib/api";
+import { AutomationHoursHint, AutomationHoursSettings } from "./AutomationHours";
 import { EvolutionPanel } from "./EvolutionPanel";
 
 interface SiteCheckPanelProps {
@@ -142,6 +143,7 @@ export function SiteCheckPanel({ profiles, onRefresh }: SiteCheckPanelProps) {
 
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
+      <AutomationHoursSettings />
       <div className="max-w-5xl overflow-hidden rounded-md border border-border bg-white">
         <div className="flex items-start gap-3 border-b border-border px-5 py-4">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-blue-50 text-blue-700">
@@ -150,7 +152,7 @@ export function SiteCheckPanel({ profiles, onRefresh }: SiteCheckPanelProps) {
           <div>
             <h2 className="text-sm font-semibold text-slate-900">一键检测报告</h2>
             <p className="mt-1 text-xs leading-5 text-slate-500">
-              自动打开画像，先用 Manager 自带探针逐项核对 UA、平台、GPU、时区、语言、CPU、内存、WebGL、Canvas、Audio、字体、WebRTC 和出口 IP，
+              在后台无头打开画像（不弹出窗口，报告会注明无头运行），先用 Manager 自带探针逐项核对 UA、平台、GPU、时区、语言、CPU、内存、WebGL、Canvas、Audio、字体、WebRTC 和出口 IP，
               再依次访问下面的网站，读出每个网站的结论并截图。报告按条目给出通过/警告/未通过，并标注受出口 IP 信誉影响的条目；打开报告还能和该画像上一次报告逐项对比。
             </p>
           </div>
@@ -184,6 +186,7 @@ export function SiteCheckPanel({ profiles, onRefresh }: SiteCheckPanelProps) {
             <span>开始一键检测</span>
           </button>
           {running && <span className="text-xs text-amber-700">这个浏览器正在运行，请先关闭它。</span>}
+          <AutomationHoursHint />
         </div>
       </div>
 
