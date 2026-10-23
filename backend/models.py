@@ -634,6 +634,37 @@ class LlmSettingsModel(BaseModel):
     executor_effort: str = ""  # 执行模型的 effort 档位，空 = 服务商默认
 
 
+class McpSettingsModel(BaseModel):
+    # off = bridge refuses to serve; read-only = the 14 read tools only;
+    # full = read tools + the 5 action tools. Stored as settings["mcp.mode"].
+    mode: Literal["off", "read-only", "full"] = "read-only"
+
+
+class McpAuditIn(BaseModel):
+    """One tool call reported by the stdio MCP bridge after dispatch."""
+
+    client_name: str | None = Field(default=None, max_length=200)
+    client_version: str | None = Field(default=None, max_length=100)
+    tool: str = Field(min_length=1, max_length=100)
+    # Already summarised/redacted by the bridge; never raw tool arguments.
+    args_summary: dict = Field(default_factory=dict)
+    ok: bool = False
+    reason: str | None = Field(default=None, max_length=200)
+    duration_ms: int | None = Field(default=None, ge=0)
+
+
+class McpAuditResponse(BaseModel):
+    id: str
+    ts: str
+    client_name: str | None = None
+    client_version: str | None = None
+    tool: str
+    args_summary: dict = Field(default_factory=dict)
+    ok: bool = False
+    reason: str | None = None
+    duration_ms: int | None = None
+
+
 class InstalledKernelResponse(BaseModel):
     name: str
     version: str
