@@ -274,6 +274,91 @@ export interface DisposableCreateData {
   locale?: string | null;
 }
 
+export interface SentenceSpec {
+  country: string;
+  city: string | null;
+  interests: string[];
+  persona_notes: string | null;
+  purpose: string | null;
+  disposable: boolean;
+}
+
+export interface SentenceAssembled {
+  name: string;
+  platform: string;
+  device_profile: string;
+  screen_width: number;
+  screen_height: number;
+  gpu_vendor: string;
+  gpu_renderer: string;
+  hardware_concurrency: number;
+  device_memory: number;
+  timezone: string;
+  locale: string;
+  warmup_targets: string[];
+  warmup_enabled: boolean;
+  warmup_persona: string | null;
+  notes: string | null;
+  disposable: boolean;
+  fingerprint_options: FingerprintOptions;
+}
+
+export interface SentenceDraftResult {
+  source: "llm" | "fallback";
+  spec: SentenceSpec;
+  assembled: SentenceAssembled;
+  warnings: string[];
+}
+
+export interface SentenceCountryOption {
+  code: string;
+  name: string;
+  locale: string | null;
+  timezone: string | null;
+}
+
+export interface SentenceCityOption {
+  name: string;
+  name_zh: string;
+  timezone: string;
+}
+
+export interface SentenceInterestOption {
+  id: string;
+  name: string;
+  targets: string[];
+}
+
+export interface SentenceTargetOption {
+  id: string;
+  name: string;
+}
+
+export interface SentenceOptions {
+  countries: SentenceCountryOption[];
+  cities: Record<string, SentenceCityOption[]>;
+  interests: SentenceInterestOption[];
+  targets: SentenceTargetOption[];
+}
+
+export interface DeviceTemplateSummary {
+  id: string;
+  name: string;
+  family: string;
+  cpu: string;
+  gpu_vendor: string;
+  gpu_renderer: string;
+  screen_width: number;
+  screen_height: number;
+  hardware_concurrency: number;
+  device_memory: number;
+  device_scale_factor: number;
+}
+
+export interface SentenceCreateResult extends Profile {
+  warnings: string[];
+}
+
 export interface BurnResult {
   ok: boolean;
   profile_id: string;
@@ -1104,6 +1189,22 @@ export const api = {
       method: "POST",
       body: JSON.stringify(data),
     }),
+
+  draftFromSentence: (sentence: string) =>
+    request<SentenceDraftResult>("/api/profiles/from-sentence/draft", {
+      method: "POST",
+      body: JSON.stringify({ sentence }),
+    }),
+
+  createFromSentence: (data: { sentence: string; assembled: SentenceAssembled }) =>
+    request<SentenceCreateResult>("/api/profiles/from-sentence", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  getSentenceOptions: () => request<SentenceOptions>("/api/profiles/from-sentence/options"),
+
+  listDeviceTemplates: () => request<DeviceTemplateSummary[]>("/api/device-templates"),
 
   burnProfile: (id: string) =>
     request<BurnResult>(`/api/profiles/${id}/burn`, {
