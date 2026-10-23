@@ -31,16 +31,18 @@ import {
   Trash2,
   XCircle,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { api, type BrowserUpdateResult, type LaunchMode, type ManagerUpdateResult, type Profile, type ProfileGroup, type ProxyPreset } from "../lib/api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { api, type BrowserUpdateResult, type DeviceTemplateSummary, type LaunchMode, type ManagerUpdateResult, type Profile, type ProfileGroup, type ProxyPreset, type SentenceAssembled, type SentenceDraftResult, type SentenceOptions } from "../lib/api";
 import { AppUpdateStatus } from "./AppUpdateStatus";
 import { AutomationIndicator } from "./AutomationIndicator";
 import { BackupPanel } from "./BackupPanel";
 import { GroupsPanel } from "./GroupsPanel";
 import { KernelPanel } from "./KernelPanel";
+import { LlmSettingsCard } from "./LlmSettingsCard";
 import { LinkabilityPanel } from "./LinkabilityPanel";
 import { SiteCheckPanel } from "./SiteCheckPanel";
 import { ProxyPresetsPanel } from "./ProxyPresetsPanel";
+import { SentenceProfileDialog } from "./SentenceProfileDialog";
 import { TrashPanel } from "./TrashPanel";
 import { formatDate } from "../lib/format";
 import { StatusIndicator } from "./StatusIndicator";
@@ -75,7 +77,7 @@ interface EnvironmentManagerProps {
   onLogout: () => void;
 }
 
-type ManagerSection = "profiles" | "groups" | "proxies" | "kernel" | "checks" | "links" | "backup" | "trash";
+type ManagerSection = "profiles" | "groups" | "proxies" | "kernel" | "ai" | "checks" | "links" | "backup" | "trash";
 type UpdateNotice = {
   tone: "success" | "info" | "error";
   text: string;
@@ -103,6 +105,7 @@ const navItems: { id: ManagerSection; label: string; icon: typeof LayoutGrid }[]
   { id: "groups", label: "分组管理", icon: Folder },
   { id: "proxies", label: "代理管理", icon: Globe2 },
   { id: "kernel", label: "浏览器内核", icon: Cpu },
+  { id: "ai", label: "AI 设置", icon: Sparkles },
   { id: "checks", label: "指纹检测", icon: ShieldCheck },
   { id: "links", label: "关联分析", icon: Network },
   { id: "backup", label: "数据备份", icon: Database },
@@ -218,6 +221,16 @@ export function EnvironmentManager({
   const [disposableRegion, setDisposableRegion] = useState("US");
   const [disposableBusy, setDisposableBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [sentenceText, setSentenceText] = useState("");
+  const [sentenceBusy, setSentenceBusy] = useState(false);
+  const [sentenceError, setSentenceError] = useState<string | null>(null);
+  const [sentenceNotice, setSentenceNotice] = useState<string | null>(null);
+  const [sentenceDraft, setSentenceDraft] = useState<SentenceDraftResult | null>(null);
+  const [sentenceOptions, setSentenceOptions] = useState<SentenceOptions | null>(null);
+  const [sentenceTemplates, setSentenceTemplates] = useState<DeviceTemplateSummary[]>([]);
+  const [sentenceConfirming, setSentenceConfirming] = useState(false);
+  const [sentenceConfirmError, setSentenceConfirmError] = useState<string | null>(null);
+  const sentenceRequestRef = useRef(0);
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
@@ -276,6 +289,7 @@ export function EnvironmentManager({
     groups: "分组管理",
     proxies: "代理管理",
     kernel: "浏览器内核",
+    ai: "AI 设置",
     checks: "指纹检测",
     links: "关联分析",
     backup: "数据备份",
@@ -286,6 +300,7 @@ export function EnvironmentManager({
     groups: `共 ${groups.length} 个分组`,
     proxies: `共 ${proxyPresets.length} 个保存代理`,
     kernel: "查看、更新和清理 CloakBrowser 内核",
+    ai: "配置 AI 功能共用的 LLM 接口（自备密钥）",
     checks: "用公开检测网站验收画像，导出报告",
     links: "哪些画像会被检测方关联成同一个人",
     backup: "完整备份 Cookie 与登录状态，或只导出配置",
@@ -421,6 +436,55 @@ export function EnvironmentManager({
       setActionError(err instanceof Error ? err.message : "一次性身份创建失败");
     } finally {
       setDisposableBusy(false);
+    }
+  };
+
+  const handleDraftSentence = async () => {
+    const sentence = sentenceText.trim();
+    if (!sentence || sentenceBusy) return;
+    const requestId = ++sentenceRequestRef.current;
+    setSentenceBusy(true);
+    setSentenceError(null);
+    setSentenceNotice(null);
+    setSentenceConfirmError(null);
+    try {
+      const [draft, options, templates] = await Promise.all([
+        api.draftFromSentence(sentence),
+        api.getSentenceOptions().catch(() => null),
+        api.listDeviceTemplates().catch(() => [] as DeviceTemplateSummary[]),
+      ]);
+      if (sentenceRequestRef.current !== requestId) return; // 已被取消，草稿丢弃
+      setSentenceOptions(options);
+      setSentenceTemplates(templates);
+      setSentenceDraft(draft);
+    } catch (err) {
+      if (sentenceRequestRef.current !== requestId) return;
+      setSentenceError(err instanceof Error ? err.message : "解析失败");
+    } finally {
+      if (sentenceRequestRef.current === requestId) setSentenceBusy(false);
+    }
+  };
+
+  const handleCancelSentenceDraft = () => {
+    sentenceRequestRef.current += 1;
+    setSentenceBusy(false);
+  };
+
+  const handleConfirmSentence = async (assembled: SentenceAssembled) => {
+    setSentenceConfirming(true);
+    setSentenceConfirmError(null);
+    try {
+      const result = await api.createFromSentence({ sentence: sentenceText.trim(), assembled });
+      setSentenceDraft(null);
+      setSentenceText("");
+      await onRefresh();
+      if (result.warnings?.length) {
+        setSentenceNotice(result.warnings.join("；"));
+      }
+    } catch (err) {
+      setSentenceConfirmError(err instanceof Error ? err.message : "创建失败");
+    } finally {
+      setSentenceConfirming(false);
     }
   };
 
@@ -750,6 +814,36 @@ export function EnvironmentManager({
                 </div>
               )}
             </div>
+            <div className="flex min-w-[260px] flex-1 items-center gap-2 sm:max-w-md">
+              <input
+                className="input h-9 flex-1 text-sm"
+                value={sentenceText}
+                onChange={(event) => setSentenceText(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") void handleDraftSentence();
+                }}
+                placeholder="一句话建号：建个美国号，西雅图，喜欢露营摄影"
+                aria-label="一句话建号"
+                disabled={sentenceBusy}
+              />
+              <button
+                className="btn-secondary flex shrink-0 items-center gap-1.5 disabled:opacity-50"
+                disabled={sentenceBusy || !sentenceText.trim()}
+                onClick={() => void handleDraftSentence()}
+                title="用一句话解析出完整画像：先预览、可修改，确认后才创建"
+              >
+                <Sparkles className="h-4 w-4" />
+                <span>{sentenceBusy ? "解析中..." : "一句话建号"}</span>
+              </button>
+              {sentenceBusy && (
+                <button
+                  className="shrink-0 text-xs text-slate-500 hover:text-slate-700"
+                  onClick={handleCancelSentenceDraft}
+                >
+                  取消
+                </button>
+              )}
+            </div>
             <div className="ml-auto flex items-center gap-2">
               {actionError && <span className="text-xs text-red-600">{actionError}</span>}
               <select
@@ -773,6 +867,8 @@ export function EnvironmentManager({
                 <span>{disposableBusy ? "创建中..." : "一次性身份"}</span>
               </button>
             </div>
+            {sentenceError && <div className="w-full text-xs text-red-600">{sentenceError}</div>}
+            {sentenceNotice && <div className="w-full text-xs text-emerald-600">{sentenceNotice}</div>}
           </div>
 
           <div className="min-h-0 flex-1 overflow-hidden rounded-md border border-border bg-white">
@@ -1055,10 +1151,24 @@ export function EnvironmentManager({
         )}
 
         {section === "kernel" && <KernelPanel runningCount={runningCount} />}
+        {section === "ai" && <LlmSettingsCard />}
         {section === "checks" && <SiteCheckPanel profiles={profiles} onRefresh={onRefresh} />}
         {section === "links" && <LinkabilityPanel />}
         {section === "backup" && <BackupPanel runningCount={runningCount} onRefresh={onRefresh} />}
       </main>
+
+      {sentenceDraft && (
+        <SentenceProfileDialog
+          sentence={sentenceText.trim()}
+          draft={sentenceDraft}
+          options={sentenceOptions}
+          templates={sentenceTemplates}
+          confirming={sentenceConfirming}
+          error={sentenceConfirmError}
+          onCancel={() => setSentenceDraft(null)}
+          onConfirm={(assembled) => void handleConfirmSentence(assembled)}
+        />
+      )}
     </div>
   );
 }
