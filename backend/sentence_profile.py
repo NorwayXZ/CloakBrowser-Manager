@@ -561,3 +561,231 @@ async def parse_sentence(
         "spec": spec,
         "warnings": ["未配置 AI，已用关键词解析（理解有限）", *rule_warnings],
     }
+
+
+# ── Assembly (spec → profile fields) ────────────────────────────────────────
+
+
+def _pick_template(used_template_ids: set) -> dict[str, Any]:
+    """An unused device template when one remains, else a random one."""
+    candidates = [
+        tpl for tpl in device_templates.list_templates()
+        if tpl["id"] not in used_template_ids
+    ]
+    return secrets.choice(candidates) if candidates else device_templates.random_template()
+
+
+def generate_profile_name(spec: dict[str, Any], *, now: datetime | None = None) -> str:
+    """「西雅图 · 露营摄影 10-23-a1b2」— place + first interests +防撞后缀.
+
+    The profiles.name column has no unique constraint, so uniqueness comes
+    from the timestamp + random suffix, same as disposable identities.
+    """
+    now = now or datetime.now()
+    country = spec["country"]
+    place = city_name_zh(country, spec.get("city")) or COUNTRY_NAMES_ZH[country]
+    shorts = [INTERESTS[i]["zh"] for i in spec.get("interests") or []][:2]
+    suffix = f"{now.strftime('%m-%d')}-{secrets.token_hex(2)}"
+    if shorts:
+        return f"{place} · {''.join(shorts)} {suffix}"
+    return f"{place} {suffix}"
+
+
+def assemble_spec(
+    spec: dict[str, Any],
+    *,
+    sentence: str,
+    used_template_ids: set,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Assemble a validated spec into profile fields (pure, no I/O).
+
+    Every value comes from the trusted tables: template library for
+    hardware, region defaults (or the city table) for timezone/locale,
+    the recommended preset for fingerprint options, the interest table
+    for warm-up targets. The LLM's only influence is which table entries
+    were selected.
+    """
+    country = spec["country"]
+    city = spec.get("city")
+    timezone = city_timezone(country, city) or suggested_timezone(country) or "America/New_York"
+    locale = suggested_locale(country) or "en-US"
+    tpl = _pick_template(used_template_ids)
+
+    targets: list[str] = []
+    for interest_id in spec.get("interests") or []:
+        for target in INTERESTS[interest_id]["targets"]:
+            if target in warmup.TARGET_CATALOG and target not in targets:
+                targets.append(target)
+    targets = targets[:MAX_WARMUP_TARGETS]
+    if not targets:
+        targets = ["google", "youtube"]
+
+    place_zh = city_name_zh(country, city) or COUNTRY_NAMES_ZH[country]
+    shorts = [INTERESTS[i]["zh"] for i in spec.get("interests") or []]
+    bits: list[str] = []
+    if shorts:
+        bits.append("喜欢" + "、".join(shorts[:4]))
+    if spec.get("persona_notes"):
+        bits.append(spec["persona_notes"])
+    persona = f"{place_zh}，{'，'.join(bits)}"[:200] if bits else None
+
+    notes = f"一句话建号：{sentence}"
+    if spec.get("purpose"):
+        notes += f"（用途：{spec['purpose']}）"
+
+    assembled = {
+        "name": generate_profile_name(spec, now=now),
+        "platform": "windows",
+        "device_profile": tpl["id"],
+        "screen_width": tpl["screen_width"],
+        "screen_height": tpl["screen_height"],
+        "gpu_vendor": tpl["gpu_vendor"],
+        "gpu_renderer": tpl["gpu_renderer"],
+        "hardware_concurrency": tpl["hardware_concurrency"],
+        "device_memory": tpl["device_memory"],
+        "timezone": timezone,
+        "locale": locale,
+        "warmup_targets": targets,
+        "warmup_enabled": True,
+        "warmup_persona": persona,
+        "notes": notes,
+        "disposable": bool(spec.get("disposable")),
+        "fingerprint_options": dict(RECOMMENDED_NEW_PROFILE_OPTIONS),
+    }
+    return {"assembled": assembled, "warnings": []}
+
+
+# ── Confirm-time re-validation ──────────────────────────────────────────────
+
+_LOCALE_RE = re.compile(r"^[A-Za-z]{2,3}-[A-Za-z]{2}$")
+_IANA_TIMEZONES: frozenset | None = None
+
+
+def _iana_timezones() -> frozenset:
+    global _IANA_TIMEZONES
+    if _IANA_TIMEZONES is None:
+        from zoneinfo import available_timezones
+
+        _IANA_TIMEZONES = frozenset(available_timezones())
+    return _IANA_TIMEZONES
+
+
+def _regenerate_name(sentence: str, *, now: datetime | None = None) -> str:
+    try:
+        spec, _ = parse_sentence_rules(sentence)
+        return generate_profile_name(spec, now=now)
+    except SentenceParseError:
+        now = now or datetime.now()
+        return f"一句话建号 {now.strftime('%m-%d')}-{secrets.token_hex(2)}"
+
+
+def validate_assembled(
+    payload: Any,
+    *,
+    sentence: str,
+    used_template_ids: set,
+    now: datetime | None = None,
+) -> tuple[dict[str, Any], list[str]]:
+    """Re-validate a client-returned assembly before it may create a profile.
+
+    The preview payload is never trusted: hardware fields are rewritten
+    from the template library, warm-up targets must be a subset of the
+    catalog, fingerprint options are forced to the recommended preset,
+    and the timezone must be a real IANA name. A template that got taken
+    between draft and confirm is swapped for another unused one (with a
+    warning) instead of failing the creation.
+    """
+    warnings: list[str] = []
+    if not isinstance(payload, dict):
+        raise SentenceValidationError("组装结果格式不对，请重新生成预览")
+
+    template_id = payload.get("device_profile")
+    tpl = device_templates.get_template(template_id) if isinstance(template_id, str) else None
+    if tpl is None:
+        raise SentenceValidationError("设备模板不存在，请重新生成预览")
+    if tpl["id"] in used_template_ids:
+        candidates = [
+            item for item in device_templates.list_templates()
+            if item["id"] not in used_template_ids
+        ]
+        if candidates:
+            tpl = secrets.choice(candidates)
+            warnings.append("预览时选中的设备模板已被其他画像占用，已自动换成另一台")
+        else:
+            tpl = device_templates.random_template()
+            warnings.append("设备模板已被占用且暂无空闲模板，已另选一台（可能与现有画像共用模板）")
+
+    timezone = payload.get("timezone")
+    if not isinstance(timezone, str) or timezone not in _iana_timezones():
+        raise SentenceValidationError("时区不合法，请重新生成预览")
+    locale = payload.get("locale")
+    if not isinstance(locale, str) or not _LOCALE_RE.fullmatch(locale.strip()):
+        raise SentenceValidationError("语言区域不合法，请重新生成预览")
+    locale = locale.strip()
+
+    targets: list[str] = []
+    raw_targets = payload.get("warmup_targets")
+    if isinstance(raw_targets, list):
+        for item in raw_targets:
+            if isinstance(item, str) and item in warmup.TARGET_CATALOG and item not in targets:
+                targets.append(item)
+    targets = targets[:MAX_WARMUP_TARGETS]
+
+    name = _clean_text(payload.get("name"), 100)
+    if not name:
+        name = _regenerate_name(sentence, now=now)
+
+    fields = {
+        "name": name,
+        "platform": "windows",
+        "device_profile": tpl["id"],
+        "screen_width": tpl["screen_width"],
+        "screen_height": tpl["screen_height"],
+        "gpu_vendor": tpl["gpu_vendor"],
+        "gpu_renderer": tpl["gpu_renderer"],
+        "hardware_concurrency": tpl["hardware_concurrency"],
+        "device_memory": tpl["device_memory"],
+        "timezone": timezone,
+        "locale": locale,
+        "fingerprint_options": dict(RECOMMENDED_NEW_PROFILE_OPTIONS),
+        "disposable": 1 if payload.get("disposable") is True else 0,
+        "warmup_enabled": bool(payload.get("warmup_enabled")) and bool(targets),
+        "warmup_targets": targets,
+        "warmup_persona": _clean_text(payload.get("warmup_persona"), 200),
+        "notes": _clean_text(payload.get("notes"), 2000),
+    }
+    return fields, warnings
+
+
+# ── Choice lists for the preview dialog ─────────────────────────────────────
+
+
+def options_payload() -> dict[str, Any]:
+    """Static choice lists the preview dialog edits against."""
+    return {
+        "countries": [
+            {
+                "code": code,
+                "name": COUNTRY_NAMES_ZH[code],
+                "locale": suggested_locale(code),
+                "timezone": suggested_timezone(code),
+            }
+            for code in sorted(COUNTRY_LOCALE_DEFAULTS)
+        ],
+        "cities": {
+            code: [
+                {"name": name, "name_zh": info["zh"], "timezone": info["tz"]}
+                for name, info in cities.items()
+            ]
+            for code, cities in sorted(CITY_TABLE.items())
+        },
+        "interests": [
+            {"id": interest_id, "name": info["label"], "targets": list(info["targets"])}
+            for interest_id, info in INTERESTS.items()
+        ],
+        "targets": [
+            {"id": platform_id, "name": entry["name"]}
+            for platform_id, entry in warmup.TARGET_CATALOG.items()
+        ],
+    }

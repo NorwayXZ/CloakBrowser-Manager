@@ -421,6 +421,36 @@ class DisposableCreateRequest(BaseModel):
     locale: str | None = None
 
 
+class SentenceDraftRequest(BaseModel):
+    """一句话建号草案请求：只有原句，长度在端点里校验（中文 422 文案）。"""
+
+    sentence: str = ""
+
+
+class SentenceAssembledPayload(BaseModel):
+    """Preview-dialog assembly returned by the client for confirm-create.
+
+    Never trusted: the confirm endpoint re-validates every field
+    server-side (hardware is rewritten from the template library,
+    fingerprint options are forced to the recommended preset).
+    """
+
+    name: str | None = None
+    device_profile: str | None = None
+    timezone: str | None = None
+    locale: str | None = None
+    warmup_targets: list[str] = Field(default_factory=list)
+    warmup_enabled: bool = False
+    warmup_persona: str | None = None
+    notes: str | None = None
+    disposable: bool = False
+
+
+class SentenceCreateRequest(BaseModel):
+    sentence: str = ""
+    assembled: SentenceAssembledPayload
+
+
 class BurnRequest(BaseModel):
     confirm: bool = False
 

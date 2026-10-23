@@ -55,7 +55,7 @@ from . import secrets_crypto
 from .browser_manager import BrowserLaunchError, BrowserManager, CookiePullError, _normalize_proxy, _validate_proxy
 from .cloak_runtime import get_effective_chromium_version
 from . import desktop_app, self_update, site_checks
-from . import behavior_traces, llm_client, warmup, warmup_script
+from . import behavior_traces, llm_client, sentence_profile, warmup, warmup_script
 from .behavior_traces import BehaviorRecorder
 from .site_check_job import SiteCheckJob, describe_environment
 from .desktop_app import app_version as desktop_app_version
@@ -85,6 +85,8 @@ from .models import (
     CookiePullResponse,
     DeviceTemplateResponse,
     DisposableCreateRequest,
+    SentenceCreateRequest,
+    SentenceDraftRequest,
     EvolutionLogResponse,
     EvolutionProposalResponse,
     EvolutionStatusResponse,
@@ -635,6 +637,75 @@ async def create_disposable_profile(req: DisposableCreateRequest):
         disposable=1,
     )
     return _profile_response(profile)
+
+
+# ── One-sentence profile creation （一句话建号） ─────────────────────────────
+# Two-step: draft parses + assembles without creating anything; confirm
+# re-validates the previewed assembly server-side before creating.
+
+
+def _used_template_ids() -> set:
+    return {
+        profile.get("device_profile")
+        for profile in db.list_profiles()
+        if profile.get("device_profile")
+    }
+
+
+@app.get("/api/profiles/from-sentence/options")
+async def sentence_profile_options():
+    """Static choice lists the one-sentence preview dialog edits against."""
+    return sentence_profile.options_payload()
+
+
+@app.post("/api/profiles/from-sentence/draft")
+async def draft_profile_from_sentence(req: SentenceDraftRequest):
+    """Parse a sentence and assemble a profile draft — creates nothing,
+    reserves no template; the original sentence is not stored anywhere."""
+    sentence = (req.sentence or "").strip()
+    if not sentence:
+        raise HTTPException(
+            status_code=422,
+            detail="请先输入一句话，例如「建个美国号，西雅图，平时喜欢露营和摄影」",
+        )
+    if len(sentence) > sentence_profile.MAX_SENTENCE_LEN:
+        raise HTTPException(
+            status_code=422,
+            detail=f"一句话最长 {sentence_profile.MAX_SENTENCE_LEN} 字，请精简后再试",
+        )
+    try:
+        parsed = await sentence_profile.parse_sentence(sentence, get_setting=db.get_setting)
+    except sentence_profile.SentenceParseError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    result = sentence_profile.assemble_spec(
+        parsed["spec"], sentence=sentence, used_template_ids=_used_template_ids(),
+    )
+    return {
+        "source": parsed["source"],
+        "spec": parsed["spec"],
+        "assembled": result["assembled"],
+        "warnings": [*parsed["warnings"], *result["warnings"]],
+    }
+
+
+@app.post("/api/profiles/from-sentence", status_code=201)
+async def create_profile_from_sentence(req: SentenceCreateRequest):
+    """Confirm-create from a previewed assembly. The client payload is
+    re-validated field by field (see sentence_profile.validate_assembled);
+    the response is the created profile plus any assembly warnings."""
+    sentence = (req.sentence or "").strip()
+    try:
+        fields, warnings = sentence_profile.validate_assembled(
+            req.assembled.model_dump(),
+            sentence=sentence,
+            used_template_ids=_used_template_ids(),
+        )
+    except sentence_profile.SentenceValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    profile = db.create_profile(**fields)
+    payload = _profile_response(profile).model_dump(mode="json")
+    payload["warnings"] = warnings
+    return JSONResponse(status_code=201, content=payload)
 
 
 @app.get("/api/profiles/{profile_id}", response_model=ProfileResponse)
