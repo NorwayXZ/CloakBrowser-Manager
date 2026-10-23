@@ -99,6 +99,9 @@ class RestClient:
             headers=headers,
             transport=self._transport,
             timeout=timeout,
+            # Loopback only: the user's proxy env vars must never reroute
+            # (or break) calls to the local Manager.
+            trust_env=False,
         )
 
     async def request(
@@ -112,10 +115,10 @@ class RestClient:
         try:
             async with self._new_client(timeout) as client:
                 resp = await client.request(method, path, json=json_body)
-        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
-            raise ManagerUnreachable(f"连不上 Manager（{self.base_url}）：{exc}") from exc
         except httpx.TimeoutException as exc:
             raise ManagerUnreachable(f"Manager 响应超时（{path}）：{exc}") from exc
+        except httpx.HTTPError as exc:
+            raise ManagerUnreachable(f"连不上 Manager（{self.base_url}）：{exc}") from exc
         try:
             return resp.status_code, resp.json()
         except ValueError:
@@ -748,7 +751,7 @@ def build_server(client: RestClient) -> Server:
     async def on_list_tools(ctx: Any, params: Any) -> types.ListToolsResult:
         try:
             mode = await fetch_mode(client)
-        except ManagerUnreachable:
+        except Exception:
             mode = MODE_READ_ONLY
         return types.ListToolsResult(tools=build_mcp_tools(mode))
 
@@ -784,7 +787,7 @@ def main() -> None:
     client = RestClient()
     try:
         mode = asyncio.run(fetch_mode(client))
-    except ManagerUnreachable:
+    except Exception:
         mode = None  # Manager may start later; tools will report unreachable.
     if mode == MODE_OFF:
         print(
