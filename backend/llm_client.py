@@ -170,8 +170,12 @@ def build_messages(profile: dict[str, Any], persona: str | None) -> list[dict[st
 # ── Generation ──────────────────────────────────────────────────────────────
 
 
-def _extract_json(text: str) -> Any:
-    """Pull the JSON value out of a model reply (fences/prose tolerated)."""
+def extract_json(text: str) -> Any:
+    """Pull the JSON value out of a model reply (fences/prose tolerated).
+
+    Shared with other LLM consumers (e.g. sentence_profile): every caller
+    still validates the extracted value against its own white-list schema.
+    """
     cleaned = text.strip()
     if cleaned.startswith("```"):
         cleaned = cleaned.strip("`")
@@ -192,10 +196,10 @@ def _extract_json(text: str) -> Any:
 
 def parse_scripts(text: str) -> list[dict[str, Any]]:
     """Response text → normalized ``[{theme, intents}]`` (may be empty)."""
-    return warmup_script.validate_scripts_payload(_extract_json(text))
+    return warmup_script.validate_scripts_payload(extract_json(text))
 
 
-async def _chat_completion(
+async def chat_completion(
     config: dict[str, str],
     messages: list[dict[str, str]],
     *,
@@ -248,7 +252,7 @@ async def generate_batch(
     last_error: Exception | None = None
     for attempt in range(_MAX_ATTEMPTS):
         try:
-            text = await _chat_completion(config, messages, transport=transport)
+            text = await chat_completion(config, messages, transport=transport)
             compiled: list[dict[str, Any]] = []
             for script in parse_scripts(text):
                 steps = warmup_script.compile_intents(profile, script["intents"])
@@ -272,3 +276,9 @@ async def generate_batch(
     raise LlmGenerationError(
         f"LLM 生成失败（{type(last_error).__name__ if last_error else '未知错误'}），请稍后重试。"
     )
+
+
+# Backwards-compatible private names (the helpers above are the public,
+# shared API; these aliases keep older imports working).
+_extract_json = extract_json
+_chat_completion = chat_completion
