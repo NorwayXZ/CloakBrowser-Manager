@@ -168,6 +168,18 @@ def init_db():
                 summary TEXT,
                 detail_json TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS mcp_audit_log (
+                id TEXT PRIMARY KEY,
+                ts TEXT NOT NULL,
+                client_name TEXT,
+                client_version TEXT,
+                tool TEXT NOT NULL,
+                args_summary TEXT,
+                ok INTEGER NOT NULL DEFAULT 0,
+                reason TEXT,
+                duration_ms INTEGER
+            );
         """)
         conn.commit()
 
@@ -338,6 +350,61 @@ def delete_setting(key: str) -> None:
     with get_db() as conn:
         conn.execute("DELETE FROM settings WHERE key = ?", (key,))
         conn.commit()
+
+
+# ── MCP bridge audit ─────────────────────────────────────────────────────────
+# One row per tool call the stdio MCP bridge dispatches. The bridge reports
+# after each call; args arrive pre-summarised/redacted by the bridge (see
+# backend/mcp_server.py summarize_args) and are stored verbatim as JSON.
+
+
+def record_mcp_audit(
+    *,
+    client_name: str | None = None,
+    client_version: str | None = None,
+    tool: str,
+    args_summary: dict[str, Any] | None = None,
+    ok: bool = False,
+    reason: str | None = None,
+    duration_ms: int | None = None,
+) -> str:
+    audit_id = uuid.uuid4().hex
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO mcp_audit_log
+                (id, ts, client_name, client_version, tool, args_summary, ok, reason, duration_ms)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                audit_id,
+                _now(),
+                client_name,
+                client_version,
+                tool,
+                json.dumps(args_summary, ensure_ascii=False) if args_summary else None,
+                1 if ok else 0,
+                reason,
+                duration_ms,
+            ),
+        )
+        conn.commit()
+    return audit_id
+
+
+def list_mcp_audit(limit: int = 100) -> list[dict[str, Any]]:
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM mcp_audit_log ORDER BY ts DESC, rowid DESC LIMIT ?",
+            (max(1, min(int(limit), 1000)),),
+        ).fetchall()
+    entries = []
+    for row in rows:
+        entry = dict(row)
+        entry["args_summary"] = _load_json_dict(entry.pop("args_summary", None)) or {}
+        entry["ok"] = bool(entry["ok"])
+        entries.append(entry)
+    return entries
 
 
 def export_configuration() -> dict[str, Any]:
