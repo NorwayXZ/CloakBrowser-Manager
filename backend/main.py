@@ -103,6 +103,9 @@ from .models import (
     LinkabilityResponse,
     LoginRequest,
     ManagerUpdateResponse,
+    McpAuditIn,
+    McpAuditResponse,
+    McpSettingsModel,
     ProfileCreate,
     ProfileResponse,
     ProfileStatusResponse,
@@ -1720,6 +1723,52 @@ async def update_llm_settings(body: LlmSettingsModel):
         executor_effort=body.executor_effort,
     )
     return llm_client.config_status(db.get_setting)
+
+
+# ── MCP bridge (stdio MCP 接口） ─────────────────────────────────────────────
+# The bridge (backend/mcp_server.py) is a separate process the user's MCP
+# client launches; it reads its mode here and reports every tool call to the
+# audit endpoint below. No tool ever approves proposals or touches cookies.
+
+MCP_MODE_SETTING_KEY = "mcp.mode"
+MCP_MODES = ("off", "read-only", "full")
+MCP_DEFAULT_MODE = "read-only"
+
+
+def _mcp_mode() -> str:
+    mode = db.get_setting(MCP_MODE_SETTING_KEY)
+    return mode if mode in MCP_MODES else MCP_DEFAULT_MODE
+
+
+@app.get("/api/settings/mcp", response_model=McpSettingsModel)
+async def get_mcp_settings():
+    return McpSettingsModel(mode=_mcp_mode())
+
+
+@app.put("/api/settings/mcp", response_model=McpSettingsModel)
+async def update_mcp_settings(body: McpSettingsModel):
+    db.set_setting(MCP_MODE_SETTING_KEY, body.mode)
+    return McpSettingsModel(mode=body.mode)
+
+
+@app.post("/api/mcp/audit", status_code=201)
+async def create_mcp_audit(body: McpAuditIn):
+    audit_id = await asyncio.to_thread(
+        db.record_mcp_audit,
+        client_name=body.client_name,
+        client_version=body.client_version,
+        tool=body.tool,
+        args_summary=body.args_summary,
+        ok=body.ok,
+        reason=body.reason,
+        duration_ms=body.duration_ms,
+    )
+    return {"id": audit_id, "ok": True}
+
+
+@app.get("/api/mcp/audit", response_model=list[McpAuditResponse])
+async def list_mcp_audit(limit: int = 100):
+    return await asyncio.to_thread(db.list_mcp_audit, limit)
 
 
 # ── Self-adversarial evolution （自对抗进化闭环） ──────────────────────────────
