@@ -1,6 +1,7 @@
 import { ArrowLeft, ClipboardCheck, Download, FileDown, Globe, Loader2, MousePointer2, Plus, RefreshCw, Save, Settings2, Trash2, Wifi, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { AutomationHoursHint } from "./AutomationHours";
+import { WarmupScriptsSection } from "./WarmupScriptsSection";
 import {
   api,
   type CookieExportFormat,
@@ -360,6 +361,7 @@ function createDefaultForm(hostOS?: HostOS | null): ProfileCreateData {
     warmup_enabled: false,
     warmup_daily_max: 1,
     warmup_targets: [],
+    warmup_persona: "",
     headless: false,
     geoip: true,
     clipboard_sync: true,
@@ -560,6 +562,7 @@ export function ProfileForm({
         warmup_enabled: Boolean(profile.warmup_enabled),
         warmup_daily_max: profile.warmup_daily_max ?? 1,
         warmup_targets: profile.warmup_targets ?? [],
+        warmup_persona: profile.warmup_persona ?? "",
         headless: profile.headless,
         geoip: profile.geoip,
         clipboard_sync: profile.clipboard_sync,
@@ -1913,6 +1916,19 @@ export function ProfileForm({
                               </select>
                             </label>
                             <div>
+                              <div className="text-sm font-medium text-slate-800">画像人格（可选）</div>
+                              <p className="mt-1 text-xs leading-5 text-slate-500">
+                                一句话描述这个画像的人设；AI 养号编排会按它编排一周剧本的主题和搜索词，不填则按地区与语言生成通用剧本。
+                              </p>
+                              <input
+                                className="input mt-2 w-full max-w-md"
+                                value={form.warmup_persona ?? ""}
+                                maxLength={200}
+                                onChange={(e) => set("warmup_persona", e.target.value)}
+                                placeholder="如：32 岁，台北，喜欢摄影和手冲咖啡"
+                              />
+                            </div>
+                            <div>
                               <div className="text-sm font-medium text-slate-800">定向养护平台</div>
                               <p className="mt-1 text-xs leading-5 text-slate-500">
                                 定向养护：在目标平台留下并积累第一方 Cookie 年龄（如 Facebook 的 datr、Amazon 的 session-id），让后续正式使用时不像全新设备。
@@ -1981,6 +1997,7 @@ export function ProfileForm({
                                 <div className="mt-2">
                                   <AutomationHoursHint />
                                 </div>
+                                <WarmupScriptsSection profileId={profile.id} />
                               </div>
                             )}
                           </div>
