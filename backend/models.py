@@ -600,6 +600,8 @@ class LlmSettingsModel(BaseModel):
     base_url: str = ""
     model: str = ""
     api_key: str | None = None  # write-only: omitted/empty keeps the stored key
+    executor_model: str = ""  # AI 驾驶员的执行模型（与剧本生成模型分开）
+    executor_effort: str = ""  # 执行模型的 effort 档位，空 = 服务商默认
 
 
 class InstalledKernelResponse(BaseModel):

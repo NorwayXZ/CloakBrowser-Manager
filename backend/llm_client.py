@@ -26,6 +26,8 @@ logger = logging.getLogger(__name__)
 SETTING_BASE_URL = "llm_base_url"
 SETTING_MODEL = "llm_model"
 SETTING_API_KEY = "llm_api_key"
+SETTING_EXECUTOR_MODEL = "llm_executor_model"
+SETTING_EXECUTOR_EFFORT = "llm_executor_effort"
 
 BATCH_SIZE = 5
 _MAX_ATTEMPTS = 2
@@ -62,6 +64,23 @@ def read_config(get_setting: GetSetting) -> dict[str, str] | None:
     return {"base_url": base_url, "model": model, "api_key": api_key}
 
 
+def read_executor_config(get_setting: GetSetting) -> dict[str, str] | None:
+    """The AI driver's executor model choice, or None when not chosen yet.
+
+    Shares the connection above (base_url + key); only the model differs —
+    the driver wants a cheap, fast model (e.g. claude-haiku-5-5), while
+    script generation can use a stronger one. ``effort`` may be empty
+    (provider default).
+    """
+    model = (get_setting(SETTING_EXECUTOR_MODEL) or "").strip()
+    if not model:
+        return None
+    return {
+        "model": model,
+        "effort": (get_setting(SETTING_EXECUTOR_EFFORT) or "").strip(),
+    }
+
+
 def config_status(get_setting: GetSetting) -> dict[str, Any]:
     """What the settings UI may see: where/what, never the key itself."""
     return {
@@ -69,6 +88,8 @@ def config_status(get_setting: GetSetting) -> dict[str, Any]:
         "base_url": (get_setting(SETTING_BASE_URL) or "").strip().rstrip("/") or None,
         "model": (get_setting(SETTING_MODEL) or "").strip() or None,
         "has_api_key": bool(decrypt_value(get_setting(SETTING_API_KEY))),
+        "executor_model": (get_setting(SETTING_EXECUTOR_MODEL) or "").strip() or None,
+        "executor_effort": (get_setting(SETTING_EXECUTOR_EFFORT) or "").strip() or None,
     }
 
 
@@ -78,10 +99,14 @@ def save_config(
     base_url: str,
     model: str,
     api_key: str | None = None,
+    executor_model: str = "",
+    executor_effort: str = "",
 ) -> None:
     """Persist base_url/model; the key is write-only (set when provided)."""
     set_setting(SETTING_BASE_URL, base_url.strip())
     set_setting(SETTING_MODEL, model.strip())
+    set_setting(SETTING_EXECUTOR_MODEL, executor_model.strip())
+    set_setting(SETTING_EXECUTOR_EFFORT, executor_effort.strip())
     if api_key:
         set_setting(SETTING_API_KEY, encrypt_value(api_key) or "")
 

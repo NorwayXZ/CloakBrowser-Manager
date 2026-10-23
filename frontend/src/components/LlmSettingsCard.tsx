@@ -9,6 +9,8 @@ export function LlmSettingsCard() {
   const [baseUrl, setBaseUrl] = useState("");
   const [model, setModel] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [executorModel, setExecutorModel] = useState("");
+  const [executorEffort, setExecutorEffort] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
 
@@ -17,6 +19,8 @@ export function LlmSettingsCard() {
     setBaseUrl(next.base_url ?? "");
     setModel(next.model ?? "");
     setApiKey("");
+    setExecutorModel(next.executor_model ?? "");
+    setExecutorEffort(next.executor_effort ?? "");
   }, []);
 
   const load = useCallback(async () => {
@@ -34,7 +38,11 @@ export function LlmSettingsCard() {
   if (!status) return null;
 
   const changed =
-    baseUrl !== (status.base_url ?? "") || model !== (status.model ?? "") || apiKey.trim() !== "";
+    baseUrl !== (status.base_url ?? "") ||
+    model !== (status.model ?? "") ||
+    apiKey.trim() !== "" ||
+    executorModel !== (status.executor_model ?? "") ||
+    executorEffort !== (status.executor_effort ?? "");
 
   const handleSave = async () => {
     setBusy(true);
@@ -45,6 +53,8 @@ export function LlmSettingsCard() {
           base_url: baseUrl.trim(),
           model: model.trim(),
           api_key: apiKey.trim() ? apiKey : null,
+          executor_model: executorModel.trim(),
+          executor_effort: executorEffort,
         }),
       );
       setNotice({ tone: "success", text: "LLM 设置已保存。" });
@@ -108,6 +118,40 @@ export function LlmSettingsCard() {
           />
           <div className="mt-1 text-xs leading-5 text-slate-500">
             密钥只写不读：保存后这里不会再显示它。
+          </div>
+        </div>
+
+        <label className="pt-2 text-right text-sm font-medium text-slate-600">执行器模型</label>
+        <div>
+          <input
+            className="input w-full max-w-xl font-mono text-xs"
+            aria-label="执行器模型"
+            value={executorModel}
+            placeholder="claude-haiku-5-5"
+            onChange={(e) => setExecutorModel(e.target.value)}
+          />
+          <div className="mt-1 text-xs leading-5 text-slate-500">
+            给「AI 驾驶员」预留的执行模型：与上面的接口地址、密钥共用，只换模型。
+            驾驶讲究便宜快，如 Claude Haiku 5.5。驾驶员功能尚未上线，先在这里定好，上线后直接使用；留空表示暂不指定。
+          </div>
+        </div>
+
+        <label className="pt-2 text-right text-sm font-medium text-slate-600">执行强度</label>
+        <div>
+          <select
+            className="input w-full max-w-xl text-xs"
+            aria-label="执行器强度"
+            value={executorEffort}
+            onChange={(e) => setExecutorEffort(e.target.value)}
+          >
+            <option value="">默认（由服务商决定）</option>
+            <option value="low">low</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+            <option value="max">max</option>
+          </select>
+          <div className="mt-1 text-xs leading-5 text-slate-500">
+            仅对支持 effort 的模型（如 Haiku 5.5）生效；执行类任务建议 high。
           </div>
         </div>
 

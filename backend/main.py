@@ -1645,6 +1645,8 @@ async def update_llm_settings(body: LlmSettingsModel):
         base_url=body.base_url,
         model=body.model,
         api_key=body.api_key,
+        executor_model=body.executor_model,
+        executor_effort=body.executor_effort,
     )
     return llm_client.config_status(db.get_setting)
 

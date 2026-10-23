@@ -263,6 +263,8 @@ def test_llm_config_is_encrypted_and_write_only(tmp_db):
         "base_url": "https://llm.example/v1",
         "model": "test-model",
         "has_api_key": True,
+        "executor_model": None,
+        "executor_effort": None,
     }
     assert "sk-secret-key" not in json.dumps(status)
     # Saving without a key keeps the stored one.
@@ -432,6 +434,17 @@ def test_llm_settings_api(app_client):
         "base_url": "https://llm.example/v1", "model": "m2",
     }).json()
     assert updated["model"] == "m2" and updated["has_api_key"] is True
+    # Executor model round-trips independently of the generation model.
+    assert updated["executor_model"] is None and updated["executor_effort"] is None
+    updated = app_client.put("/api/settings/llm", json={
+        "base_url": "https://llm.example/v1", "model": "m2",
+        "executor_model": "claude-haiku-5-5", "executor_effort": "high",
+    }).json()
+    assert updated["executor_model"] == "claude-haiku-5-5"
+    assert updated["executor_effort"] == "high"
+    assert llm_client.read_executor_config(db.get_setting) == {
+        "model": "claude-haiku-5-5", "effort": "high",
+    }
 
 
 def test_scripts_api_flow(app_client, monkeypatch):

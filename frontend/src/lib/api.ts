@@ -372,12 +372,16 @@ export interface LlmSettings {
   base_url: string | null;
   model: string | null;
   has_api_key: boolean;
+  executor_model: string | null;
+  executor_effort: string | null;
 }
 
 export interface LlmSettingsUpdate {
   base_url: string;
   model: string;
   api_key?: string | null;
+  executor_model: string;
+  executor_effort: string;
 }
 
 export interface WarmupInfo {
