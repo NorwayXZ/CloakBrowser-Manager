@@ -133,6 +133,7 @@ class ProfileCreate(BaseModel):
     warmup_enabled: bool = False
     warmup_daily_max: int = Field(default=1, ge=1, le=5)
     warmup_targets: list[str] = Field(default_factory=list)
+    warmup_persona: str | None = Field(default=None, max_length=200)
     evolution_enabled: bool = False
     evolution_interval_hours: int = Field(default=24, ge=1, le=24 * 30)
     headless: bool = False
@@ -171,6 +172,7 @@ class ProfileUpdate(BaseModel):
     warmup_enabled: bool | None = None
     warmup_daily_max: int | None = Field(default=None, ge=1, le=5)
     warmup_targets: list[str] | None = None
+    warmup_persona: str | None = Field(default=None, max_length=200)
     evolution_enabled: bool | None = None
     evolution_interval_hours: int | None = Field(default=None, ge=1, le=24 * 30)
     headless: bool | None = None
@@ -220,6 +222,7 @@ class ProfileResponse(BaseModel):
     warmup_enabled: bool = False
     warmup_daily_max: int = 1
     warmup_targets: list[str] = Field(default_factory=list)
+    warmup_persona: str | None = None
     evolution_enabled: bool = False
 
     @field_validator("evolution_enabled", mode="before")
@@ -418,6 +421,36 @@ class DisposableCreateRequest(BaseModel):
     locale: str | None = None
 
 
+class SentenceDraftRequest(BaseModel):
+    """一句话建号草案请求：只有原句，长度在端点里校验（中文 422 文案）。"""
+
+    sentence: str = ""
+
+
+class SentenceAssembledPayload(BaseModel):
+    """Preview-dialog assembly returned by the client for confirm-create.
+
+    Never trusted: the confirm endpoint re-validates every field
+    server-side (hardware is rewritten from the template library,
+    fingerprint options are forced to the recommended preset).
+    """
+
+    name: str | None = None
+    device_profile: str | None = None
+    timezone: str | None = None
+    locale: str | None = None
+    warmup_targets: list[str] = Field(default_factory=list)
+    warmup_enabled: bool = False
+    warmup_persona: str | None = None
+    notes: str | None = None
+    disposable: bool = False
+
+
+class SentenceCreateRequest(BaseModel):
+    sentence: str = ""
+    assembled: SentenceAssembledPayload
+
+
 class BurnRequest(BaseModel):
     confirm: bool = False
 
@@ -591,6 +624,14 @@ class KernelSettingsModel(BaseModel):
     auto_update: bool = True
     release_channel: Literal["stable", "preview"] = "stable"
     pinned_version: str | None = None
+
+
+class LlmSettingsModel(BaseModel):
+    base_url: str = ""
+    model: str = ""
+    api_key: str | None = None  # write-only: omitted/empty keeps the stored key
+    executor_model: str = ""  # AI 驾驶员的执行模型（与剧本生成模型分开）
+    executor_effort: str = ""  # 执行模型的 effort 档位，空 = 服务商默认
 
 
 class InstalledKernelResponse(BaseModel):
