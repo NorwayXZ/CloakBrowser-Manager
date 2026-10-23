@@ -295,7 +295,7 @@ INTERESTS: dict[str, dict[str, Any]] = {
 }
 
 _DISPOSABLE_KEYWORDS = ("一次性", "用完即焚", "阅后即焚", "临时身份", "临时号")
-_QUANTITY_RE = re.compile(r"(?:[两三四五六七八九十]|\d+)\s*个号|批量")
+_QUANTITY_RE = re.compile(r"(?:[两三四五六七八九十]|\d+)\s*个.{0,8}号|批量")
 
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 _WHITESPACE = re.compile(r"\s+")
@@ -537,7 +537,10 @@ async def parse_sentence(
                 text = await llm_client.chat_completion(config, messages, transport=transport)
                 spec, spec_warnings = validate_spec(llm_client.extract_json(text))
                 if spec is not None:
-                    return {"source": "llm", "spec": spec, "warnings": spec_warnings}
+                    warnings = list(spec_warnings)
+                    if _QUANTITY_RE.search(sentence):
+                        warnings.append("一次只建一个画像，数量词已忽略")
+                    return {"source": "llm", "spec": spec, "warnings": warnings}
                 logger.info("Sentence parse attempt %d: spec failed validation", attempt + 1)
             except Exception as exc:  # transport / extraction — degrade, never surface raw
                 logger.info(
@@ -628,7 +631,15 @@ def assemble_spec(
         bits.append("喜欢" + "、".join(shorts[:4]))
     if spec.get("persona_notes"):
         bits.append(spec["persona_notes"])
-    persona = f"{place_zh}，{'，'.join(bits)}"[:200] if bits else None
+    persona = f"{place_zh}，{'，'.join(bits)}"[:200] if bits else place_zh
+
+    warnings: list[str] = []
+    if (
+        spec.get("interests")
+        and any("\u4e00" <= ch <= "\u9fff" for ch in sentence)
+        and not locale.startswith("zh")
+    ):
+        warnings.append(f"兴趣来自中文描述，但画像语言为 {locale}，养号搜索词会按画像语言生成")
 
     notes = f"一句话建号：{sentence}"
     if spec.get("purpose"):
@@ -653,7 +664,7 @@ def assemble_spec(
         "disposable": bool(spec.get("disposable")),
         "fingerprint_options": dict(RECOMMENDED_NEW_PROFILE_OPTIONS),
     }
-    return {"assembled": assembled, "warnings": []}
+    return {"assembled": assembled, "warnings": warnings}
 
 
 # ── Confirm-time re-validation ──────────────────────────────────────────────
