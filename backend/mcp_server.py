@@ -36,6 +36,7 @@ import sys
 import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
+from urllib.parse import quote
 
 import httpx
 from mcp import types
@@ -418,6 +419,326 @@ async def _manager_status(client: RestClient, args: dict[str, Any]) -> dict[str,
         if s_hours < 300 and isinstance(p_hours, dict):
             result["automation_hours"] = p_hours
     return result
+
+
+async def _get_or_error(
+    client: RestClient, path: str, tool: str
+) -> tuple[Any, dict[str, Any] | None]:
+    status, payload = await client.get(path)
+    if status >= 300:
+        return None, error_result(status, payload, tool=tool)
+    return payload, None
+
+
+def _profile_id_arg(args: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
+    profile_id = str(args.get("profile_id") or "").strip()
+    if not profile_id:
+        return "", {"ok": False, "reason": "invalid_argument", "detail": "缺少 profile_id，先用 list_profiles 查。"}
+    return profile_id, None
+
+
+@register("list_profiles", "列出全部画像的摘要（id、名称、平台、设备模板、时区/语言、指纹配置、养号与进化开关、运行状态）。代理只回出口端点不带账密，备注与 Cookie 不回。", NO_ARGS, "read")
+async def _list_profiles(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    payload, err = await _get_or_error(client, "/api/profiles", "list_profiles")
+    if err:
+        return err
+    profiles = [shape_profile(p) for p in payload if isinstance(p, dict)]
+    return {"ok": True, "count": len(profiles), "profiles": profiles}
+
+
+@register("get_profile", "看单个画像的完整配置（字段政策同 list_profiles）加实时运行状态。", PROFILE_ID_ARGS, "read")
+async def _get_profile(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    profile_id, err = _profile_id_arg(args)
+    if err:
+        return err
+    quoted = quote(profile_id, safe="")
+    payload, err = await _get_or_error(client, f"/api/profiles/{quoted}", "get_profile")
+    if err:
+        return err
+    result: dict[str, Any] = {"ok": True, "profile": shape_profile(payload)}
+    s_status, p_status = await client.get(f"/api/profiles/{quoted}/status")
+    if s_status < 300 and isinstance(p_status, dict):
+        result["live_status"] = {
+            key: p_status.get(key)
+            for key in ("status", "runtime_mode", "viewer_mode", "browser_engine", "launch_mode")
+        }
+    return result
+
+
+@register("get_profile_preflight", "启动前一致性检查：这个画像现在能不能启动、有哪些问题。launch 之前可以先看它。", PROFILE_ID_ARGS, "read")
+async def _get_profile_preflight(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    profile_id, err = _profile_id_arg(args)
+    if err:
+        return err
+    payload, err = await _get_or_error(
+        client, f"/api/profiles/{quote(profile_id, safe='')}/preflight", "get_profile_preflight"
+    )
+    if err:
+        return err
+    return {"ok": True, "preflight": payload}
+
+
+@register(
+    "list_device_templates",
+    "列出设备模板库（104 个真实 Windows 设备）的摘要：id、名称、屏幕、GPU、CPU、核数、内存。",
+    NO_ARGS,
+    "read",
+)
+async def _list_device_templates(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    payload, err = await _get_or_error(client, "/api/device-templates", "list_device_templates")
+    if err:
+        return err
+    keys = (
+        "id", "name", "family", "cpu", "screen_width", "screen_height",
+        "gpu_vendor", "gpu_renderer", "hardware_concurrency", "device_memory",
+    )
+    templates = [
+        {key: t.get(key) for key in keys if key in t} for t in payload if isinstance(t, dict)
+    ]
+    return {"ok": True, "count": len(templates), "templates": templates}
+
+
+@register("get_linkability", "关联分析：哪些画像看起来像同一个人（共用代理出口/设备/指纹种子等），附原因与改进建议。", NO_ARGS, "read")
+async def _get_linkability(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    payload, err = await _get_or_error(client, "/api/linkability", "get_linkability")
+    if err:
+        return err
+    return {"ok": True, "linkability": payload}
+
+
+@register("list_site_check_reports", "列出已保存的指纹检测报告的元数据与通过计数（不含逐项明细，明细用 get_site_check_report）。", NO_ARGS, "read")
+async def _list_site_check_reports(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    payload, err = await _get_or_error(client, "/api/site-checks", "list_site_check_reports")
+    if err:
+        return err
+    reports = payload if isinstance(payload, list) else []
+    return {"ok": True, "count": len(reports), "reports": reports[:50]}
+
+
+@register(
+    "get_site_check_report",
+    "读一份完整的指纹检测报告（含与上一份的 diff、是否无头运行的标记）。",
+    {
+        "type": "object",
+        "properties": {"report_id": {"type": "string", "description": "报告 id（先用 list_site_check_reports 查）"}},
+        "required": ["report_id"],
+    },
+    "read",
+)
+async def _get_site_check_report(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    report_id = str(args.get("report_id") or "").strip()
+    if not report_id:
+        return {"ok": False, "reason": "invalid_argument", "detail": "缺少 report_id，先用 list_site_check_reports 查。"}
+    payload, err = await _get_or_error(
+        client, f"/api/site-checks/{quote(report_id, safe='')}", "get_site_check_report"
+    )
+    if err:
+        return err
+    return {"ok": True, "report": payload}
+
+
+@register("get_current_site_check", "看正在进行中的指纹检测的进度快照（run_site_check 之后轮询这个）。", NO_ARGS, "read")
+async def _get_current_site_check(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    payload, err = await _get_or_error(client, "/api/site-checks/current", "get_current_site_check")
+    if err:
+        return err
+    return {"ok": True, "current": payload}
+
+
+@register("get_fingerprint_report", "读画像的本地指纹探针报告（逐项一致性检查结果，不访问外部检测站）。", PROFILE_ID_ARGS, "read")
+async def _get_fingerprint_report(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    profile_id, err = _profile_id_arg(args)
+    if err:
+        return err
+    payload, err = await _get_or_error(
+        client, f"/api/profiles/{quote(profile_id, safe='')}/fingerprint-report", "get_fingerprint_report"
+    )
+    if err:
+        return err
+    return {"ok": True, "report": payload}
+
+
+@register("get_warmup_state", "看画像的养号状态：开关、每日上限、目标平台、身份年龄、最近运行记录。", PROFILE_ID_ARGS, "read")
+async def _get_warmup_state(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    profile_id, err = _profile_id_arg(args)
+    if err:
+        return err
+    payload, err = await _get_or_error(
+        client, f"/api/profiles/{quote(profile_id, safe='')}/warmup", "get_warmup_state"
+    )
+    if err:
+        return err
+    return {"ok": True, "warmup": payload}
+
+
+@register(
+    "list_warmup_scripts",
+    "看画像的 AI 养号剧本批次：状态、主题与意图（搜索词）。persona 快照不回。批准/驳回只能在面板里人工操作，这里没有对应工具。",
+    PROFILE_ID_ARGS,
+    "read",
+)
+async def _list_warmup_scripts(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    profile_id, err = _profile_id_arg(args)
+    if err:
+        return err
+    payload, err = await _get_or_error(
+        client, f"/api/profiles/{quote(profile_id, safe='')}/warmup/scripts", "list_warmup_scripts"
+    )
+    if err:
+        return err
+    batches = []
+    for batch in payload.get("batches") or []:
+        if not isinstance(batch, dict):
+            continue
+        shaped = {key: batch.get(key) for key in ("batch_id", "created_at", "status", "model")}
+        shaped["scripts"] = batch.get("scripts") or []
+        batches.append(shaped)
+    return {
+        "ok": True,
+        "llm_configured": payload.get("llm_configured"),
+        "generating": payload.get("generating"),
+        "last_generation": payload.get("last_generation"),
+        "batches": batches,
+    }
+
+
+@register(
+    "get_evolution",
+    "看自对抗进化：引擎状态、待人工批准的提案、实验战报。section 可选 status/proposals/logs/all（默认 all）。批准提案只能在面板里人工操作。",
+    {
+        "type": "object",
+        "properties": {
+            "section": {
+                "type": "string",
+                "enum": ["all", "status", "proposals", "logs"],
+                "default": "all",
+            }
+        },
+    },
+    "read",
+)
+async def _get_evolution(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    section = str(args.get("section") or "all")
+    if section not in ("all", "status", "proposals", "logs"):
+        return {"ok": False, "reason": "invalid_argument", "detail": f"section 只能是 all/status/proposals/logs，收到：{section}"}
+    result: dict[str, Any] = {"ok": True}
+    if section in ("all", "status"):
+        payload, err = await _get_or_error(client, "/api/evolution/status", "get_evolution")
+        if err:
+            return err
+        result["status"] = payload
+    if section in ("all", "proposals"):
+        payload, err = await _get_or_error(client, "/api/evolution/proposals", "get_evolution")
+        if err:
+            return err
+        result["proposals"] = payload
+    if section in ("all", "logs"):
+        payload, err = await _get_or_error(client, "/api/evolution/logs", "get_evolution")
+        if err:
+            return err
+        result["logs"] = payload[:20] if isinstance(payload, list) else payload
+    return result
+
+
+@register("get_kernel_info", "看浏览器内核信息：版本、已安装内核、授权状态（只有 tier/plan/到期/key 是否已存，key 值本身任何接口都不返回）。", NO_ARGS, "read")
+async def _get_kernel_info(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    payload, err = await _get_or_error(client, "/api/kernel", "get_kernel_info")
+    if err:
+        return err
+    return {"ok": True, "kernel": payload}
+
+
+# ── Tools: action layer (registered only when mcp.mode == "full") ────────────
+
+
+@register(
+    "launch_profile",
+    "启动一个画像的浏览器。已在跑会回 already_running；撞上授权单座位会回 seat_busy（座位释放需要几分钟，不要立刻重试）。",
+    PROFILE_ID_ARGS,
+    "action",
+)
+async def _launch_profile(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    profile_id, err = _profile_id_arg(args)
+    if err:
+        return err
+    status, payload = await client.post(
+        f"/api/profiles/{quote(profile_id, safe='')}/launch",
+        json_body={},
+        timeout=ACTION_TIMEOUT_S,
+    )
+    if status >= 300 or not isinstance(payload, dict):
+        return error_result(status, payload, tool="launch_profile")
+    # LaunchResponse also carries cdp_url / vnc_ws_port / display — local
+    # access paths the agent must not get (CDP handout is a hard no).
+    return {
+        "ok": True,
+        **{
+            key: payload.get(key)
+            for key in ("profile_id", "status", "runtime_mode", "viewer_mode", "browser_engine", "launch_mode")
+        },
+    }
+
+
+@register("stop_profile", "关闭一个正在运行的画像浏览器。没在跑会回 not_running。", PROFILE_ID_ARGS, "action")
+async def _stop_profile(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    profile_id, err = _profile_id_arg(args)
+    if err:
+        return err
+    status, payload = await client.post(
+        f"/api/profiles/{quote(profile_id, safe='')}/stop", timeout=ACTION_TIMEOUT_S
+    )
+    if status >= 300:
+        return error_result(status, payload, tool="stop_profile")
+    return {"ok": True, "profile_id": profile_id}
+
+
+@register(
+    "run_site_check",
+    "对画像跑一轮指纹检测（异步：先关掉该画像的浏览器再以调试模式重开，测完自动关闭）。返回任务快照，进度用 get_current_site_check 轮询，报告用 list_site_check_reports 查。另一个自动化在跑时回 automation_busy。",
+    PROFILE_ID_ARGS,
+    "action",
+)
+async def _run_site_check(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    profile_id, err = _profile_id_arg(args)
+    if err:
+        return err
+    status, payload = await client.post(
+        f"/api/profiles/{quote(profile_id, safe='')}/site-check", json_body={}
+    )
+    if status >= 300:
+        return error_result(status, payload, tool="run_site_check")
+    return {"ok": True, "job": payload}
+
+
+@register("run_warmup", "立刻给画像跑一轮养号（不等定时调度）。另一个自动化在跑时回 automation_busy。", PROFILE_ID_ARGS, "action")
+async def _run_warmup(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    profile_id, err = _profile_id_arg(args)
+    if err:
+        return err
+    status, payload = await client.post(
+        f"/api/profiles/{quote(profile_id, safe='')}/warmup/run", json_body={}
+    )
+    if status >= 300:
+        return error_result(status, payload, tool="run_warmup")
+    return {"ok": True, "started": bool(isinstance(payload, dict) and payload.get("started"))}
+
+
+@register(
+    "run_evolution",
+    "立刻给画像跑一轮自对抗进化实验（只在一次性克隆上实验，胜出方案变成待批提案，不直接改真画像）。另一个进化周期在跑时回 conflict/automation_busy。",
+    PROFILE_ID_ARGS,
+    "action",
+)
+async def _run_evolution(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    profile_id, err = _profile_id_arg(args)
+    if err:
+        return err
+    status, payload = await client.post(
+        f"/api/profiles/{quote(profile_id, safe='')}/evolution/run", json_body={}
+    )
+    if status >= 300:
+        return error_result(status, payload, tool="run_evolution")
+    return {"ok": True, "started": bool(isinstance(payload, dict) and payload.get("started"))}
 
 
 # ── MCP server wiring (the only place the SDK is touched) ────────────────────
