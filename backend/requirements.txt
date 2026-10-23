@@ -4,5 +4,8 @@ pydantic>=2.14
 cloakbrowser[geoip]>=0.6.2
 websockets>=14.0
 httpx>=0.27.0
+# Only backend/mcp_server.py imports this (the stdio MCP bridge); the
+# FastAPI app itself never does, so the panel runs fine without it.
+mcp>=2.0
 certifi>=2024.8.30
 cryptography>=42.0
