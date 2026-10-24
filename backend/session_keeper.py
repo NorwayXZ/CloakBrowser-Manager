@@ -4,13 +4,21 @@ On macOS, closing a browser's last window leaves the app running with no
 windows. The Manager still showed it as open, its Dock icon stayed, and when
 it was quit later Chromium saved an empty session, so every tab was lost.
 
-Two pieces fix that:
+Three pieces fix that:
 
 * Closing the last window makes Chromium shut that profile down at once —
   it releases every file in the profile folder while the process lives on
   (measured: 108 open files drop to 0 within a second; a minimized window
   keeps them all). The Manager watches for that and ends the browser the
   normal way. An extension cannot report it: it is stopped with the profile.
+  Debug launches are watched the same way; their DevTools connection does
+  not keep the profile open.
+* Ending a browser whose windows are still open asks that one app to quit,
+  as ⌘Q does, before any signal. On SIGTERM the 155 kernel takes Chromium's
+  end-of-session shortcut, which never closes the profile: measured, a
+  cookie set just before was gone on the next start. Once the last window
+  has closed the profile is already saved, and SIGTERM is used: a quit
+  request then left the kernel's license seat taken for about 4 minutes.
 * A small profile-local MV3 extension keeps a snapshot of the open tabs and,
   on the next start, reopens it if Chromium restored no web page itself. It
   never overwrites the snapshot with "no windows" (closing the last window or
@@ -20,10 +28,12 @@ Two pieces fix that:
 
 from __future__ import annotations
 
+import ctypes
 import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Callable
 
@@ -172,3 +182,39 @@ def profile_files_open(
     if result.returncode not in (0, 1):
         return None
     return any(line.startswith("n" + profile_dir) for line in result.stdout.splitlines())
+
+
+def request_app_quit(pid: int) -> bool:
+    """Ask the macOS app with this PID to quit, as ⌘Q does; False if it cannot be asked.
+
+    Only that process is asked; it closes its profile (cookies, LocalStorage
+    and the session are written) and its helper processes exit with it.
+    """
+    if sys.platform != "darwin":
+        return False
+    try:
+        objc = ctypes.CDLL("/usr/lib/libobjc.A.dylib")
+        ctypes.CDLL("/System/Library/Frameworks/AppKit.framework/AppKit")
+    except OSError:
+        return False
+    objc.objc_getClass.restype = ctypes.c_void_p
+    objc.objc_getClass.argtypes = [ctypes.c_char_p]
+    objc.sel_registerName.restype = ctypes.c_void_p
+    objc.sel_registerName.argtypes = [ctypes.c_char_p]
+    send = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)(("objc_msgSend", objc))
+    send_int = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int)(("objc_msgSend", objc))
+    send_bool = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)(("objc_msgSend", objc))
+
+    def sel(name: bytes) -> int:
+        return objc.sel_registerName(name)
+
+    pool = send(send(objc.objc_getClass(b"NSAutoreleasePool"), sel(b"alloc")), sel(b"init"))
+    try:
+        app = send_int(
+            objc.objc_getClass(b"NSRunningApplication"),
+            sel(b"runningApplicationWithProcessIdentifier:"),
+            pid,
+        )
+        return bool(app) and bool(send_bool(app, sel(b"terminate")))
+    finally:
+        send(pool, sel(b"drain"))
