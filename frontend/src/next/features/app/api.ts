@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { request } from "../../shared/api/client";
 import type { components } from "../../shared/api/schema";
+import { profileKeys } from "../profiles/api";
 
 type Schemas = components["schemas"];
 export type ManagerStatus = Schemas["StatusResponse"];
@@ -18,7 +19,8 @@ export const appKeys = {
   auth: ["auth", "status"] as const,
   status: ["manager", "status"] as const,
   automation: ["automation", "status"] as const,
-  profiles: ["profiles", "list"] as const,
+  /** Shared with the environment list, so both read one cache. */
+  profiles: profileKeys.list,
 };
 
 export const appApi = {

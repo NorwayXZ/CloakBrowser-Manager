@@ -56,7 +56,7 @@ describe("app shell", () => {
     expect(await screen.findByText("Manager v0.7.2")).toBeInTheDocument();
     expect(screen.getByText("内核 145.0.7632.159.1")).toBeInTheDocument();
     expect(await screen.findByText("运行中 2")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "外观" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "外观" })).toBeInTheDocument();
   });
 
   it("shows background automation with its profile, and nothing while idle", async () => {

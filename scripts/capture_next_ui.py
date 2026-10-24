@@ -79,7 +79,25 @@ def screens(page: Page, base: str):
             page.wait_for_timeout(500)
         return run
 
-    yield "01-profiles-placeholder", go("/next/profiles", "text=这一页正在重做"), False
+    first_row = lambda: page.locator("tr[data-row]").first
+    yield "01-profiles", go("/next/profiles", "tr[data-row]"), False
+    yield "01b-profiles-drawer", with_action("/next/profiles", "tr[data-row]",
+                                             lambda: first_row().locator("td").nth(2).click()), False
+    yield "01c-profiles-batch", with_action("/next/profiles", "tr[data-row]", lambda: (
+        page.get_by_role("checkbox", name="全选当前列表").click())), False
+    yield "01d-profiles-row-menu", with_action("/next/profiles", "tr[data-row]",
+                                               lambda: page.get_by_role("button", name="的更多操作").first.click()), False
+    yield "01e-preflight", with_action("/next/profiles", "tr[data-row]", lambda: (
+        page.locator("tr[data-row]", has_text="Etsy UK").get_by_role("button", name="打开「Etsy UK」").click(),
+        page.wait_for_selector("text=启动前检查"))), False
+    yield "01f-sentence", go("/next/profiles?create=sentence", "text=一句话描述"), False
+    yield "01f2-sentence-preview", with_action("/next/profiles?create=sentence", "text=一句话描述", lambda: (
+        page.get_by_role("textbox", name="一句话描述").fill("建个美国号，西雅图，喜欢露营摄影"),
+        page.get_by_role("button", name="解析").click(),
+        page.wait_for_selector("text=一句话建号预览"))), False
+    yield "01g-disposable", go("/next/profiles?create=disposable", "text=新建一次性身份"), False
+    yield "01h-no-match", go("/next/profiles?q=zzzz", "text=没有匹配的环境"), False
+    yield "01i-editor-placeholder", go("/next/profiles/new", "text=新建环境"), False
     yield "02-settings-appearance", go("/next/settings", "text=主题"), False
     yield "03-settings-placeholder", go("/next/settings/kernel", "text=正在重做"), False
     yield "04-running-popover", with_action("/next/settings", "text=主题",

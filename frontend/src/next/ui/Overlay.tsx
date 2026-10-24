@@ -42,7 +42,7 @@ export function Dialog({
           )}
         >
           <div className="flex items-start gap-3 px-5 pb-3 pt-4">
-            <div className="min-w-0 flex-1">
+            <div className={cn("min-w-0 flex-1", dismissible && "pr-8")}>
               <RadixDialog.Title className="text-md font-semibold text-fg">{title}</RadixDialog.Title>
               {description ? (
                 <RadixDialog.Description className="mt-1 text-sm text-fg-2">{description}</RadixDialog.Description>
@@ -50,14 +50,15 @@ export function Dialog({
                 <RadixDialog.Description className="sr-only">{title}</RadixDialog.Description>
               )}
             </div>
-            {dismissible && (
-              <RadixDialog.Close asChild>
-                <IconButton label="关闭" icon={<X className="h-4 w-4" />} size="sm" className="-mr-1.5 -mt-0.5" />
-              </RadixDialog.Close>
-            )}
           </div>
           {children && <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4 text-sm text-fg">{children}</div>}
           {footer && <div className="flex flex-wrap justify-end gap-2 border-t border-border px-5 py-3">{footer}</div>}
+          {/* Last in the DOM so the first focus lands in the content, not on 关闭 (with its tooltip). */}
+          {dismissible && (
+            <RadixDialog.Close asChild>
+              <IconButton label="关闭" icon={<X className="h-4 w-4" />} size="sm" className="absolute right-3.5 top-3.5" />
+            </RadixDialog.Close>
+          )}
         </RadixDialog.Content>
       </RadixDialog.Portal>
     </RadixDialog.Root>
@@ -68,8 +69,10 @@ export function Dialog({
 
 const menuContent =
   "z-50 min-w-44 rounded-md border border-border bg-surface p-1 shadow-popover animate-[cbm-pop-in_120ms_ease-out]";
+// No text colour here: callers pick exactly one (text-fg or text-danger), since
+// two competing colour utilities resolve by stylesheet order, not class order.
 const menuItem =
-  "flex h-8 cursor-default select-none items-center gap-2 rounded px-2 text-sm text-fg outline-none " +
+  "flex h-8 cursor-default select-none items-center gap-2 rounded px-2 text-sm outline-none " +
   "data-[highlighted]:bg-surface-2 data-[disabled]:pointer-events-none data-[disabled]:opacity-50";
 
 export function Menu({ trigger, children, align = "end" }: { trigger: ReactElement; children: ReactNode; align?: "start" | "end" }) {
@@ -101,7 +104,7 @@ export function MenuItem({
   shortcut?: string;
 }) {
   return (
-    <RadixMenu.Item className={cn(menuItem, danger && "text-danger")} onSelect={onSelect} disabled={disabled}>
+    <RadixMenu.Item className={cn(menuItem, danger ? "text-danger data-[highlighted]:bg-danger-soft" : "text-fg")} onSelect={onSelect} disabled={disabled}>
       <span className="flex h-4 w-4 items-center justify-center" aria-hidden>
         {icon}
       </span>
@@ -127,7 +130,7 @@ export function MenuRadioGroup({
       {label && <RadixMenu.Label className="px-2 py-1 text-xs text-fg-3">{label}</RadixMenu.Label>}
       <RadixMenu.RadioGroup value={value} onValueChange={onValueChange}>
         {options.map((option) => (
-          <RadixMenu.RadioItem key={option.value} value={option.value} className={menuItem}>
+          <RadixMenu.RadioItem key={option.value} value={option.value} className={cn(menuItem, "text-fg")}>
             <span className="flex h-4 w-4 items-center justify-center" aria-hidden>
               {option.icon}
             </span>

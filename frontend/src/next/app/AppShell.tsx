@@ -5,13 +5,10 @@ import { usePreferences } from "../features/settings/preferences";
 import { onReconnect, useConnectionState } from "../shared/api/connection";
 import { useHotkeys, useMediaQuery } from "../shared/lib/hotkeys";
 import { Banner, Dialog, Kbd, Spinner, useToast } from "../ui";
-import { NAV_ITEMS } from "./nav";
+import { NARROW_QUERY, NAV_ITEMS } from "./nav";
 import { RouteErrorBoundary } from "./RouteErrorBoundary";
 import { Sidebar } from "./Sidebar";
 import { SHORTCUTS, Toolbar } from "./Toolbar";
-
-/** Below this width the sidebar only shows icons, whatever the preference says. */
-export const NARROW_QUERY = "(max-width: 1179px)";
 
 export function AppShell() {
   const location = useLocation();

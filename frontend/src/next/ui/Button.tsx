@@ -3,7 +3,7 @@ import { cn } from "../shared/lib/cn";
 import { Spinner } from "./Spinner";
 import { Tooltip } from "./Tooltip";
 
-export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
+export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "danger-ghost";
 export type ButtonSize = "sm" | "md";
 
 const VARIANTS: Record<ButtonVariant, string> = {
@@ -11,6 +11,8 @@ const VARIANTS: Record<ButtonVariant, string> = {
   secondary: "border border-border-strong bg-surface text-fg hover:bg-surface-2 active:bg-surface-3",
   ghost: "text-fg-2 hover:bg-surface-2 hover:text-fg active:bg-surface-3",
   danger: "bg-danger text-danger-on hover:bg-danger-hover active:bg-danger-hover",
+  /** Destructive but secondary: red text, no fill (e.g. "移到回收站" beside other actions). */
+  "danger-ghost": "text-danger hover:bg-danger-soft active:bg-danger-soft",
 };
 
 const SIZES: Record<ButtonSize, string> = {

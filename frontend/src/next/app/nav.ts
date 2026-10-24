@@ -25,3 +25,6 @@ export const APP_BASENAME = "/next";
 
 /** The current panel, for pages that are not rebuilt yet. */
 export const LEGACY_PANEL_URL = "/";
+
+/** Below this width the sidebar only shows icons and side panels collapse. */
+export const NARROW_QUERY = "(max-width: 1179px)";
