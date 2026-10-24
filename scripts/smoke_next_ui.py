@@ -101,7 +101,62 @@ def run(page: Page, base: str) -> None:
     assert name not in profiles_by_name(base)
     assert name not in {p["name"] for p in call(base, "GET", "/api/profiles/trash")}
 
+    step("create with the editor: custom SOCKS5 proxy, group, notes")
+    page.goto(base + "/next/profiles/new")
+    page.get_by_role("textbox", name="名称").fill("编辑器创建的环境")
+    page.get_by_label("分组").select_option("冒烟测试组")
+    page.get_by_role("radiogroup", name="代理方式").get_by_role("radio", name="自定义代理").click()
+    page.get_by_label("代理类型").select_option("socks5")
+    page.get_by_placeholder("192.168.100.1").fill("203.0.113.77")
+    page.get_by_placeholder("1090").fill("1080")
+    page.get_by_label("代理账号").fill("smoke")
+    page.get_by_label("代理密码").fill("p@ss word")
+    page.get_by_label("备注").fill("由新编辑页创建")
+    page.get_by_role("button", name="创建").click()
+    expect(page.get_by_role("complementary", name="编辑器创建的环境")).to_be_visible()
+    made = profiles_by_name(base)["编辑器创建的环境"]
+    assert made["proxy"] == "socks5://smoke:p%40ss%20word@203.0.113.77:1080", made["proxy"]
+    assert made["group_name"] == "冒烟测试组" and made["notes"] == "由新编辑页创建"
+    assert made["fingerprint_options"].get("storage_quota_mb") == 50000
+
+    step("edit: leaving with changes asks first; Ctrl/Cmd+S saves")
+    page.goto(base + f"/next/profiles/{made['id']}/edit")
+    page.get_by_label("备注").fill("改过的备注")
+    page.get_by_role("button", name="取消").click()
+    page.get_by_role("dialog", name="放弃没保存的修改？").get_by_role("button", name="继续编辑").click()
+    page.keyboard.press("ControlOrMeta+s")
+    expect(page.get_by_role("complementary", name="编辑器创建的环境")).to_be_visible()
+    assert profiles_by_name(base)["编辑器创建的环境"]["notes"] == "改过的备注"
+
+    step("typing stays responsive with a large cookie field")
+    big = "[" + ",".join(f'{{"name":"c{i}","value":"{"x" * 40}","domain":".example.com","path":"/"}}' for i in range(400)) + "]"
+    page.goto(base + f"/next/profiles/{made['id']}/edit")
+    page.get_by_placeholder("支持 JSON、Netscape", exact=False).fill(big)
+    name = page.get_by_role("textbox", name="名称")
+    name.click()
+    name.press("End")
+    per_key = page.evaluate("""async () => {
+      const input = document.activeElement;
+      const samples = [];
+      for (let i = 0; i < 30; i += 1) {
+        const start = performance.now();
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+        setter.call(input, input.value + "a");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+        samples.push(performance.now() - start);
+      }
+      samples.sort((a, b) => a - b);
+      return { median: samples[15], worst: samples[29] };
+    }""")
+    print(f"    keystroke to next frame: median {per_key['median']:.1f} ms, worst {per_key['worst']:.1f} ms")
+    assert per_key["median"] < 50, per_key
+    page.get_by_role("button", name="取消").click()
+    page.get_by_role("dialog", name="放弃没保存的修改？").get_by_role("button", name="放弃修改").click()
+
     step("preflight opens and cancels without launching")
+    page.goto(base + "/next/profiles")
     page.get_by_role("button", name="打开「Etsy UK」").click()
     page.get_by_role("dialog", name="启动前检查").get_by_role("button", name="取消").click()
     assert profiles_by_name(base)["Etsy UK"]["status"] != "running"

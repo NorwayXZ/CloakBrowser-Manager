@@ -30,6 +30,9 @@ LAYOUT_CHECK = """
   const faults = [];
   const vw = document.documentElement.clientWidth;
   if (document.documentElement.scrollWidth > vw + 1) faults.push(`page scrolls sideways (${document.documentElement.scrollWidth} > ${vw})`);
+  // The shell never scrolls as a whole; only its panes do. A scrolled page means
+  // something (e.g. scrollIntoView) pushed the toolbar out of the window.
+  if (window.scrollY > 0 || document.querySelector("#root")?.parentElement?.scrollTop) faults.push(`the page itself is scrolled by ${window.scrollY}px`);
   const describe = (el) => {
     const id = el.id ? `#${el.id}` : "";
     const text = (el.textContent || "").trim().slice(0, 40);
@@ -97,7 +100,34 @@ def screens(page: Page, base: str):
         page.wait_for_selector("text=一句话建号预览"))), False
     yield "01g-disposable", go("/next/profiles?create=disposable", "text=新建一次性身份"), False
     yield "01h-no-match", go("/next/profiles?q=zzzz", "text=没有匹配的环境"), False
-    yield "01i-editor-placeholder", go("/next/profiles/new", "text=新建环境"), False
+    def edit_first():
+        page.goto(base + "/next/profiles")
+        page.wait_for_selector("tr[data-row]")
+        page.get_by_role("button", name="「Amazon Seller #1」的更多操作").click()
+        page.get_by_role("menuitem", name="编辑").click()
+        page.wait_for_selector("#form-basic")
+        page.wait_for_timeout(700)
+
+    def section(name: str):
+        def run():
+            edit_first()
+            page.get_by_role("navigation", name="表单分区").get_by_role("button", name=name).click()
+            page.wait_for_timeout(900)
+        return run
+
+    yield "02a-editor-new", go("/next/profiles/new", "#form-basic"), False
+    yield "02b-editor-edit", edit_first, False
+    yield "02c-editor-proxy", section("代理信息"), False
+    yield "02d-editor-fingerprint", section("指纹配置"), False
+    yield "02e-editor-more", section("更多指纹"), False
+    yield "02f-editor-advanced", with_action("/next/profiles/new", "#form-basic", lambda: (
+        page.get_by_role("navigation", name="表单分区").get_by_role("button", name="高级设置").click(),
+        page.get_by_role("checkbox", name="养号（定时自动浏览养护）").click(),
+        page.wait_for_timeout(600))), False
+    yield "02g-editor-leave", with_action("/next/profiles/new", "#form-basic", lambda: (
+        page.get_by_role("textbox", name="名称").fill("没保存的环境"),
+        page.get_by_role("button", name="取消").click(),
+        page.wait_for_selector("text=放弃没保存的修改？"))), False
     yield "02-settings-appearance", go("/next/settings", "text=主题"), False
     yield "03-settings-placeholder", go("/next/settings/kernel", "text=正在重做"), False
     yield "04-running-popover", with_action("/next/settings", "text=主题",

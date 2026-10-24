@@ -1,6 +1,6 @@
 import { lazy, Suspense, type ReactNode } from "react";
 import { createBrowserRouter, Navigate, type RouteObject } from "react-router";
-import { EditorComingSoon, ProfilesLayout } from "../features/profiles/ProfilesLayout";
+import { ProfilesLayout } from "../features/profiles/ProfilesLayout";
 import { ProfilesPage } from "../features/profiles/ProfilesPage";
 import { ComingSoon, NotFound } from "../pages/ComingSoon";
 import { Skeleton } from "../ui";
@@ -9,6 +9,7 @@ import { APP_BASENAME } from "./nav";
 
 const Gallery = lazy(() => import("../dev/Gallery").then((m) => ({ default: m.Gallery })));
 const ViewerPage = lazy(() => import("../features/profiles/ViewerPage").then((m) => ({ default: m.ViewerPage })));
+const EditorPage = lazy(() => import("../features/editor/EditorPage").then((m) => ({ default: m.EditorPage })));
 const SettingsPage = lazy(() => import("../pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 
 function page(element: ReactNode) {
@@ -34,8 +35,8 @@ export const routes: RouteObject[] = [
         element: <ProfilesLayout />,
         children: [
           { index: true, element: <ProfilesPage /> },
-          { path: "new", element: <EditorComingSoon mode="new" /> },
-          { path: ":id/edit", element: <EditorComingSoon mode="edit" /> },
+          { path: "new", element: page(<EditorPage mode="new" />) },
+          { path: ":id/edit", element: page(<EditorPage mode="edit" />) },
           { path: ":id/viewer", element: page(<ViewerPage />) },
         ],
       },

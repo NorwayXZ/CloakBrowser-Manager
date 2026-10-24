@@ -6,6 +6,7 @@ import {
   forwardRef,
   useContext,
   useId,
+  useState,
   type InputHTMLAttributes,
   type ReactNode,
   type SelectHTMLAttributes,
@@ -125,6 +126,7 @@ export function Checkbox({
   checked,
   onCheckedChange,
   label,
+  description,
   disabled,
   id,
   "aria-label": ariaLabel,
@@ -132,18 +134,24 @@ export function Checkbox({
   checked: boolean | "indeterminate";
   onCheckedChange: (checked: boolean) => void;
   label?: ReactNode;
+  /** Shown under the label and read as the box's description. */
+  description?: ReactNode;
   disabled?: boolean;
   id?: string;
   "aria-label"?: string;
 }) {
   const autoId = useId();
   const boxId = id ?? autoId;
+  // Inside a <form>, Radix adds a hidden absolutely positioned native input next
+  // to the box; the relative wrapper keeps it from stretching the document.
   const box = (
+    <span className="relative inline-flex">
     <RadixCheckbox.Root
       id={boxId}
       checked={checked}
       disabled={disabled}
       aria-label={ariaLabel}
+      aria-describedby={description ? `${boxId}-desc` : undefined}
       onCheckedChange={(value) => onCheckedChange(value === true)}
       className={cn(
         "flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border border-border-strong bg-surface text-accent-on",
@@ -156,8 +164,24 @@ export function Checkbox({
         {checked === "indeterminate" ? <Minus className="h-3 w-3" strokeWidth={3} /> : <Check className="h-3 w-3" strokeWidth={3} />}
       </RadixCheckbox.Indicator>
     </RadixCheckbox.Root>
+    </span>
   );
   if (!label) return box;
+  if (description) {
+    return (
+      <div className="flex items-start gap-2.5">
+        <span className="mt-0.5">{box}</span>
+        <div className="min-w-0">
+          <label htmlFor={boxId} className={cn("text-sm font-medium text-fg", disabled && "text-fg-3")}>
+            {label}
+          </label>
+          <div id={`${boxId}-desc`} className="mt-0.5 text-xs text-fg-3">
+            {description}
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="flex items-center gap-2">
       {box}
@@ -165,6 +189,81 @@ export function Checkbox({
         {label}
       </label>
     </div>
+  );
+}
+
+/**
+ * A few mutually exclusive choices shown side by side (a radio group).
+ * Arrow keys move the choice, as with native radio buttons.
+ */
+export function Segmented<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+  className,
+}: {
+  label: string;
+  value: T;
+  options: [T, ReactNode][];
+  onChange: (value: T) => void;
+  className?: string;
+}) {
+  const move = (delta: number, from: HTMLElement) => {
+    const index = options.findIndex(([option]) => option === value);
+    const next = options[(index + delta + options.length) % options.length];
+    if (!next) return;
+    onChange(next[0]);
+    const buttons = from.parentElement?.querySelectorAll<HTMLButtonElement>("[role=radio]");
+    buttons?.[(index + delta + options.length) % options.length]?.focus();
+  };
+  return (
+    <div role="radiogroup" aria-label={label} className={cn("inline-flex max-w-full flex-wrap rounded border border-border-strong bg-surface-2 p-0.5", className)}>
+      {options.map(([option, text]) => {
+        const checked = value === option;
+        return (
+          <button
+            key={option}
+            type="button"
+            role="radio"
+            aria-checked={checked}
+            tabIndex={checked ? 0 : -1}
+            onClick={() => onChange(option)}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+                event.preventDefault();
+                move(1, event.currentTarget);
+              } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+                event.preventDefault();
+                move(-1, event.currentTarget);
+              }
+            }}
+            className={cn(
+              "h-7 rounded-sm px-3 text-sm transition-colors duration-fast",
+              checked ? "bg-surface font-medium text-accent shadow-raised" : "text-fg-2 hover:text-fg",
+            )}
+          >
+            {text}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Long help text folded to one line, with 展开 / 收起. */
+export function Hint({ children, lines = 1 }: { children: string; lines?: 1 | 2 }) {
+  const [open, setOpen] = useState(false);
+  const long = children.length > (lines === 1 ? 56 : 112);
+  return (
+    <span className="block">
+      <span className={cn(!open && long && (lines === 1 ? "line-clamp-1" : "line-clamp-2"))}>{children}</span>
+      {long && (
+        <button type="button" className="text-accent hover:underline" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+          {open ? "收起" : "展开"}
+        </button>
+      )}
+    </span>
   );
 }
 
@@ -194,6 +293,7 @@ export function Switch({
           </p>
         )}
       </div>
+      <span className="relative inline-flex shrink-0">
       <RadixSwitch.Root
         id={id}
         checked={checked}
@@ -207,6 +307,7 @@ export function Switch({
       >
         <RadixSwitch.Thumb className="block h-4 w-4 translate-x-0.5 rounded-full bg-surface shadow-raised transition-transform duration-fast data-[state=checked]:translate-x-[18px]" />
       </RadixSwitch.Root>
+      </span>
     </div>
   );
 }
