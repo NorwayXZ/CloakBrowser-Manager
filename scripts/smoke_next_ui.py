@@ -223,6 +223,21 @@ def run(page: Page, base: str) -> None:
     assert first["id"] in {p["id"] for p in call(base, "GET", "/api/profiles")}
     assert second["id"] not in {p["id"] for p in call(base, "GET", "/api/profiles/trash")}
 
+    step("checks: reports start empty; evolution switch saves; linkability analyses saved profiles")
+    page.goto(base + "/next/checks")
+    expect(page.get_by_text("还没有检测报告")).to_be_visible()
+    expect(page.get_by_role("button", name="开始一键检测")).to_be_enabled()
+    page.goto(base + "/next/checks/evolution")
+    target = page.get_by_label("进化的环境").input_value()
+    page.get_by_role("switch", name="自动进化").click()
+    expect(page.get_by_role("switch", name="自动进化")).to_be_checked()
+    page.wait_for_timeout(500)
+    assert {p["id"]: p for p in call(base, "GET", "/api/profiles")}[target]["evolution_enabled"] is True
+    page.goto(base + "/next/checks/links")
+    expect(page.get_by_text("个环境", exact=False).first).to_be_visible()
+    analysis = call(base, "GET", "/api/linkability")
+    assert analysis["profile_count"] == len(call(base, "GET", "/api/profiles")), analysis["profile_count"]
+
     step("preflight opens and cancels without launching")
     page.goto(base + "/next/profiles")
     page.get_by_role("button", name="打开「Etsy UK」").first.click()

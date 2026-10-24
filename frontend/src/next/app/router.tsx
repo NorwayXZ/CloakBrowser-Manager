@@ -2,7 +2,7 @@ import { lazy, Suspense, type ReactNode } from "react";
 import { createBrowserRouter, Navigate, type RouteObject } from "react-router";
 import { ProfilesLayout } from "../features/profiles/ProfilesLayout";
 import { ProfilesPage } from "../features/profiles/ProfilesPage";
-import { ComingSoon, NotFound } from "../pages/ComingSoon";
+import { NotFound } from "../pages/ComingSoon";
 import { Skeleton } from "../ui";
 import { AppShell } from "./AppShell";
 import { APP_BASENAME } from "./nav";
@@ -12,6 +12,7 @@ const ViewerPage = lazy(() => import("../features/profiles/ViewerPage").then((m)
 const EditorPage = lazy(() => import("../features/editor/EditorPage").then((m) => ({ default: m.EditorPage })));
 const ProxiesPage = lazy(() => import("../features/proxies/ProxiesPage").then((m) => ({ default: m.ProxiesPage })));
 const DataPage = lazy(() => import("../features/data/DataPage").then((m) => ({ default: m.DataPage })));
+const ChecksPage = lazy(() => import("../features/checks/ChecksPage").then((m) => ({ default: m.ChecksPage })));
 const SettingsPage = lazy(() => import("../pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 
 function page(element: ReactNode) {
@@ -43,7 +44,9 @@ export const routes: RouteObject[] = [
         ],
       },
       { path: "proxies", element: page(<ProxiesPage />) },
-      { path: "checks", element: <ComingSoon title="检测" description="检测报告、自对抗进化和关联分析。" phase={5} /> },
+      { path: "checks", element: page(<ChecksPage />) },
+      { path: "checks/evolution", element: page(<ChecksPage />) },
+      { path: "checks/links", element: page(<ChecksPage />) },
       { path: "data", element: page(<DataPage />) },
       { path: "data/trash", element: page(<DataPage />) },
       { path: "settings", element: page(<SettingsPage />) },

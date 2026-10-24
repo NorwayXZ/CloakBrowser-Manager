@@ -19,7 +19,7 @@ from pathlib import Path
 from playwright.sync_api import Page, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from capture_baseline_ui import ROOT, free_port, seed, start_server  # noqa: E402
+from capture_baseline_ui import ROOT, call, free_port, seed, start_server  # noqa: E402
 
 OUT = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "build" / "next-screenshots"
 SIZES = [(900, 640), (1024, 680), (1280, 800), (1600, 1000)]
@@ -65,6 +65,46 @@ LAYOUT_CHECK = """
   return [...new Set(faults)].slice(0, 20);
 }
 """
+
+
+def seed_reports(data_dir: Path, base: str, browser) -> None:
+    """Two example detection reports for one profile (older and newer), so the
+    report screens show real content. Example data, written straight into the
+    throwaway data directory; no browser profile is launched."""
+    profile = next(p for p in call(base, "GET", "/api/profiles") if p["name"] == "Etsy UK")
+    page = browser.new_page(viewport={"width": 640, "height": 400})
+
+    def shot(title: str, verdict: str) -> bytes:
+        page.set_content(f"<body style='margin:0;font:28px sans-serif;background:#eef1f7;display:flex;align-items:center;justify-content:center;height:100vh'>"
+                         f"<div><b>{title}</b><br><span style='color:#666'>{verdict}（示例截图）</span></div></body>")
+        return page.screenshot()
+
+    def result(site, name, status, summary, details=(), local=False, ip_note=None):
+        return {"site": site, "name": name, "url": "", "criteria": "示例标准", "status": status, "summary": summary,
+                "details": list(details), "screenshot": None if local else f"{site}.png", "seconds": 20,
+                "source": "local" if local else "site", "ip_note": ip_note}
+
+    for stamp, pixelscan in (("20261023-100000", "pass"), ("20261024-100000", "fail")):
+        folder = data_dir / "check-reports" / f"{stamp}-Etsy_UK"
+        folder.mkdir(parents=True, exist_ok=True)
+        results = [
+            result("local_gpu", "GPU / WebGL", "pass", "ANGLE (Apple, ANGLE Metal Renderer: Apple M2)", local=True),
+            result("creepjs", "CreepJS", "pass", "没有 lies，headless 0%，stealth 0%", ["lies：0 处"]),
+            result("pixelscan", "Pixelscan", pixelscan, "指纹一致" if pixelscan == "pass" else "指纹不一致、检测到伪装", ["指纹：" + ("一致" if pixelscan == "pass" else "不一致")]),
+            result("fingerprint", "Fingerprint.com", "warn", "浏览器没被认出，但 IP 被认出", ip_note="这一项的结论受出口 IP 信誉影响"),
+        ]
+        for item in results:
+            if item["screenshot"]:
+                (folder / item["screenshot"]).write_bytes(shot(item["name"], item["summary"]))
+        report = {
+            "id": folder.name, "created_at": f"{stamp[:4]}-{stamp[4:6]}-{stamp[6:8]}T10:00:00+08:00",
+            "overall": "fail" if pixelscan == "fail" else "warn",
+            "environment": {"profile_id": profile["id"], "profile_name": profile["name"], "host_os": "macos", "kernel_version": "145.0.7632.159.1", "exit_ip": "192.0.2.55", "exit_country": "GB"},
+            "results": results,
+            "egress_note": "示例报告：出口 192.0.2.55（GB）。标注“IP 信誉”的条目结论受出口 IP 影响。",
+        }
+        (folder / "report.json").write_text(json.dumps(report, ensure_ascii=False), encoding="utf-8")
+    page.close()
 
 
 def screens(page: Page, base: str):
@@ -137,6 +177,10 @@ def screens(page: Page, base: str):
         page.get_by_role("button", name="恢复到", exact=False).first.click(),
         page.wait_for_selector("role=dialog"))), False
     yield "04c-trash", go("/next/data/trash", "text=已删除的旧环境"), False
+    yield "05a-checks", go("/next/checks", "text=检测哪些网站"), False
+    yield "05b-checks-report", go("/next/checks?report=20261024-100000-Etsy_UK", "text=和上次不同"), True
+    yield "05c-checks-evolution", go("/next/checks/evolution", "text=进化时间线"), False
+    yield "05d-checks-links", go("/next/checks/links", "text=关联分析"), False
     yield "02-settings-appearance", go("/next/settings", "text=主题"), False
     yield "03-settings-placeholder", go("/next/settings/kernel", "text=正在重做"), False
     yield "04-running-popover", with_action("/next/settings", "text=主题",
@@ -163,6 +207,7 @@ def main() -> int:
         seed(base)
         with sync_playwright() as pw:
             browser = pw.chromium.launch()
+            seed_reports(proc.data_dir, base, browser)
             for theme in THEMES:
                 for width, height in SIZES:
                     context = browser.new_context(viewport={"width": width, "height": height}, color_scheme=theme,

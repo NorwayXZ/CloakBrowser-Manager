@@ -136,11 +136,11 @@ describe("app shell", () => {
     expect(link).toHaveAttribute("aria-current", "page");
   });
 
-  it("shows a placeholder with a way back to the current panel for unbuilt pages", () => {
+  it("shows a placeholder with a way back to the current panel for unbuilt pages", async () => {
     controllableMedia({});
     mockFetch(shellRoutes());
-    renderApp("/checks");
-    expect(screen.getByText("这一页正在重做")).toBeInTheDocument();
+    renderApp("/settings/kernel");
+    expect(await screen.findByText(/正在重做/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "打开当前界面" })).toHaveAttribute("href", "/");
   });
 

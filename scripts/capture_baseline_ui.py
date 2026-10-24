@@ -59,6 +59,7 @@ def start_server(port: int) -> subprocess.Popen:
         [sys.executable, "-m", "uvicorn", "backend.main:app", "--host", "127.0.0.1", "--port", str(port)],
         cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
     )
+    proc.data_dir = Path(env["CLOAKBROWSER_MANAGER_DATA_DIR"])  # type: ignore[attr-defined]
     base = f"http://127.0.0.1:{port}"
     for _ in range(120):
         try:
