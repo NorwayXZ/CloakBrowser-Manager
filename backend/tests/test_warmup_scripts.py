@@ -421,6 +421,19 @@ def _wait_for_generation(client, pid: str, timeout=10.0):
     raise AssertionError("generation did not finish in time")
 
 
+def test_llm_api_key_can_be_cleared(app_client):
+    app_client.put("/api/settings/llm", json={
+        "base_url": "https://llm.example/v1", "model": "m1", "api_key": "sk-hidden",
+    })
+
+    cleared = app_client.put("/api/settings/llm", json={
+        "base_url": "https://llm.example/v1", "model": "m1", "api_key": "sk-ignored", "clear_api_key": True,
+    }).json()
+
+    assert cleared["has_api_key"] is False and cleared["configured"] is False
+    assert db.get_setting("llm_api_key") in (None, "")
+
+
 def test_llm_settings_api(app_client):
     status = app_client.get("/api/settings/llm").json()
     assert status["configured"] is False and status["has_api_key"] is False

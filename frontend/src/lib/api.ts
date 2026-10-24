@@ -465,6 +465,8 @@ export interface LlmSettingsUpdate {
   base_url: string;
   model: string;
   api_key?: string | null;
+  /** Deletes the stored key; wins over api_key. */
+  clear_api_key?: boolean;
   executor_model: string;
   executor_effort: string;
 }
@@ -698,6 +700,9 @@ export interface ProxyTestResult {
   connection_mode?: "direct" | "proxy" | null;
   /** Whether the exit IP is known as a proxy, VPN or datacenter address. */
   ip_quality?: IpQuality | null;
+  /** Every exit IP this test saw; more than one of a family = rotating. */
+  exit_ips?: string[];
+  rotating_ip?: boolean;
 }
 
 export interface ProfileGroup {

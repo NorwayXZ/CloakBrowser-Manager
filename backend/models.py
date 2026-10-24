@@ -383,6 +383,9 @@ class ProxyTestResponse(BaseModel):
     source: str = "ipapi.co"
     connection_mode: Literal["direct", "proxy"] | None = None
     ip_quality: IpQuality | None = None
+    # Every exit IP this test saw; more than one of a family = rotating proxy.
+    exit_ips: list[str] = []
+    rotating_ip: bool = False
 
 
 class GroupCreate(BaseModel):
@@ -630,6 +633,7 @@ class LlmSettingsModel(BaseModel):
     base_url: str = ""
     model: str = ""
     api_key: str | None = None  # write-only: omitted/empty keeps the stored key
+    clear_api_key: bool = False  # True deletes the stored key (wins over api_key)
     executor_model: str = ""  # AI 驾驶员的执行模型（与剧本生成模型分开）
     executor_effort: str = ""  # 执行模型的 effort 档位，空 = 服务商默认
 

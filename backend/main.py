@@ -806,7 +806,7 @@ async def _burn_profile_now(profile: dict) -> dict:
             resolved = user_data_dir.resolve()
         except ValueError:
             resolved = None
-        if resolved is not None and resolved.is_relative_to(profiles_root):
+        if resolved is not None and resolved != profiles_root and resolved.is_relative_to(profiles_root):
             try:
                 files_removed = sum(1 for path in resolved.rglob("*") if path.is_file())
             except OSError:
@@ -814,7 +814,8 @@ async def _burn_profile_now(profile: dict) -> dict:
 
     db.purge_profile(profile_id)
     if resolved is not None and resolved.exists():
-        if resolved.is_relative_to(profiles_root):
+        # Only a profile's own folder inside profiles/, never the root itself.
+        if resolved != profiles_root and resolved.is_relative_to(profiles_root):
             shutil.rmtree(resolved, ignore_errors=True)
         else:
             logger.error("Refusing to burn %s: outside profiles root", user_data_dir)
@@ -1721,6 +1722,7 @@ async def update_llm_settings(body: LlmSettingsModel):
         api_key=body.api_key,
         executor_model=body.executor_model,
         executor_effort=body.executor_effort,
+        clear_api_key=body.clear_api_key,
     )
     return llm_client.config_status(db.get_setting)
 
@@ -1827,9 +1829,12 @@ _CLONE_COPY_FIELDS = (
     "browser_engine", "device_profile", "fingerprint_seed", "proxy", "timezone", "locale",
     "platform", "user_agent", "screen_width", "screen_height", "gpu_vendor", "gpu_renderer",
     "hardware_concurrency", "device_memory", "humanize", "human_preset", "headless", "geoip",
-    "clipboard_sync", "color_scheme", "group_name", "account_platform", "cookies_json",
+    "clipboard_sync", "color_scheme", "group_name", "account_platform",
     "launch_args", "fingerprint_options",
 )
+# cookies_json is deliberately absent: a clone only runs the detection
+# battery, which never needs the account's login cookies, and copying them
+# would put live sessions into a throwaway profile driven by automation.
 
 
 def _evo_make_clone(source: dict) -> dict:
