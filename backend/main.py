@@ -34,6 +34,7 @@ import starlette.requests
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from . import auto_backup
+from . import client_logs
 from . import backup as backups
 from . import database as db
 from . import device_templates
@@ -106,6 +107,9 @@ from .models import (
     McpAuditIn,
     McpAuditResponse,
     McpSettingsModel,
+    UiPreferencesModel,
+    ClientLogBatch,
+    ClientLogResult,
     ProfileCreate,
     ProfileResponse,
     ProfileStatusResponse,
@@ -1751,6 +1755,32 @@ async def update_mcp_settings(body: McpSettingsModel):
     return McpSettingsModel(mode=body.mode)
 
 
+UI_PREFERENCES_SETTING_KEY = "ui.preferences"
+
+
+@app.get("/api/settings/ui", response_model=UiPreferencesModel)
+async def get_ui_preferences():
+    raw = db.get_setting(UI_PREFERENCES_SETTING_KEY)
+    if raw:
+        try:
+            return UiPreferencesModel.model_validate_json(raw)
+        except ValueError:
+            logger.warning("Ignoring unreadable UI preferences: %r", raw[:200])
+    return UiPreferencesModel()
+
+
+@app.put("/api/settings/ui", response_model=UiPreferencesModel)
+async def update_ui_preferences(body: UiPreferencesModel):
+    db.set_setting(UI_PREFERENCES_SETTING_KEY, body.model_dump_json())
+    return body
+
+
+@app.post("/api/client-logs", response_model=ClientLogResult)
+async def receive_client_logs(body: ClientLogBatch):
+    accepted, dropped = client_logs.write_entries([entry.model_dump() for entry in body.entries])
+    return ClientLogResult(accepted=accepted, dropped=dropped)
+
+
 @app.post("/api/mcp/audit", status_code=201)
 async def create_mcp_audit(body: McpAuditIn):
     audit_id = await asyncio.to_thread(
@@ -3246,6 +3276,18 @@ async def cdp_page_proxy(websocket: WebSocket, profile_id: str, path: str):
 
 # ── Static Frontend ───────────────────────────────────────────────────────────
 
+def _spa_page(full_path: str) -> Path:
+    """The HTML page for a client-side route.
+
+    The redesigned panel is a second page under /next/ until it replaces the
+    current one; everything else gets the current panel.
+    """
+    next_page = FRONTEND_DIR / "next" / "index.html"
+    if (full_path == "next" or full_path.startswith("next/")) and next_page.is_file():
+        return next_page
+    return FRONTEND_DIR / "index.html"
+
+
 # Serve React build. Must be AFTER API routes so /api/* isn't caught by the SPA.
 if FRONTEND_DIR.exists():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIR / "assets"), name="assets")
@@ -3270,4 +3312,4 @@ if FRONTEND_DIR.exists():
                 return FileResponse(file_path)
         # The page must be revalidated: a stale cached index.html keeps loading
         # the previous release's bundle after the app is upgraded.
-        return FileResponse(FRONTEND_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+        return FileResponse(_spa_page(full_path), headers={"Cache-Control": "no-cache"})

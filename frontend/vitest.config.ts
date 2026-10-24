@@ -6,5 +6,6 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    setupFiles: ["./src/next/test/setup.ts"],
   },
 });

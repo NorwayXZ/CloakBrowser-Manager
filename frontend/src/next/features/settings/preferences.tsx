@@ -1,0 +1,145 @@
+/**
+ * Display preferences (theme, sidebar). The backend settings table is the
+ * source of truth; localStorage only caches the last values so the first
+ * frame already has the right theme. Changes apply at once and are rolled
+ * back with an error toast if the save fails.
+ */
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
+import { request } from "../../shared/api/client";
+import type { components } from "../../shared/api/schema";
+import { log } from "../../shared/log/logger";
+import { useToast } from "../../ui";
+
+export type UiPreferences = components["schemas"]["UiPreferencesModel"];
+export type ThemePreference = UiPreferences["theme"];
+export type ResolvedTheme = "light" | "dark";
+
+const KEY = ["settings", "ui"] as const;
+const THEME_CACHE = "cbm.theme";
+const SIDEBAR_CACHE = "cbm.sidebar";
+
+function readCache(): Required<UiPreferences> {
+  const fallback = { theme: "system" as ThemePreference, sidebar_collapsed: false };
+  try {
+    const theme = window.localStorage.getItem(THEME_CACHE);
+    return {
+      theme: theme === "light" || theme === "dark" || theme === "system" ? theme : fallback.theme,
+      sidebar_collapsed: window.localStorage.getItem(SIDEBAR_CACHE) === "1",
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function writeCache(prefs: Required<UiPreferences>) {
+  try {
+    window.localStorage.setItem(THEME_CACHE, prefs.theme);
+    window.localStorage.setItem(SIDEBAR_CACHE, prefs.sidebar_collapsed ? "1" : "0");
+  } catch {
+    // Storage blocked: the backend still has the value.
+  }
+}
+
+const DARK_QUERY = "(prefers-color-scheme: dark)";
+
+function subscribeSystemTheme(listener: () => void) {
+  const media = window.matchMedia(DARK_QUERY);
+  media.addEventListener("change", listener);
+  return () => media.removeEventListener("change", listener);
+}
+
+function systemTheme(): ResolvedTheme {
+  return window.matchMedia(DARK_QUERY).matches ? "dark" : "light";
+}
+
+export function useSystemTheme(): ResolvedTheme {
+  return useSyncExternalStore(subscribeSystemTheme, systemTheme, () => "light");
+}
+
+interface PreferencesValue {
+  theme: ThemePreference;
+  resolvedTheme: ResolvedTheme;
+  sidebarCollapsed: boolean;
+  setTheme: (theme: ThemePreference) => void;
+  setSidebarCollapsed: (collapsed: boolean) => void;
+  saving: boolean;
+}
+
+const PreferencesCtx = createContext<PreferencesValue | null>(null);
+
+export function PreferencesProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  const [initial] = useState(readCache);
+  const query = useQuery({
+    queryKey: KEY,
+    queryFn: () => request<UiPreferences>("/api/settings/ui"),
+    staleTime: Infinity,
+    placeholderData: initial,
+  });
+  const prefs: Required<UiPreferences> = {
+    theme: query.data?.theme ?? initial.theme,
+    sidebar_collapsed: query.data?.sidebar_collapsed ?? initial.sidebar_collapsed,
+  };
+
+  const mutation = useMutation({
+    mutationFn: (next: Required<UiPreferences>) => request<UiPreferences>("/api/settings/ui", { method: "PUT", body: next }),
+    onMutate: async (next) => {
+      await queryClient.cancelQueries({ queryKey: KEY });
+      const previous = queryClient.getQueryData<UiPreferences>(KEY);
+      queryClient.setQueryData(KEY, next);
+      return { previous };
+    },
+    onError: (error, _next, context) => {
+      queryClient.setQueryData(KEY, context?.previous);
+      log.warn("保存界面偏好失败", { action: "settings.ui.save", detail: error });
+      toast.show({ tone: "error", title: "界面偏好没有保存", description: error instanceof Error ? error.message : String(error) });
+    },
+  });
+
+  const { mutate } = mutation;
+  const { theme, sidebar_collapsed: sidebarCollapsed } = prefs;
+  const update = useCallback(
+    (patch: Partial<UiPreferences>) => mutate({ theme, sidebar_collapsed: sidebarCollapsed, ...patch } as Required<UiPreferences>),
+    [mutate, theme, sidebarCollapsed],
+  );
+
+  const system = useSystemTheme();
+  const resolvedTheme: ResolvedTheme = theme === "system" ? system : theme;
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = resolvedTheme;
+  }, [resolvedTheme]);
+
+  useEffect(() => {
+    writeCache({ theme, sidebar_collapsed: sidebarCollapsed });
+  }, [theme, sidebarCollapsed]);
+
+  const saving = mutation.isPending;
+  const value = useMemo<PreferencesValue>(
+    () => ({
+      theme,
+      resolvedTheme,
+      sidebarCollapsed,
+      setTheme: (next) => update({ theme: next }),
+      setSidebarCollapsed: (next) => update({ sidebar_collapsed: next }),
+      saving,
+    }),
+    [theme, sidebarCollapsed, resolvedTheme, update, saving],
+  );
+
+  return <PreferencesCtx.Provider value={value}>{children}</PreferencesCtx.Provider>;
+}
+
+export function usePreferences(): PreferencesValue {
+  const value = useContext(PreferencesCtx);
+  if (!value) throw new Error("usePreferences needs <PreferencesProvider>");
+  return value;
+}
+
+export const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
+  { value: "system", label: "跟随系统" },
+  { value: "light", label: "浅色" },
+  { value: "dark", label: "深色" },
+];

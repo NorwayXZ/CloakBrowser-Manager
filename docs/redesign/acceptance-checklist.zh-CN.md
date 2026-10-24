@@ -21,6 +21,24 @@
 | 接口契约 | 90 个路径、106 个操作、62 个数据结构 | [`openapi-baseline.json`](openapi-baseline.json)，由 `scripts/export_openapi.py` 生成；`backend/tests/test_openapi_contract.py` 检查操作没有减少、请求体结构没有改变 |
 | 旧界面截图 | 见 [`baseline/screenshots/`](baseline/screenshots/) | 由 `scripts/capture_baseline_ui.py` 生成，示例数据，临时数据目录 |
 
+## 阶段 1 记录：设计系统与应用外框
+
+新界面在 `/next/` 下和旧界面并行（`frontend/next/index.html` + `frontend/src/next/`，独立的 `tailwind.next.config.ts`），旧界面的代码和样式没有改动（构建后旧 CSS 文件哈希不变）。
+
+| 项目 | 结果 |
+|---|---|
+| 新增依赖 | 运行时：`react-router` 7.18.4、`@tanstack/react-query` 5.104.1、7 个 `@radix-ui/*` 原语；开发：`axe-core`、`openapi-typescript`。全部发布满两周；3 个两天内刚发布的间接依赖用 `overrides` 固定到旧版本 |
+| 前端测试 | 26 个文件、234 个用例全部通过（旧 126 + 新 108） |
+| 后端测试 | 892 通过（新增 `test_client_logs.py` 11 个） |
+| 首屏体积 | JS 161.9 KB、CSS 5.7 KB（gzip；预算 200 / 30 KB，CI 检查） |
+| 颜色对比度 | `tokens.test.ts` 检查浅色 / 深色各 27 组文字与背景、控件边框（WCAG 4.5:1 / 3:1），全部通过。测试一开始就查出输入框边框只有 1.5:1，已加深 |
+| 无障碍 | axe-core 检查组件展示页和应用外框，无违规（jsdom 中不含颜色对比，对比度由上一行覆盖） |
+| 布局 | `scripts/capture_next_ui.py`：9 个画面 × 900 / 1024 / 1280 / 1600 宽 × 浅 / 深色 = 72 张，0 处横向滚动、越出右边、文字或内容被裁切。检查脚本已用旧界面内核页验证能查出裁切 |
+| 后端改动 | 新增 `GET/PUT /api/settings/ui`（界面偏好）、`POST /api/client-logs`（前端日志写入 manager.log，脱敏、限流）；`/next/*` 返回新界面页面；没有改动任何现有接口 |
+| CI | 前端任务增加体积检查；后端 Ubuntu 任务检查 `schema.d.ts` 是否与后端 OpenAPI 一致 |
+
+**未验证**：没有在打包后的 macOS 应用（WKWebView）和 Windows Chrome 应用窗口里实测新界面；截图用的是 Playwright 自带的 Chromium。留到阶段 7。
+
 ### 旧界面已知问题（基线截图中可见）
 
 新界面要避免这些问题，阶段 1 起的布局检查脚本会专门检测：
@@ -40,15 +58,15 @@ WebSocket 接口（VNC、CDP 代理）和 `include_in_schema=False` 的内部接
 
 | 编号 | 功能 | 现有测试 | 新位置 | 已实现 | 已测试 | 备注 |
 |---|---|---|---|---|---|---|
-| G-01 | 启动时检查登录状态；连不上服务时显示错误和"重试" | — | 全局 | [ ] | [ ] | |
+| G-01 | 启动时检查登录状态；连不上服务时显示错误和"重试" | — | 全局 | [x] | [x] | 阶段 1：`AuthGate`；新增运行中断线横幅 + 自动重连（`connection.ts`） |
 | G-02 | 需要密码时显示登录页；登录成功进入面板；接口返回 401 时回到登录页 | api.test | 登录页 | [ ] | [ ] | |
 | G-03 | 退出登录（服务不可用时也能在本地退出） | — | 设置 › 账号与安全 | [ ] | [ ] | |
 | G-04 | 账号设置：改用户名、改密码（两次输入一致性校验） | — | 设置 › 账号与安全 | [ ] | [ ] | |
 | G-05 | 显示应用版本和内核版本；源码运行时标注"源码" | EnvironmentManager.test | 设置 › 关于与更新 + 侧栏底部 | [ ] | [ ] | |
 | G-06 | 后端版本过旧（缺少分组/代理/回收站接口）时提示重启 | — | 全局横幅 | [ ] | [ ] | |
-| G-07 | 后台自动化运行指示（显示任务名和画像名；空闲或接口失败时不显示） | AutomationIndicator.test | 顶栏 | [ ] | [ ] | |
+| G-07 | 后台自动化运行指示（显示任务名和画像名；空闲或接口失败时不显示） | AutomationIndicator.test | 顶栏 | [x] | [x] | 阶段 1：`Toolbar`，shell.test |
 | G-08 | 环境列表每 3 秒刷新运行状态 | useProfiles.test | 全局 | [ ] | [ ] | 新增：窗口隐藏时暂停 |
-| G-09 | 接口错误统一为 `ApiError`（带后端 detail；非 JSON 时回退到 statusText） | api.test | shared/api | [ ] | [ ] | |
+| G-09 | 接口错误统一为 `ApiError`（带后端 detail；非 JSON 时回退到 statusText） | api.test | shared/api | [x] | [x] | 阶段 1：`shared/api/client.ts`，另区分网络断开 / 超时，非 JSON 错误页不再原样显示 |
 
 ## 2. 环境列表
 
@@ -183,7 +201,7 @@ WebSocket 接口（VNC、CDP 代理）和 `include_in_schema=False` 的内部接
 | S-09 | 应用自更新：确认后开始并显示下载进度；新版本响应后重新加载 | AppUpdateStatus.test | 同上 | [ ] | [ ] | |
 | S-10 | 应用自更新：上次更新结果可查看和关闭；不能开始时说明原因；超时提示 | AppUpdateStatus.test | 同上 | [ ] | [ ] | |
 | S-11 | Git 安装版"更新 Manager"：拉代码、更新内核；如实说明"发现新版本"而不是"已升级完成" | EnvironmentManager.test | 同上 | [ ] | [ ] | 只在 Git 安装版出现 |
-| S-12 | 外观：浅色 / 深色 / 跟随系统 | — | 设置 › 外观 | [ ] | [ ] | 新功能 |
+| S-12 | 外观：浅色 / 深色 / 跟随系统 | — | 设置 › 外观 | [x] | [x] | 阶段 1：存后端 `/api/settings/ui`，失败回滚 |
 
 ## 10. 原生外壳与交付（人工验证为主）
 
