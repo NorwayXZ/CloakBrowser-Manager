@@ -24,6 +24,16 @@ describe("request", () => {
     expect(init.headers).toEqual({ "Content-Type": "application/json" });
   });
 
+  it("sends a file as it is, with its own type", async () => {
+    const fetchMock = vi.fn(async () => new Response("{}"));
+    vi.stubGlobal("fetch", fetchMock);
+    const file = new Blob(["PK"], { type: "application/zip" });
+    await request("/api/backups/restore-upload", { method: "POST", body: file });
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(init.body).toBe(file);
+    expect(init.headers).toEqual({ "Content-Type": "application/zip" });
+  });
+
   it("returns null for an empty body", async () => {
     respond(200, "");
     await expect(request("/api/x")).resolves.toBeNull();

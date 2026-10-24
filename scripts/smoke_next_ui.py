@@ -155,9 +155,77 @@ def run(page: Page, base: str) -> None:
     page.get_by_role("button", name="取消").click()
     page.get_by_role("dialog", name="放弃没保存的修改？").get_by_role("button", name="放弃修改").click()
 
+    step("proxies: add one, add a batch, delete one")
+    page.goto(base + "/next/proxies")
+    page.get_by_label("代理名称").fill("冒烟 SOCKS5")
+    page.get_by_placeholder("192.168.100.1 或 proxy.example.com").fill("203.0.113.88")
+    page.get_by_placeholder("1090").fill("1080")
+    page.get_by_role("button", name="保存代理").click()
+    expect(page.get_by_role("row", name="冒烟 SOCKS5")).to_be_visible()
+    page.get_by_role("tab", name="批量导入").click()
+    page.get_by_label("批量代理").fill("198.51.100.20:8000\nsocks5://u:p@198.51.100.21:1080\n乱写的一行")
+    expect(page.get_by_text("1 行无法识别，会跳过")).to_be_visible()
+    page.get_by_role("button", name="保存 2 个代理").click()
+    expect(page.get_by_role("row", name="SOCKS5 198.51.100.21:1080")).to_be_visible()
+    names = {p["name"] for p in call(base, "GET", "/api/proxy-presets")}
+    assert {"冒烟 SOCKS5", "SOCKS5 198.51.100.20:8000", "SOCKS5 198.51.100.21:1080"} <= names, names
+    page.get_by_role("button", name="删除「冒烟 SOCKS5」").click()
+    page.get_by_role("dialog").get_by_role("button", name="删除").click()
+    expect(page.get_by_role("row", name="冒烟 SOCKS5")).to_have_count(0)
+
+    step("data: full backup is created and downloaded")
+    page.goto(base + "/next/data")
+    with page.expect_download(timeout=120_000) as download:
+        page.get_by_role("button", name="立即完整备份").click()
+    assert download.value.suggested_filename.endswith(".zip"), download.value.suggested_filename
+    expect(page.get_by_text("完整备份已生成", exact=False).first).to_be_visible()
+    full = [b for b in call(base, "GET", "/api/backups")["backups"] if b["kind"] == "full"]
+    assert full, "no full backup listed"
+
+    step("data: delete a profile after the backup, then restore the backup brings it back")
+    victim = profiles_by_name(base)["Google Ads 测试"]
+    call(base, "DELETE", f"/api/profiles/{victim['id']}")
+    call(base, "DELETE", f"/api/profiles/{victim['id']}/purge")
+    assert "Google Ads 测试" not in profiles_by_name(base)
+    page.reload()
+    page.get_by_role("button", name=f"恢复到 {full[0]['name']}").click()
+    page.get_by_role("dialog", name="恢复这个完整备份？").get_by_role("button", name="恢复").click()
+    expect(page.get_by_text("原来的数据保存在", exact=False).first).to_be_visible(timeout=120_000)
+    assert "Google Ads 测试" in profiles_by_name(base)
+
+    step("data: automatic backup settings and a run now")
+    page.get_by_label("备份频率").select_option("3")
+    page.get_by_role("button", name="保存设置").click()
+    expect(page.get_by_text("自动备份设置已保存。")).to_be_visible()
+    assert call(base, "GET", "/api/backups/auto")["interval_days"] == 3
+    page.get_by_role("button", name="立即备份一次").click()
+    expect(page.get_by_text("已备份：", exact=False).first).to_be_visible(timeout=120_000)
+
+    step("data: configuration export, then import adds the profiles again")
+    with page.expect_download() as download:
+        page.get_by_role("button", name="下载配置备份").click()
+    exported = download.value.path()
+    before = len(call(base, "GET", "/api/profiles"))
+    page.locator('input[type="file"][accept*="json"]').set_input_files(exported)
+    expect(page.get_by_text("配置已导入").first).to_be_visible()
+    assert len(call(base, "GET", "/api/profiles")) > before
+
+    step("trash: restore one, delete one for good")
+    first, second = list(profiles_by_name(base).values())[:2]
+    call(base, "DELETE", f"/api/profiles/{first['id']}")
+    call(base, "DELETE", f"/api/profiles/{second['id']}")
+    page.goto(base + "/next/data/trash")
+    page.get_by_role("button", name=f"恢复「{first['name']}」").click()
+    expect(page.get_by_text(f"已恢复「{first['name']}」")).to_be_visible()
+    page.get_by_role("button", name=f"彻底删除「{second['name']}」").click()
+    page.get_by_role("dialog").get_by_role("button", name="彻底删除").click()
+    expect(page.get_by_role("button", name=f"彻底删除「{second['name']}」")).to_have_count(0)
+    assert first["id"] in {p["id"] for p in call(base, "GET", "/api/profiles")}
+    assert second["id"] not in {p["id"] for p in call(base, "GET", "/api/profiles/trash")}
+
     step("preflight opens and cancels without launching")
     page.goto(base + "/next/profiles")
-    page.get_by_role("button", name="打开「Etsy UK」").click()
+    page.get_by_role("button", name="打开「Etsy UK」").first.click()
     page.get_by_role("dialog", name="启动前检查").get_by_role("button", name="取消").click()
     assert profiles_by_name(base)["Etsy UK"]["status"] != "running"
 

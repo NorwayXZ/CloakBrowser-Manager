@@ -1,6 +1,7 @@
 import { Globe, Wifi } from "lucide-react";
 import { useState } from "react";
 import { cn } from "../../../shared/lib/cn";
+import { maskProxy } from "../../../shared/lib/mask";
 import { Banner, Button, Checkbox, FormField, Hint, Input, Section, Segmented, Select, Textarea } from "../../../ui";
 import { editorApi } from "../api";
 import { BROWSER_LANGUAGES, type ProxyKind, type ProxyScheme } from "../model";
@@ -14,7 +15,7 @@ const IP_QUALITY: Record<IpQualityStatus, { label: string; box: string }> = {
   unknown: { label: "无法判断", box: "border-border bg-surface-2" },
 };
 
-function IpQualityPanel({ quality }: { quality: IpQuality }) {
+export function IpQualityPanel({ quality }: { quality: IpQuality }) {
   const style = IP_QUALITY[quality.verdict];
   return (
     <div data-testid="ip-quality" className={cn("rounded-md border p-3 text-sm", style.box)}>
@@ -135,7 +136,7 @@ export function ProxySection({ editor, presets }: { editor: Editor; presets: Pro
             <Button icon={<Wifi className="h-3.5 w-3.5" />} loading={testing} disabled={needsAddress} onClick={() => void check()}>
               {proxyParts.kind === "none" ? "检查直连出口" : "检查代理"}
             </Button>
-            <span className="min-w-0 break-all font-mono text-xs text-fg-3">{form.proxy ? maskCredentials(form.proxy) : "用这台电脑的网络检测公网 IP、国家、时区和语言"}</span>
+            <span className="min-w-0 break-all font-mono text-xs text-fg-3">{form.proxy ? maskProxy(form.proxy) : "用这台电脑的网络检测公网 IP、国家、时区和语言"}</span>
           </div>
           <p className="text-xs text-fg-3">保存前可以先查一次；启动时还会重新检测。时区、语言留空时会自动补全，开启“跟随出口 IP”时会覆盖手填的值。</p>
           {proxyTestError && <Banner tone="danger">{proxyTestError}</Banner>}
@@ -191,9 +192,4 @@ export function ProxySection({ editor, presets }: { editor: Editor; presets: Pro
       </div>
     </Section>
   );
-}
-
-/** Show the proxy address without its password. */
-function maskCredentials(proxy: string): string {
-  return proxy.replace(/(:\/\/[^:/@]*):[^@/]*@/, "$1:***@");
 }

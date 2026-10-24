@@ -10,6 +10,8 @@ import { APP_BASENAME } from "./nav";
 const Gallery = lazy(() => import("../dev/Gallery").then((m) => ({ default: m.Gallery })));
 const ViewerPage = lazy(() => import("../features/profiles/ViewerPage").then((m) => ({ default: m.ViewerPage })));
 const EditorPage = lazy(() => import("../features/editor/EditorPage").then((m) => ({ default: m.EditorPage })));
+const ProxiesPage = lazy(() => import("../features/proxies/ProxiesPage").then((m) => ({ default: m.ProxiesPage })));
+const DataPage = lazy(() => import("../features/data/DataPage").then((m) => ({ default: m.DataPage })));
 const SettingsPage = lazy(() => import("../pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 
 function page(element: ReactNode) {
@@ -40,9 +42,10 @@ export const routes: RouteObject[] = [
           { path: ":id/viewer", element: page(<ViewerPage />) },
         ],
       },
-      { path: "proxies", element: <ComingSoon title="代理" description="保存常用代理，批量导入，测试连通性。" phase={4} /> },
+      { path: "proxies", element: page(<ProxiesPage />) },
       { path: "checks", element: <ComingSoon title="检测" description="检测报告、自对抗进化和关联分析。" phase={5} /> },
-      { path: "data", element: <ComingSoon title="数据" description="备份与恢复、回收站。" phase={4} /> },
+      { path: "data", element: page(<DataPage />) },
+      { path: "data/trash", element: page(<DataPage />) },
       { path: "settings", element: page(<SettingsPage />) },
       { path: "settings/:section", element: page(<SettingsPage />) },
       {

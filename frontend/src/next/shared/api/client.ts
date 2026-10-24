@@ -91,11 +91,13 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
 
   let response: Response;
   try {
+    // Files (a backup .zip) go up as they are; everything else as JSON.
+    const raw = typeof Blob !== "undefined" && body instanceof Blob;
     response = await fetch(path, {
       method,
       credentials: "same-origin",
-      headers: body === undefined ? undefined : { "Content-Type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      headers: body === undefined ? undefined : { "Content-Type": raw ? (body as Blob).type || "application/octet-stream" : "application/json" },
+      body: body === undefined ? undefined : raw ? (body as Blob) : JSON.stringify(body),
       signal: controller.signal,
     });
   } catch (error) {

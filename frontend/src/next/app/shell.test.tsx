@@ -139,7 +139,7 @@ describe("app shell", () => {
   it("shows a placeholder with a way back to the current panel for unbuilt pages", () => {
     controllableMedia({});
     mockFetch(shellRoutes());
-    renderApp("/data");
+    renderApp("/checks");
     expect(screen.getByText("这一页正在重做")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "打开当前界面" })).toHaveAttribute("href", "/");
   });

@@ -27,7 +27,8 @@ export function mockFetch(routesList: MockRoute[]) {
       (r) => (r.method ?? "GET").toUpperCase() === method && (typeof r.path === "string" ? r.path === url : r.path.test(url)),
     );
     if (!route) return new Response(JSON.stringify({ detail: "Not found" }), { status: 404 });
-    const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+    // Only JSON bodies are parsed; uploads (a File) reach the route as they are.
+    const body = typeof init?.body === "string" ? JSON.parse(init.body) : init?.body;
     const payload = typeof route.respond === "function" ? (route.respond as (b: unknown) => unknown)(body) : route.respond;
     return new Response(payload === undefined ? "" : JSON.stringify(payload), {
       status: route.status ?? 200,

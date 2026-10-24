@@ -128,6 +128,15 @@ def screens(page: Page, base: str):
         page.get_by_role("textbox", name="名称").fill("没保存的环境"),
         page.get_by_role("button", name="取消").click(),
         page.wait_for_selector("text=放弃没保存的修改？"))), False
+    yield "03a-proxies", go("/next/proxies", "text=美国 SOCKS5"), False
+    yield "03b-proxies-batch", with_action("/next/proxies", "text=美国 SOCKS5", lambda: (
+        page.get_by_role("tab", name="批量导入").click(),
+        page.get_by_label("批量代理").fill("192.168.0.1:8000\nsocks5://user:pass@10.0.0.1:1080\nvless://uuid@edge.example.com:443?security=tls#东京\n写错的一行"))), False
+    yield "04a-data", go("/next/data", "text=备份记录"), True
+    yield "04b-data-restore-confirm", with_action("/next/data", "text=备份记录", lambda: (
+        page.get_by_role("button", name="恢复到", exact=False).first.click(),
+        page.wait_for_selector("role=dialog"))), False
+    yield "04c-trash", go("/next/data/trash", "text=已删除的旧环境"), False
     yield "02-settings-appearance", go("/next/settings", "text=主题"), False
     yield "03-settings-placeholder", go("/next/settings/kernel", "text=正在重做"), False
     yield "04-running-popover", with_action("/next/settings", "text=主题",
