@@ -47,6 +47,7 @@ from .runtime import RuntimeConfig, resolve_runtime, server_port
 from .session_keeper import (
     profile_files_open,
     remove_session_keeper_extension,
+    request_app_quit,
     sync_session_keeper_extension,
     window_name_arg,
 )
@@ -61,6 +62,9 @@ SESSION_RESTORE_ARG = "--restore-last-session"
 # macOS window watch: wait for the profile to open its files, then poll.
 MAC_WINDOW_WATCH_START_SECONDS = 10.0
 MAC_WINDOW_WATCH_INTERVAL_SECONDS = 2.0
+# How long a macOS browser asked to quit gets to close its profile before
+# it is sent SIGTERM.
+MAC_GRACEFUL_QUIT_SECONDS = 15.0
 # How often a running profile's Preferences are checked for a new first
 # language, and how many identical reads in a row count as settled.
 LANGUAGE_WATCH_INTERVAL_SECONDS = 2.0
@@ -1077,7 +1081,17 @@ def _launch_cloakbrowser_manual_process(
         return process
 
 
-async def _terminate_process_async(process: subprocess.Popen[Any] | None) -> None:
+async def _terminate_process_async(
+    process: subprocess.Popen[Any] | None,
+    *,
+    ask_to_quit: bool = True,
+) -> None:
+    """End a browser: on macOS ask it to quit first, then SIGTERM, then SIGKILL.
+
+    ``ask_to_quit=False`` is for a browser whose profile has already closed
+    (its last window is gone): everything is saved, and SIGTERM frees its
+    license seat at once, which a quit request at that point does not.
+    """
     if process is None:
         return
     if process.poll() is not None:
@@ -1086,6 +1100,15 @@ async def _terminate_process_async(process: subprocess.Popen[Any] | None) -> Non
         except (OSError, subprocess.TimeoutExpired):
             pass
         return
+    pid = getattr(process, "pid", None)
+    if ask_to_quit and isinstance(pid, int) and await asyncio.to_thread(request_app_quit, pid):
+        try:
+            await asyncio.to_thread(process.wait, MAC_GRACEFUL_QUIT_SECONDS)
+            return
+        except subprocess.TimeoutExpired:
+            logger.warning(
+                "Browser %s did not quit within %.0f s; sending SIGTERM", pid, MAC_GRACEFUL_QUIT_SECONDS,
+            )
     try:
         process.terminate()
     except OSError:
@@ -2927,11 +2950,6 @@ class BrowserManager:
                     self._watch_process(profile_id, browser_process),
                     name=f"cloakbrowser-watch-{profile_id}",
                 )
-                if self.runtime.host_os == "macos" and self.runtime.runtime_mode == "native":
-                    running.window_watch_task = asyncio.create_task(
-                        self._watch_macos_windows(profile_id, browser_process, user_data_dir),
-                        name=f"cloakbrowser-windows-{profile_id}",
-                    )
                 if (
                     effective_launch_mode == "manual"
                     and browser_engine == "cloakbrowser"
@@ -2942,6 +2960,17 @@ class BrowserManager:
                         self._watch_language_choice(profile_id, browser_process, user_data_dir),
                         name=f"cloakbrowser-language-{profile_id}",
                     )
+            if (
+                browser_process is not None
+                and not effective_headless
+                and self.runtime.host_os == "macos"
+                and self.runtime.runtime_mode == "native"
+            ):
+                # Manual and debug launches alike: a headless one has no window.
+                running.window_watch_task = asyncio.create_task(
+                    self._watch_macos_windows(profile_id, browser_process, user_data_dir),
+                    name=f"cloakbrowser-windows-{profile_id}",
+                )
 
             async with self._lock:
                 self.running[profile_id] = running
@@ -3027,7 +3056,7 @@ class BrowserManager:
                 misses += 1
                 if misses >= MAC_WINDOW_CLOSED_CHECKS:
                     logger.info("Last window closed for profile %s; closing its browser", profile_id)
-                    await self.stop(profile_id, reason="关闭了浏览器窗口")
+                    await self.stop(profile_id, reason="关闭了浏览器窗口", profile_closed=True)
                     return
             await asyncio.sleep(MAC_WINDOW_WATCH_INTERVAL_SECONDS)
 
@@ -3090,6 +3119,7 @@ class BrowserManager:
         running: RunningProfile,
         *,
         close_context: bool,
+        profile_closed: bool = False,
     ) -> None:
         # The extension's pull token dies with the browser; a pull still
         # waiting on it fails at once instead of running out its timeout.
@@ -3115,6 +3145,9 @@ class BrowserManager:
             running.monitor_task.cancel()
             with suppress(asyncio.CancelledError):
                 await running.monitor_task
+        if profile_closed:
+            # Before a debug context's own cleanup, which would ask it to quit.
+            await _terminate_process_async(running.browser_process, ask_to_quit=False)
         if close_context and running.context is not None:
             await self._close_context(running.context, running.profile_id)
         await _terminate_process_async(running.browser_process)
@@ -3141,8 +3174,12 @@ class BrowserManager:
             except Exception as exc:
                 logger.debug("Could not persist exit status for %s: %s", profile_id, exc)
 
-    async def stop(self, profile_id: str, reason: str = "用户关闭"):
-        """Stop a running browser instance and release all owned resources."""
+    async def stop(self, profile_id: str, reason: str = "用户关闭", *, profile_closed: bool = False):
+        """Stop a running browser instance and release all owned resources.
+
+        ``profile_closed`` means its last window is already gone (see
+        ``_terminate_process_async``).
+        """
         # Pop before close so the close event observes an already-clean state.
         async with self._lock:
             running = self.running.pop(profile_id, None)
@@ -3151,7 +3188,7 @@ class BrowserManager:
             return
 
         logger.info("Stopping profile %s", profile_id)
-        await self._dispose_running(running, close_context=True)
+        await self._dispose_running(running, close_context=True, profile_closed=profile_closed)
         try:
             from . import database as db
             db.mark_profile_exit(profile_id, reason)
