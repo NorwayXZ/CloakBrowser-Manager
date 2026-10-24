@@ -4,6 +4,7 @@ import axe from "axe-core";
 import type { ReactElement } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { expect, vi } from "vitest";
+import { AuthGate } from "../app/AuthGate";
 import { AppProviders } from "../app/providers";
 import { routes } from "../app/router";
 
@@ -57,6 +58,7 @@ export function shellRoutes(overrides: MockRoute[] = []): MockRoute[] {
     { path: "/api/auth/status", respond: { auth_required: false, authenticated: false, username: null } },
     { path: "/api/status", respond: STATUS },
     { path: "/api/automation/status", respond: { active: false } },
+    { path: "/api/app/update", respond: { phase: "idle", supported: false, current_version: "0.7.2", last_result: null } },
     { path: "/api/settings/ui", respond: { theme: "system", sidebar_collapsed: false } },
     { method: "PUT", path: "/api/settings/ui", respond: (body: unknown) => body },
     { path: "/api/profiles", respond: [] },
@@ -72,10 +74,11 @@ export function renderWithProviders(ui: ReactElement, client = testQueryClient()
   return { client, ...render(<AppProviders client={client}>{ui}</AppProviders>) };
 }
 
-/** Render the whole shell at a path (without the /next basename). */
-export function renderApp(path: string, client = testQueryClient()) {
+/** Render the whole shell at a path (without the /next basename); `auth` adds the sign-in gate as main.tsx does. */
+export function renderApp(path: string, client = testQueryClient(), { auth = false } = {}) {
   const router = createMemoryRouter(routes, { initialEntries: [path] });
-  return { router, client, ...render(<AppProviders client={client}><RouterProvider router={router} /></AppProviders>) };
+  const app = <RouterProvider router={router} />;
+  return { router, client, ...render(<AppProviders client={client}>{auth ? <AuthGate>{app}</AuthGate> : app}</AppProviders>) };
 }
 
 /** axe in jsdom: structure, names and ARIA. Color contrast is checked from the tokens instead. */

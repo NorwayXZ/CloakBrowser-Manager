@@ -35,6 +35,7 @@ export function AppShell() {
       <div className="flex min-w-0 flex-1 flex-col">
         <Toolbar onShowShortcuts={() => setShortcutsOpen(true)} />
         <ConnectionBanner />
+        <OutdatedBackendBanner />
         <main id="main" tabIndex={-1} className="min-h-0 flex-1 overflow-auto focus:outline-none">
           <RouteErrorBoundary key={location.pathname}>
             <Outlet />
@@ -51,6 +52,19 @@ export function AppShell() {
           ))}
         </ul>
       </Dialog>
+    </div>
+  );
+}
+
+/** The panel was rebuilt but the Manager serving it was not restarted. */
+function OutdatedBackendBanner() {
+  const { backendOutdated } = usePreferences();
+  if (!backendOutdated) return null;
+  return (
+    <div className="shrink-0 border-b border-border bg-surface px-4 py-2">
+      <Banner tone="warning" title="Manager 服务是旧版本，需要重启">
+        面板已经更新，但正在运行的 Manager 服务还是旧版本，部分功能用不了。源码版请运行 ./bin/cloak restart；安装包版请从菜单栏或托盘退出后重新打开。
+      </Banner>
     </div>
   );
 }

@@ -3,7 +3,11 @@ import { NavLink, Navigate, useParams } from "react-router";
 import { THEME_OPTIONS, usePreferences, type ThemePreference } from "../features/settings/preferences";
 import { cn } from "../shared/lib/cn";
 import { PageHeader, Section, Spinner } from "../ui";
-import { ComingSoonPanel } from "./ComingSoon";
+import { AboutSection } from "../features/settings/AboutSection";
+import { AccountSection } from "../features/settings/AccountSection";
+import { AiSection } from "../features/settings/AiSection";
+import { AutomationSection } from "../features/settings/AutomationSection";
+import { KernelSection } from "../features/settings/KernelSection";
 
 const SECTIONS = [
   { id: "appearance", label: "外观" },
@@ -45,7 +49,7 @@ export function SettingsPage() {
           </ul>
         </nav>
         <div className="min-w-0 max-w-form flex-1">
-          {current.id === "appearance" ? <AppearanceSettings /> : <SettingsPlaceholder label={current.label} />}
+          <CurrentSection id={current.id} />
         </div>
       </div>
     </div>
@@ -110,6 +114,19 @@ function AppearanceSettings() {
   );
 }
 
-function SettingsPlaceholder({ label }: { label: string }) {
-  return <ComingSoonPanel phase={6} what={`“${label}”设置`} />;
+function CurrentSection({ id }: { id: (typeof SECTIONS)[number]["id"] }) {
+  switch (id) {
+    case "kernel":
+      return <KernelSection />;
+    case "ai":
+      return <AiSection />;
+    case "automation":
+      return <AutomationSection />;
+    case "account":
+      return <AccountSection />;
+    case "about":
+      return <AboutSection />;
+    default:
+      return <AppearanceSettings />;
+  }
 }

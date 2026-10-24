@@ -136,12 +136,20 @@ describe("app shell", () => {
     expect(link).toHaveAttribute("aria-current", "page");
   });
 
-  it("shows a placeholder with a way back to the current panel for unbuilt pages", async () => {
+  it("asks for a restart when the running Manager is older than the panel", async () => {
+    controllableMedia({});
+    mockFetch([{ path: "/api/settings/ui", status: 404, respond: { detail: "Not found" } }, ...shellRoutes().filter((route) => route.path !== "/api/settings/ui")]);
+    renderApp("/settings");
+    expect(await screen.findByText("Manager 服务是旧版本，需要重启")).toBeInTheDocument();
+    expect(screen.getByText(/\.\/bin\/cloak restart/)).toBeInTheDocument();
+  });
+
+  it("does not ask for a restart when the Manager is current", async () => {
     controllableMedia({});
     mockFetch(shellRoutes());
-    renderApp("/settings/kernel");
-    expect(await screen.findByText(/正在重做/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "打开当前界面" })).toHaveAttribute("href", "/");
+    renderApp("/settings");
+    expect(await screen.findByRole("heading", { name: "外观" })).toBeInTheDocument();
+    expect(screen.queryByText("Manager 服务是旧版本，需要重启")).not.toBeInTheDocument();
   });
 
   it("shows a not-found page for unknown paths", () => {
@@ -264,8 +272,9 @@ describe("auth gate", () => {
         </AuthGate>
       </AppProviders>,
     );
-    expect(await screen.findByText("请先登录")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "去登录" })).toHaveAttribute("href", "/");
+    expect(await screen.findByRole("heading", { name: "CloakBrowser Manager" })).toBeInTheDocument();
+    expect(screen.getByLabelText("用户名")).toHaveValue("admin");
+    expect(screen.getByRole("button", { name: "登录" })).toBeDisabled();
     expect(screen.queryByText("面板")).not.toBeInTheDocument();
   });
 

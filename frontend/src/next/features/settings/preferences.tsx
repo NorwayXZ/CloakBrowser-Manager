@@ -6,7 +6,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
-import { request } from "../../shared/api/client";
+import { isApiError, request } from "../../shared/api/client";
 import type { components } from "../../shared/api/schema";
 import { log } from "../../shared/log/logger";
 import { useToast } from "../../ui";
@@ -64,6 +64,8 @@ interface PreferencesValue {
   setTheme: (theme: ThemePreference) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   saving: boolean;
+  /** The running Manager predates this panel: it has no /api/settings/ui. */
+  backendOutdated: boolean;
 }
 
 const PreferencesCtx = createContext<PreferencesValue | null>(null);
@@ -117,6 +119,7 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
   }, [theme, sidebarCollapsed]);
 
   const saving = mutation.isPending;
+  const backendOutdated = query.isError && isApiError(query.error) && query.error.status === 404;
   const value = useMemo<PreferencesValue>(
     () => ({
       theme,
@@ -125,8 +128,9 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
       setTheme: (next) => update({ theme: next }),
       setSidebarCollapsed: (next) => update({ sidebar_collapsed: next }),
       saving,
+      backendOutdated,
     }),
-    [theme, sidebarCollapsed, resolvedTheme, update, saving],
+    [theme, sidebarCollapsed, resolvedTheme, update, saving, backendOutdated],
   );
 
   return <PreferencesCtx.Provider value={value}>{children}</PreferencesCtx.Provider>;

@@ -50,11 +50,16 @@ def call(base: str, method: str, path: str, body: dict | None = None):
     return json.loads(raw) if raw else None
 
 
-def start_server(port: int) -> subprocess.Popen:
+def start_server(port: int, extra_env: dict[str, str] | None = None) -> subprocess.Popen:
     env = dict(os.environ)
     env["CLOAKBROWSER_MANAGER_DATA_DIR"] = tempfile.mkdtemp(prefix="cbm-baseline-data-")
     env["CLOAKBROWSER_MANAGER_BACKUP_COPY_DIR"] = tempfile.mkdtemp(prefix="cbm-baseline-backup-")
     env["CLOAKBROWSER_MANAGER_PORT"] = str(port)
+    # Own kernel cache and no license key: reading the kernel page must not touch
+    # ~/.cloakbrowser or ask the license server about the real key.
+    env["CLOAKBROWSER_CACHE_DIR"] = tempfile.mkdtemp(prefix="cbm-baseline-kernel-")
+    env.pop("CLOAKBROWSER_LICENSE_KEY", None)
+    env.update(extra_env or {})
     proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "backend.main:app", "--host", "127.0.0.1", "--port", str(port)],
         cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,

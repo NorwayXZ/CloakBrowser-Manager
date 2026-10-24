@@ -10,6 +10,7 @@ that needs the real kernel and a license seat, and stays a manual check.
 
 from __future__ import annotations
 
+import secrets
 import subprocess
 import sys
 from pathlib import Path
@@ -228,6 +229,7 @@ def run(page: Page, base: str) -> None:
     expect(page.get_by_text("还没有检测报告")).to_be_visible()
     expect(page.get_by_role("button", name="开始一键检测")).to_be_enabled()
     page.goto(base + "/next/checks/evolution")
+    expect(page.get_by_label("进化的环境")).not_to_have_value("")
     target = page.get_by_label("进化的环境").input_value()
     page.get_by_role("switch", name="自动进化").click()
     expect(page.get_by_role("switch", name="自动进化")).to_be_checked()
@@ -238,11 +240,92 @@ def run(page: Page, base: str) -> None:
     analysis = call(base, "GET", "/api/linkability")
     assert analysis["profile_count"] == len(call(base, "GET", "/api/profiles")), analysis["profile_count"]
 
+    step("settings: automation hours, AI endpoint (key write-only), kernel update policy")
+    page.goto(base + "/next/settings/automation")
+    page.get_by_label("允许的时段").fill("09-18")
+    page.get_by_role("button", name="保存", exact=True).click()
+    expect(page.get_by_text("自动化时段已设为 09-18")).to_be_visible()
+    assert call(base, "GET", "/api/automation/hours")["hours"] == "09-18"
+    page.get_by_label("允许的时段").fill("bad")
+    page.get_by_role("button", name="保存", exact=True).click()
+    expect(page.get_by_role("alert").filter(has_text="HH")).to_be_visible()
+    assert call(base, "GET", "/api/automation/hours")["hours"] == "09-18"
+    page.get_by_label("允许的时段").fill("")
+    page.get_by_role("button", name="保存", exact=True).click()
+    expect(page.get_by_text("已取消自动化时段限制")).to_be_visible()
+    assert call(base, "GET", "/api/automation/hours")["hours"] is None
+
+    page.goto(base + "/next/settings/ai")
+    page.get_by_label("接口地址").fill("http://127.0.0.1:9/v1")
+    page.get_by_label("模型", exact=True).fill("smoke-model")
+    page.get_by_label("API 密钥").fill("sk-smoke-test-value")
+    page.get_by_role("button", name="保存设置").click()
+    expect(page.get_by_text("已配置，AI 功能可用。")).to_be_visible()
+    expect(page.get_by_label("API 密钥")).to_have_value("")
+    llm = call(base, "GET", "/api/settings/llm")
+    assert llm["configured"] and llm["has_api_key"] and llm["model"] == "smoke-model", llm
+    assert "sk-smoke-test-value" not in str(llm)
+
+    page.goto(base + "/next/settings/kernel")
+    page.get_by_role("switch", name="启动浏览器时自动下载新内核").click()
+    page.get_by_role("button", name="保存设置").click()
+    expect(page.get_by_text("内核设置已保存")).to_be_visible()
+    assert call(base, "GET", "/api/kernel")["settings"]["auto_update"] is False
+
+    page.goto(base + "/next/settings/about")
+    expect(page.get_by_text("源码版（Git 安装）")).to_be_visible()
+    # 拉取更新 would run git pull in this checkout, so it is not clicked here.
+    expect(page.get_by_role("button", name="拉取更新")).to_be_enabled()
+
     step("preflight opens and cancels without launching")
     page.goto(base + "/next/profiles")
     page.get_by_role("button", name="打开「Etsy UK」").first.click()
     page.get_by_role("dialog", name="启动前检查").get_by_role("button", name="取消").click()
     assert profiles_by_name(base)["Etsy UK"]["status"] != "running"
+
+
+def run_login(browser) -> None:
+    """Sign-in, password change and sign-out against a second Manager that has a password."""
+    step("login: wrong password refused, right one signs in; change password; sign out; sign in with the new one")
+    first, second = secrets.token_urlsafe(12), secrets.token_urlsafe(12)
+    port = free_port()
+    base = f"http://127.0.0.1:{port}"
+    proc = start_server(port, {"ADMIN_USERNAME": "smoke", "ADMIN_PASSWORD": first})
+    try:
+        page = browser.new_page(viewport={"width": 1280, "height": 800}, locale="zh-CN")
+        page.goto(base + "/next/profiles")
+        expect(page.get_by_label("用户名")).to_have_value("smoke")
+        page.get_by_label("密码").fill("not-the-password")
+        page.get_by_role("button", name="登录").click()
+        expect(page.get_by_text("用户名或密码错误")).to_be_visible()
+        page.get_by_label("密码").fill(first)
+        page.get_by_role("button", name="登录").click()
+        expect(page.get_by_role("navigation", name="页面")).to_be_visible()
+
+        page.goto(base + "/next/settings/account")
+        page.get_by_label("当前密码").fill(first)
+        page.get_by_label("新密码", exact=True).fill(second)
+        page.get_by_label("确认新密码").fill(second)
+        page.get_by_role("button", name="保存", exact=True).click()
+        expect(page.get_by_text("用户名和密码已保存")).to_be_visible()
+
+        page.get_by_role("button", name="退出登录").click()
+        expect(page.get_by_text("输入管理员账号和密码")).to_be_visible()
+        page.reload()
+        expect(page.get_by_text("输入管理员账号和密码")).to_be_visible()
+        page.get_by_label("密码").fill(first)
+        page.get_by_role("button", name="登录").click()
+        expect(page.get_by_text("用户名或密码错误")).to_be_visible()
+        page.get_by_label("密码").fill(second)
+        page.get_by_role("button", name="登录").click()
+        expect(page.get_by_role("navigation", name="页面")).to_be_visible()
+        page.close()
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            proc.kill()
 
 
 def main() -> int:
@@ -261,6 +344,7 @@ def main() -> int:
             page.on("pageerror", lambda exc: errors.append(str(exc)))
             expect.set_options(timeout=10_000)
             run(page, base)
+            run_login(browser)
             browser.close()
     finally:
         proc.terminate()

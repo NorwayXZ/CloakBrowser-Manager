@@ -2,7 +2,7 @@ import { lazy, Suspense, type ReactNode } from "react";
 import { createBrowserRouter, Navigate, type RouteObject } from "react-router";
 import { ProfilesLayout } from "../features/profiles/ProfilesLayout";
 import { ProfilesPage } from "../features/profiles/ProfilesPage";
-import { NotFound } from "../pages/ComingSoon";
+import { NotFound } from "../pages/NotFound";
 import { Skeleton } from "../ui";
 import { AppShell } from "./AppShell";
 import { APP_BASENAME } from "./nav";

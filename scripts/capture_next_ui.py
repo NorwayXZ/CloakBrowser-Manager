@@ -107,9 +107,45 @@ def seed_reports(data_dir: Path, base: str, browser) -> None:
     page.close()
 
 
+KERNEL_FIXTURE = {
+    "wrapper_version": "0.6.2", "platform": "darwin-arm64", "cache_dir": "/Users/example/.cloakbrowser",
+    "license": {"tier": "free", "plan": "free", "expires": None, "can_pin": False, "key_stored": True},
+    "settings": {"auto_update": True, "release_channel": "stable", "pinned_version": None},
+    "version": "154.0.8037.57.1", "installed": True, "pinned": False, "bundled_version": "146.0.7680.177.5",
+    "installed_kernels": [
+        {"name": "chromium-154.0.8037.57.1-pro", "version": "154.0.8037.57.1", "pro": True, "size_bytes": 408 << 20, "in_use": True},
+        {"name": "chromium-145.0.7632.109.2", "version": "145.0.7632.109.2", "pro": False, "size_bytes": 367 << 20, "in_use": False},
+    ],
+    "running_count": 0,
+}
+UPDATE_FIXTURE = {"phase": "downloading", "label": "正在下载新版本", "target": "0.8.0", "done": 42, "total": 100,
+                  "supported": True, "current_version": "0.7.2", "last_result": None}
+SIGNED_OUT_FIXTURE = {"auth_required": True, "authenticated": False, "username": "admin"}
+
+
 def screens(page: Page, base: str):
-    def go(path: str, ready: str):
+    faked: list[str] = []
+
+    def fake(answers: dict[str, dict]):
+        """Answer these API paths with example JSON until the next screen starts."""
+        def install():
+            for path, body in answers.items():
+                pattern = f"**{path}"
+                payload = json.dumps(body, ensure_ascii=False)
+
+                def answer(route, _request=None, payload=payload):
+                    route.fulfill(status=200, content_type="application/json", body=payload)
+
+                page.route(pattern, answer)
+                faked.append(pattern)
+        return install
+
+    def go(path: str, ready: str, before=None):
         def run():
+            while faked:
+                page.unroute(faked.pop())
+            if before:
+                before()
             page.goto(base + path)
             page.wait_for_selector(ready)
             page.wait_for_timeout(700)
@@ -182,7 +218,13 @@ def screens(page: Page, base: str):
     yield "05c-checks-evolution", go("/next/checks/evolution", "text=进化时间线"), False
     yield "05d-checks-links", go("/next/checks/links", "text=关联分析"), False
     yield "02-settings-appearance", go("/next/settings", "text=主题"), False
-    yield "03-settings-placeholder", go("/next/settings/kernel", "text=正在重做"), False
+    yield "06a-settings-kernel", go("/next/settings/kernel", "text=已下载的内核", fake({"/api/kernel": KERNEL_FIXTURE})), True
+    yield "06b-settings-ai", go("/next/settings/ai", "text=执行强度"), False
+    yield "06c-settings-automation", go("/next/settings/automation", "text=允许的时段"), False
+    yield "06d-settings-account", go("/next/settings/account", "text=没有开启登录保护"), False
+    yield "06e-settings-about", go("/next/settings/about", "text=还没有检查过"), False
+    yield "06f-settings-updating", go("/next/settings/about", "text=正在下载新版本", fake({"/api/app/update": UPDATE_FIXTURE})), False
+    yield "06g-login", go("/next/profiles", "text=输入管理员账号和密码", fake({"/api/auth/status": SIGNED_OUT_FIXTURE})), False
     yield "04-running-popover", with_action("/next/settings", "text=主题",
                                             lambda: page.get_by_role("button", name="未运行").click()), False
     yield "05-theme-menu", with_action("/next/settings", "text=主题",

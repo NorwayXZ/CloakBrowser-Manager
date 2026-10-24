@@ -1,8 +1,10 @@
 import { Keyboard, Monitor, Moon, Sun } from "lucide-react";
 import { useState } from "react";
-import { useLocation } from "react-router";
+import { Link, useLocation } from "react-router";
 import { useAutomationStatus, useManagerStatus, useRunningProfiles } from "../features/app/api";
+import { APP_UPDATE_ACTIVE, useUpdateCheck } from "../features/settings/api";
 import { THEME_OPTIONS, usePreferences, type ThemePreference } from "../features/settings/preferences";
+import { useAppUpdateWatcher } from "../features/settings/updateWatcher";
 import { formatShortcut } from "../shared/lib/hotkeys";
 import { Badge, IconButton, Menu, MenuRadioGroup, Popover, Skeleton, Spinner, StatusDot } from "../ui";
 import { navItemFor } from "./nav";
@@ -17,12 +19,38 @@ export function Toolbar({ onShowShortcuts }: { onShowShortcuts: () => void }) {
     <header className="flex h-toolbar shrink-0 items-center gap-3 border-b border-border bg-surface px-4">
       <div className="min-w-0 flex-1 truncate text-base font-semibold text-fg">{title}</div>
       <div className="flex shrink-0 items-center gap-1.5">
+        <UpdateIndicator />
         <AutomationIndicator />
         <RunningIndicator />
         <ThemeMenu />
         <IconButton label="快捷键" shortcut="?" icon={<Keyboard className="h-4 w-4" />} onClick={onShowShortcuts} />
       </div>
     </header>
+  );
+}
+
+/** A running app update, its last result, or a new version the last check found. */
+function UpdateIndicator() {
+  const update = useAppUpdateWatcher();
+  const check = useUpdateCheck();
+  const state = update.data;
+  let badge: { tone: "accent" | "success" | "danger" | "info"; text: string; spinning?: boolean } | null = null;
+  if (state && APP_UPDATE_ACTIVE.has(state.phase)) {
+    const pct = state.phase === "downloading" && state.total ? ` ${Math.min(100, Math.round(((state.done ?? 0) / state.total) * 100))}%` : "";
+    badge = { tone: "accent", text: `${state.label ?? "正在更新"}${pct}`, spinning: true };
+  } else if (state?.last_result) {
+    badge = state.last_result.ok ? { tone: "success", text: `已更新到 ${state.last_result.to}` } : { tone: "danger", text: "更新没有成功" };
+  } else if (check.data?.manager.download_url) {
+    badge = { tone: "info", text: `新版本 ${check.data.manager.after ?? ""}`.trim() };
+  }
+  if (!badge) return null;
+  return (
+    <Link to="/settings/about" title="查看更新" className="inline-flex min-w-0 max-w-56 rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
+      <Badge tone={badge.tone} className="max-w-full">
+        {badge.spinning && <Spinner className="h-3 w-3" />}
+        <span className="truncate">{badge.text}</span>
+      </Badge>
+    </Link>
   );
 }
 
