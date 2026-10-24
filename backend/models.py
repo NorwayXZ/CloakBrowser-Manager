@@ -391,7 +391,7 @@ class GroupCreate(BaseModel):
 
 
 class DeviceTemplateResponse(BaseModel):
-    """One entry from the Windows device template library (backend/device_templates.py)."""
+    """One entry from the device template library (backend/device_templates.py)."""
 
     id: str
     name: str
@@ -404,6 +404,7 @@ class DeviceTemplateResponse(BaseModel):
     hardware_concurrency: int
     device_memory: int
     device_scale_factor: float
+    platform: str = "windows"
 
 
 class ApplyDeviceTemplateRequest(BaseModel):

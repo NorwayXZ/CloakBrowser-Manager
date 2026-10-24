@@ -483,7 +483,7 @@ async def _get_profile_preflight(client: RestClient, args: dict[str, Any]) -> di
 
 @register(
     "list_device_templates",
-    "列出设备模板库（104 个真实 Windows 设备）的摘要：id、名称、屏幕、GPU、CPU、核数、内存。",
+    "列出本机能启动的设备模板库（Mac 上是 Apple 芯片 Mac，其他系统是真实 Windows 设备）的摘要：id、名称、屏幕、GPU、CPU、核数、内存、平台。",
     NO_ARGS,
     "read",
 )
@@ -493,7 +493,7 @@ async def _list_device_templates(client: RestClient, args: dict[str, Any]) -> di
         return err
     keys = (
         "id", "name", "family", "cpu", "screen_width", "screen_height",
-        "gpu_vendor", "gpu_renderer", "hardware_concurrency", "device_memory",
+        "gpu_vendor", "gpu_renderer", "hardware_concurrency", "device_memory", "platform",
     )
     templates = [
         {key: t.get(key) for key in keys if key in t} for t in payload if isinstance(t, dict)

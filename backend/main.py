@@ -603,9 +603,10 @@ async def create_profile(req: ProfileCreate):
 
 @app.post("/api/profiles/disposable", response_model=ProfileResponse, status_code=201)
 async def create_disposable_profile(req: DisposableCreateRequest):
-    """One-click throwaway identity: an unused device template, the
-    recommended new-profile defaults, and a coherent timezone/locale pair
-    for the chosen region — flagged disposable so it can be burned."""
+    """One-click throwaway identity: an unused device template for a
+    platform this computer can launch, the recommended new-profile
+    defaults, and a coherent timezone/locale pair for the chosen region —
+    flagged disposable so it can be burned."""
     region = (req.region or "US").strip().upper() or "US"
     locale = req.locale or suggested_locale(region) or "en-US"
     timezone = req.timezone or suggested_timezone(region) or "America/New_York"
@@ -613,20 +614,12 @@ async def create_disposable_profile(req: DisposableCreateRequest):
         f"一次性身份 {region} {datetime.now().strftime('%m-%d %H:%M')}-{secrets.token_hex(2)}"
     )
 
-    used_template_ids = {
-        profile.get("device_profile")
-        for profile in db.list_profiles()
-        if profile.get("device_profile")
-    }
-    candidates = [
-        tpl for tpl in device_templates.list_templates()
-        if tpl["id"] not in used_template_ids
-    ]
-    tpl = secrets.choice(candidates) if candidates else device_templates.random_template()
+    platform = _host_template_platform()
+    tpl = device_templates.pick_unused_template(_used_template_ids(), platform)
 
     profile = db.create_profile(
         name=name,
-        platform="windows",
+        platform=platform,
         device_profile=tpl["id"],
         screen_width=tpl["screen_width"],
         screen_height=tpl["screen_height"],
@@ -655,6 +648,11 @@ def _used_template_ids() -> set:
     }
 
 
+def _host_template_platform() -> str:
+    """The device-template platform this computer's launch preflight accepts."""
+    return device_templates.platform_for_host(browser_mgr.runtime.host_os)
+
+
 @app.get("/api/profiles/from-sentence/options")
 async def sentence_profile_options():
     """Static choice lists the one-sentence preview dialog edits against."""
@@ -681,7 +679,10 @@ async def draft_profile_from_sentence(req: SentenceDraftRequest):
     except sentence_profile.SentenceParseError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     result = sentence_profile.assemble_spec(
-        parsed["spec"], sentence=sentence, used_template_ids=_used_template_ids(),
+        parsed["spec"],
+        sentence=sentence,
+        used_template_ids=_used_template_ids(),
+        platform=_host_template_platform(),
     )
     return {
         "source": parsed["source"],
@@ -702,6 +703,7 @@ async def create_profile_from_sentence(req: SentenceCreateRequest):
             req.assembled.model_dump(),
             sentence=sentence,
             used_template_ids=_used_template_ids(),
+            platform=_host_template_platform(),
         )
     except sentence_profile.SentenceValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -847,9 +849,16 @@ async def burn_profile(profile_id: str, req: BurnRequest):
 
 
 @app.get("/api/device-templates", response_model=list[DeviceTemplateResponse])
-async def list_device_templates(q: str | None = None, family: str | None = None):
-    """List the Windows device template library, with optional filters."""
-    items = device_templates.list_templates()
+async def list_device_templates(
+    q: str | None = None, family: str | None = None, platform: str | None = None,
+):
+    """List a device template library, with optional filters.
+
+    Without ``platform`` this is the library this computer can launch
+    (macOS on a Mac, Windows elsewhere)."""
+    if platform not in (None, "windows", "macos"):
+        raise HTTPException(status_code=422, detail="platform 只能是 windows 或 macos")
+    items = device_templates.list_templates(platform or _host_template_platform())
     if family:
         items = [t for t in items if t["family"] == family]
     if q:
@@ -874,7 +883,7 @@ async def get_device_template(template_id: str):
 
 @app.post("/api/profiles/{profile_id}/apply-device-template", response_model=ProfileResponse)
 async def apply_device_template(profile_id: str, req: ApplyDeviceTemplateRequest):
-    """Pin a Windows device template onto a profile (screen/GPU/CPU/memory).
+    """Pin a device template onto a profile (platform/screen/GPU/CPU/memory).
 
     The template id is recorded in the profile's device_profile field so the
     applied persona stays traceable.
@@ -887,7 +896,7 @@ async def apply_device_template(profile_id: str, req: ApplyDeviceTemplateRequest
         raise HTTPException(status_code=404, detail="Profile not found")
     updated = db.update_profile(
         profile_id,
-        platform="windows",
+        platform=tpl["platform"],
         screen_width=tpl["screen_width"],
         screen_height=tpl["screen_height"],
         gpu_vendor=tpl["gpu_vendor"],

@@ -569,15 +569,6 @@ async def parse_sentence(
 # ── Assembly (spec → profile fields) ────────────────────────────────────────
 
 
-def _pick_template(used_template_ids: set) -> dict[str, Any]:
-    """An unused device template when one remains, else a random one."""
-    candidates = [
-        tpl for tpl in device_templates.list_templates()
-        if tpl["id"] not in used_template_ids
-    ]
-    return secrets.choice(candidates) if candidates else device_templates.random_template()
-
-
 def generate_profile_name(spec: dict[str, Any], *, now: datetime | None = None) -> str:
     """「西雅图 · 露营摄影 10-23-a1b2」— place + first interests +防撞后缀.
 
@@ -599,12 +590,13 @@ def assemble_spec(
     *,
     sentence: str,
     used_template_ids: set,
+    platform: str = "windows",
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Assemble a validated spec into profile fields (pure, no I/O).
 
-    Every value comes from the trusted tables: template library for
-    hardware, region defaults (or the city table) for timezone/locale,
+    Every value comes from the trusted tables: the ``platform`` template
+    library (the one the host can launch) for hardware, region defaults (or the city table) for timezone/locale,
     the recommended preset for fingerprint options, the interest table
     for warm-up targets. The LLM's only influence is which table entries
     were selected.
@@ -613,7 +605,7 @@ def assemble_spec(
     city = spec.get("city")
     timezone = city_timezone(country, city) or suggested_timezone(country) or "America/New_York"
     locale = suggested_locale(country) or "en-US"
-    tpl = _pick_template(used_template_ids)
+    tpl = device_templates.pick_unused_template(used_template_ids, platform)
 
     targets: list[str] = []
     for interest_id in spec.get("interests") or []:
@@ -647,7 +639,7 @@ def assemble_spec(
 
     assembled = {
         "name": generate_profile_name(spec, now=now),
-        "platform": "windows",
+        "platform": platform,
         "device_profile": tpl["id"],
         "screen_width": tpl["screen_width"],
         "screen_height": tpl["screen_height"],
@@ -696,6 +688,7 @@ def validate_assembled(
     *,
     sentence: str,
     used_template_ids: set,
+    platform: str = "windows",
     now: datetime | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """Re-validate a client-returned assembly before it may create a profile.
@@ -704,7 +697,8 @@ def validate_assembled(
     from the template library, warm-up targets must be a subset of the
     catalog, fingerprint options are forced to the recommended preset,
     and the timezone must be a real IANA name. A template that got taken
-    between draft and confirm is swapped for another unused one (with a
+    between draft and confirm, or that is not for ``platform`` (the one
+    the host can launch), is swapped for another unused one (with a
     warning) instead of failing the creation.
     """
     warnings: list[str] = []
@@ -715,16 +709,19 @@ def validate_assembled(
     tpl = device_templates.get_template(template_id) if isinstance(template_id, str) else None
     if tpl is None:
         raise SentenceValidationError("设备模板不存在，请重新生成预览")
-    if tpl["id"] in used_template_ids:
+    if tpl["platform"] != platform:
+        tpl = device_templates.pick_unused_template(used_template_ids, platform)
+        warnings.append("预览时选中的设备模板不能在这台电脑上启动，已换成本机平台的设备")
+    elif tpl["id"] in used_template_ids:
         candidates = [
-            item for item in device_templates.list_templates()
+            item for item in device_templates.list_templates(platform)
             if item["id"] not in used_template_ids
         ]
         if candidates:
             tpl = secrets.choice(candidates)
             warnings.append("预览时选中的设备模板已被其他画像占用，已自动换成另一台")
         else:
-            tpl = device_templates.random_template()
+            tpl = device_templates.random_template(platform)
             warnings.append("设备模板已被占用且暂无空闲模板，已另选一台（可能与现有画像共用模板）")
 
     timezone = payload.get("timezone")
@@ -749,7 +746,7 @@ def validate_assembled(
 
     fields = {
         "name": name,
-        "platform": "windows",
+        "platform": tpl["platform"],
         "device_profile": tpl["id"],
         "screen_width": tpl["screen_width"],
         "screen_height": tpl["screen_height"],

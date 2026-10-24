@@ -1,11 +1,16 @@
-"""Windows device template library for profile personas.
+"""Device template library for profile personas (Windows and macOS).
 
-Every template is a real, believable Windows machine (laptop or desktop):
+Every Windows template is a real, believable Windows machine (laptop or desktop):
 its GPU reports the vendor/renderer strings Chromium actually exposes via
 WebGL (``ANGLE (<vendor>, <model> (0x<device-id>) Direct3D11 ...)``), its
 screen is a real shipping resolution, and its core count / memory bucket
 match the paired CPU. Applying a template pins those fields onto a profile
 through ``POST /api/profiles/{id}/apply-device-template``.
+
+The macOS templates are the Apple-silicon Macs the profile form offers
+(``frontend/src/lib/deviceProfiles.ts``), under the same ids, so a Mac host
+can make personas its launch preflight accepts. Lists default to Windows;
+pass ``platform="macos"`` (see ``platform_for_host``) for the Mac library.
 
 The library is data only: no kernel behaviour is touched.
 """
@@ -15,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import random
 import re
+import secrets
 from typing import Any
 
 # Family key -> human-readable label. Families exist so the API can filter.
@@ -335,21 +341,118 @@ def _build_templates() -> list[dict[str, Any]]:
                 "hardware_concurrency": cores,
                 "device_memory": mem,
                 "device_scale_factor": dpr,
+                "platform": "windows",
             })
     return templates
 
 
+# ── macOS (Apple silicon) ─────────────────────────────────────────────────
+
+MAC_FAMILIES: dict[str, str] = {
+    "MacBook Air": "MacBook Air",
+    "MacBook Pro": "MacBook Pro",
+    "iMac": "iMac",
+    "Mac mini": "Mac mini",
+    "Mac Studio": "Mac Studio",
+    "Mac Pro": "Mac Pro",
+}
+
+# (id, family, name, chip, logical width, logical height, CPU threads).
+# Mirrors the Apple entries of frontend/src/lib/deviceProfiles.ts.
+_MAC_SPECS: list[tuple[str, str, str, str, int, int, int]] = [
+    ("mba_13_m1_2020", "MacBook Air", "MacBook Air 13 M1 (2020)", "M1", 1440, 900, 8),
+    ("mba_13_m2_2022", "MacBook Air", "MacBook Air 13 M2 (2022)", "M2", 1470, 956, 8),
+    ("mba_15_m2_2023", "MacBook Air", "MacBook Air 15 M2 (2023)", "M2", 1710, 1107, 8),
+    ("mba_13_m3_2024", "MacBook Air", "MacBook Air 13 M3 (2024)", "M3", 1470, 956, 8),
+    ("mba_15_m3_2024", "MacBook Air", "MacBook Air 15 M3 (2024)", "M3", 1710, 1107, 8),
+    ("mba_13_m4_2025", "MacBook Air", "MacBook Air 13 M4 (2025)", "M4", 1470, 956, 10),
+    ("mba_15_m4_2025", "MacBook Air", "MacBook Air 15 M4 (2025)", "M4", 1710, 1107, 10),
+    ("mba_13_m5", "MacBook Air", "MacBook Air 13 M5", "M5", 1470, 956, 10),
+    ("mba_15_m5", "MacBook Air", "MacBook Air 15 M5", "M5", 1710, 1107, 10),
+    ("mbp_13_m1_2020", "MacBook Pro", "MacBook Pro 13 M1 (2020)", "M1", 1440, 900, 8),
+    ("mbp_13_m2_2022", "MacBook Pro", "MacBook Pro 13 M2 (2022)", "M2", 1440, 900, 8),
+    ("mbp_14_m1_pro_2021", "MacBook Pro", "MacBook Pro 14 M1 Pro (2021)", "M1 Pro", 1512, 982, 10),
+    ("mbp_14_m1_max_2021", "MacBook Pro", "MacBook Pro 14 M1 Max (2021)", "M1 Max", 1512, 982, 10),
+    ("mbp_16_m1_pro_2021", "MacBook Pro", "MacBook Pro 16 M1 Pro (2021)", "M1 Pro", 1728, 1117, 10),
+    ("mbp_16_m1_max_2021", "MacBook Pro", "MacBook Pro 16 M1 Max (2021)", "M1 Max", 1728, 1117, 10),
+    ("mbp_14_m2_pro_2023", "MacBook Pro", "MacBook Pro 14 M2 Pro (2023)", "M2 Pro", 1512, 982, 12),
+    ("mbp_14_m2_max_2023", "MacBook Pro", "MacBook Pro 14 M2 Max (2023)", "M2 Max", 1512, 982, 12),
+    ("mbp_16_m2_pro_2023", "MacBook Pro", "MacBook Pro 16 M2 Pro (2023)", "M2 Pro", 1728, 1117, 12),
+    ("mbp_16_m2_max_2023", "MacBook Pro", "MacBook Pro 16 M2 Max (2023)", "M2 Max", 1728, 1117, 12),
+    ("mbp_14_m3_2023", "MacBook Pro", "MacBook Pro 14 M3 (2023)", "M3", 1512, 982, 8),
+    ("mbp_14_m3_pro_2023", "MacBook Pro", "MacBook Pro 14 M3 Pro (2023)", "M3 Pro", 1512, 982, 12),
+    ("mbp_14_m3_max_2023", "MacBook Pro", "MacBook Pro 14 M3 Max (2023)", "M3 Max", 1512, 982, 16),
+    ("mbp_16_m3_pro_2023", "MacBook Pro", "MacBook Pro 16 M3 Pro (2023)", "M3 Pro", 1728, 1117, 12),
+    ("mbp_16_m3_max_2023", "MacBook Pro", "MacBook Pro 16 M3 Max (2023)", "M3 Max", 1728, 1117, 16),
+    ("mbp_14_m4_2024", "MacBook Pro", "MacBook Pro 14 M4 (2024)", "M4", 1512, 982, 10),
+    ("mbp_14_m4_pro_2024", "MacBook Pro", "MacBook Pro 14 M4 Pro (2024)", "M4 Pro", 1512, 982, 14),
+    ("mbp_14_m4_max_2024", "MacBook Pro", "MacBook Pro 14 M4 Max (2024)", "M4 Max", 1512, 982, 16),
+    ("mbp_16_m4_pro_2024", "MacBook Pro", "MacBook Pro 16 M4 Pro (2024)", "M4 Pro", 1728, 1117, 14),
+    ("mbp_16_m4_max_2024", "MacBook Pro", "MacBook Pro 16 M4 Max (2024)", "M4 Max", 1728, 1117, 16),
+    ("mbp_14_m5", "MacBook Pro", "MacBook Pro 14 M5", "M5", 1512, 982, 10),
+    ("mbp_14_m5_pro", "MacBook Pro", "MacBook Pro 14 M5 Pro", "M5 Pro", 1512, 982, 14),
+    ("mbp_14_m5_max", "MacBook Pro", "MacBook Pro 14 M5 Max", "M5 Max", 1512, 982, 16),
+    ("mbp_16_m5_pro", "MacBook Pro", "MacBook Pro 16 M5 Pro", "M5 Pro", 1728, 1117, 14),
+    ("mbp_16_m5_max", "MacBook Pro", "MacBook Pro 16 M5 Max", "M5 Max", 1728, 1117, 16),
+    ("imac_24_m1_2021", "iMac", "iMac 24 M1 (2021)", "M1", 2240, 1260, 8),
+    ("imac_24_m3_2023", "iMac", "iMac 24 M3 (2023)", "M3", 2240, 1260, 8),
+    ("imac_24_m4_2024", "iMac", "iMac 24 M4 (2024)", "M4", 2240, 1260, 10),
+    ("mac_mini_m1_2020", "Mac mini", "Mac mini M1 (2020)", "M1", 2560, 1440, 8),
+    ("mac_mini_m2_2023", "Mac mini", "Mac mini M2 (2023)", "M2", 2560, 1440, 8),
+    ("mac_mini_m2_pro_2023", "Mac mini", "Mac mini M2 Pro (2023)", "M2 Pro", 3840, 2160, 12),
+    ("mac_mini_m4_2024", "Mac mini", "Mac mini M4 (2024)", "M4", 2560, 1440, 10),
+    ("mac_mini_m4_pro_2024", "Mac mini", "Mac mini M4 Pro (2024)", "M4 Pro", 3840, 2160, 14),
+    ("mac_studio_m1_max_2022", "Mac Studio", "Mac Studio M1 Max (2022)", "M1 Max", 3840, 2160, 10),
+    ("mac_studio_m1_ultra_2022", "Mac Studio", "Mac Studio M1 Ultra (2022)", "M1 Ultra", 5120, 2880, 20),
+    ("mac_studio_m2_max_2023", "Mac Studio", "Mac Studio M2 Max (2023)", "M2 Max", 3840, 2160, 12),
+    ("mac_studio_m2_ultra_2023", "Mac Studio", "Mac Studio M2 Ultra (2023)", "M2 Ultra", 5120, 2880, 24),
+    ("mac_studio_m4_max_2025", "Mac Studio", "Mac Studio M4 Max (2025)", "M4 Max", 3840, 2160, 16),
+    ("mac_studio_m3_ultra_2025", "Mac Studio", "Mac Studio M3 Ultra (2025)", "M3 Ultra", 5120, 2880, 28),
+    ("mac_pro_m2_ultra_2023", "Mac Pro", "Mac Pro M2 Ultra (2023)", "M2 Ultra", 5120, 2880, 24),
+]
+
+
+def _build_mac_templates() -> list[dict[str, Any]]:
+    return [
+        {
+            "id": tpl_id,
+            "name": f"{name} · Apple {chip} · {width}×{height}",
+            "family": family,
+            "cpu": f"Apple {chip}",
+            "gpu_vendor": "Google Inc. (Apple)",
+            "gpu_renderer": f"ANGLE (Apple, ANGLE Metal Renderer: Apple {chip}, Unspecified Version)",
+            "screen_width": width,
+            "screen_height": height,
+            "hardware_concurrency": threads,
+            "device_memory": 8,
+            "device_scale_factor": 2,
+            "platform": "macos",
+        }
+        for tpl_id, family, name, chip, width, height, threads in _MAC_SPECS
+    ]
+
+
 _TEMPLATES: list[dict[str, Any]] = _build_templates()
-_BY_ID: dict[str, dict[str, Any]] = {t["id"]: t for t in _TEMPLATES}
+_MAC_TEMPLATES: list[dict[str, Any]] = _build_mac_templates()
+_BY_PLATFORM: dict[str, list[dict[str, Any]]] = {"windows": _TEMPLATES, "macos": _MAC_TEMPLATES}
+_BY_ID: dict[str, dict[str, Any]] = {t["id"]: t for t in (*_TEMPLATES, *_MAC_TEMPLATES)}
 
 
-def list_templates() -> list[dict[str, Any]]:
-    """Return a copy of every device template, in stable order."""
-    return [dict(t) for t in _TEMPLATES]
+def platform_for_host(host_os: str | None) -> str:
+    """The template platform a host can launch: macOS on a Mac, else Windows.
+
+    Linux (Docker) hosts have no platform gate and keep the Windows library.
+    """
+    return "macos" if host_os == "macos" else "windows"
+
+
+def list_templates(platform: str = "windows") -> list[dict[str, Any]]:
+    """Return a copy of every template for this platform, in stable order."""
+    return [dict(t) for t in _BY_PLATFORM[platform]]
 
 
 def get_template(template_id: str) -> dict[str, Any] | None:
-    """Return a copy of the template with this id, or None."""
+    """Return a copy of the template with this id (any platform), or None."""
     tpl = _BY_ID.get(template_id)
     return dict(tpl) if tpl else None
 
@@ -365,9 +468,15 @@ def pick_template(seed_or_index: int | str) -> dict[str, Any]:
     return dict(_TEMPLATES[index])
 
 
-def random_template() -> dict[str, Any]:
-    """Pick a random template (non-deterministic)."""
-    return dict(random.choice(_TEMPLATES))
+def random_template(platform: str = "windows") -> dict[str, Any]:
+    """Pick a random template for this platform (non-deterministic)."""
+    return dict(random.choice(_BY_PLATFORM[platform]))
+
+
+def pick_unused_template(used_template_ids: set, platform: str = "windows") -> dict[str, Any]:
+    """An unused template for this platform when one remains, else a random one."""
+    candidates = [tpl for tpl in _BY_PLATFORM[platform] if tpl["id"] not in used_template_ids]
+    return dict(secrets.choice(candidates)) if candidates else random_template(platform)
 
 
 # ── Consistency validation ────────────────────────────────────────────────
@@ -398,6 +507,9 @@ def validate_template(tpl: dict[str, Any]) -> list[str]:
         err("缺少 id")
     if not tpl.get("name"):
         err("缺少可读名")
+    if tpl.get("platform") == "macos":
+        _validate_mac_template(tpl, err)
+        return errors
     if tpl.get("family") not in FAMILIES:
         err(f"未知家族 {tpl.get('family')!r}")
 
@@ -447,3 +559,27 @@ def validate_template(tpl: dict[str, Any]) -> list[str]:
             err(f"高端 GPU {gpu_key} 的核数 {cores} 太低")
 
     return errors
+
+
+_MAC_RENDERER_RE = re.compile(r"^ANGLE \(Apple, ANGLE Metal Renderer: (Apple M\d(?: Pro| Max| Ultra)?), Unspecified Version\)$")
+
+
+def _validate_mac_template(tpl: dict[str, Any], err) -> None:
+    if tpl.get("family") not in MAC_FAMILIES:
+        err(f"未知家族 {tpl.get('family')!r}")
+    if tpl.get("gpu_vendor") != "Google Inc. (Apple)":
+        err(f"gpu_vendor 格式不对：{tpl.get('gpu_vendor')!r}，应为 'Google Inc. (Apple)'")
+    rm = _MAC_RENDERER_RE.match(str(tpl.get("gpu_renderer") or ""))
+    if not rm:
+        err(f"gpu_renderer 格式不对：{tpl.get('gpu_renderer')!r}")
+    elif rm.group(1) != tpl.get("cpu"):
+        err(f"芯片不一致：renderer={rm.group(1)!r} vs cpu={tpl.get('cpu')!r}")
+    width, height = tpl.get("screen_width"), tpl.get("screen_height")
+    if not isinstance(width, int) or not isinstance(height, int) or width <= height:
+        err(f"分辨率 {width}×{height} 不是横屏")
+    if tpl.get("hardware_concurrency") not in {8, 10, 12, 14, 16, 20, 24, 28}:
+        err(f"核数 {tpl.get('hardware_concurrency')} 不合理")
+    if tpl.get("device_memory") not in MEMORY_BUCKETS:
+        err(f"内存桶 {tpl.get('device_memory')} 必须是 4 或 8")
+    if tpl.get("device_scale_factor") != 2:
+        err(f"DPR {tpl.get('device_scale_factor')} 不是 Retina 的 2")

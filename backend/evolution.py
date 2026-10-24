@@ -163,7 +163,9 @@ class Candidate:
 
 def _pick_gpu_template(profile: dict[str, Any]) -> dict[str, Any] | None:
     """A template with a different GPU, preferring the same screen size."""
-    templates = device_templates.list_templates()
+    templates = device_templates.list_templates(
+        "macos" if profile.get("platform") == "macos" else "windows"
+    )
     current_id = profile.get("device_profile")
     current_renderer = profile.get("gpu_renderer")
     pool = [
@@ -343,7 +345,7 @@ def update_kwargs(profile: dict[str, Any], knob: str, to_value: Any) -> dict[str
         if tpl is None:
             raise ValueError(f"设备模板不存在：{to_value}")
         return {
-            "platform": "windows",
+            "platform": tpl["platform"],
             "device_profile": tpl["id"],
             "screen_width": tpl["screen_width"],
             "screen_height": tpl["screen_height"],
