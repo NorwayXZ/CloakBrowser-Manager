@@ -41,14 +41,14 @@ export function AgentLeaseBadge({ profileId, lease, onChanged }: AgentLeaseBadge
       className={`mt-1.5 flex items-center gap-2 text-xs ${byUser ? "text-slate-500" : "text-amber-600"}`}
       data-testid="agent-lease"
     >
-      {byUser ? <Hand className="h-3.5 w-3.5" /> : <Bot className="h-3.5 w-3.5" />}
-      <span>
+      {byUser ? <Hand className="h-3.5 w-3.5 shrink-0" /> : <Bot className="h-3.5 w-3.5 shrink-0" />}
+      <span className="min-w-0">
         {byUser
           ? `你已接管，AI 暂不能操作（约 ${minutesLeft(lease)} 分钟后自动归还）`
           : `AI 控制中：${lease.holder}（${minutesLeft(lease)} 分钟内有效）`}
       </span>
       <button
-        className="rounded border border-current px-1.5 py-0.5 hover:bg-black/5 disabled:opacity-50"
+        className="shrink-0 whitespace-nowrap rounded border border-current px-1.5 py-0.5 hover:bg-black/5 disabled:opacity-50"
         disabled={busy}
         onClick={() => void act()}
       >
