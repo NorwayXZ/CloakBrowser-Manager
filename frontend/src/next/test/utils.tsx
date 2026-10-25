@@ -74,7 +74,7 @@ export function renderWithProviders(ui: ReactElement, client = testQueryClient()
   return { client, ...render(<AppProviders client={client}>{ui}</AppProviders>) };
 }
 
-/** Render the whole shell at a path (without the /next basename); `auth` adds the sign-in gate as main.tsx does. */
+/** Render the whole shell at a path; `auth` adds the sign-in gate as main.tsx does. */
 export function renderApp(path: string, client = testQueryClient(), { auth = false } = {}) {
   const router = createMemoryRouter(routes, { initialEntries: [path] });
   const app = <RouterProvider router={router} />;

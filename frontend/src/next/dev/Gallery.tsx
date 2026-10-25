@@ -38,7 +38,7 @@ import {
 
 /**
  * Every component in every state, for review in both themes and for the
- * automated layout / accessibility checks. Reachable at /next/__ui; not linked
+ * automated layout / accessibility checks. Reachable at /__ui; not linked
  * from the navigation. Content is example data.
  */
 export function Gallery() {

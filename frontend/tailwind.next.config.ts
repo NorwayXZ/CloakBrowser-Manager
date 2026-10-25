@@ -5,7 +5,7 @@ import type { Config } from "tailwindcss";
 const token = (name: string) => `rgb(var(--c-${name}) / <alpha-value>)`;
 
 export default {
-  content: ["./next/index.html", "./src/next/**/*.{ts,tsx}"],
+  content: ["./index.html", "./src/next/**/*.{ts,tsx}"],
   darkMode: ["selector", '[data-theme="dark"]'],
   theme: {
     colors: {

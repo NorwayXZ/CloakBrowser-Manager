@@ -20,11 +20,11 @@ export function navItemFor(pathname: string): NavItem | undefined {
   return NAV_ITEMS.find((item) => pathname === item.path || pathname.startsWith(`${item.path}/`));
 }
 
-/** Where the redesigned panel is served until it replaces the current one. */
-export const APP_BASENAME = "/next";
+/** The panel is served from the site root. */
+export const APP_BASENAME = "/";
 
-/** The current panel, for pages that are not rebuilt yet. */
-export const LEGACY_PANEL_URL = "/";
+/** The previous panel, kept for one release as a way back. */
+export const LEGACY_PANEL_URL = "/legacy/";
 
 /** Below this width the sidebar only shows icons and side panels collapse. */
 export const NARROW_QUERY = "(max-width: 1179px)";

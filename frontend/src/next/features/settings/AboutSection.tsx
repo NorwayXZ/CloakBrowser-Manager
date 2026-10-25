@@ -1,8 +1,11 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { Download, RefreshCw, X } from "lucide-react";
+import { Download, History, RefreshCw, X } from "lucide-react";
 import { useState } from "react";
 import { Badge, Banner, Button, buttonClass, IconButton, KeyValueList, ProgressBar, Section, Skeleton, useConfirm } from "../../ui";
+import { LEGACY_PANEL_URL } from "../../app/nav";
+import { page } from "../../shared/lib/page";
 import { useManagerStatus } from "../app/api";
+import { usePreferences } from "./preferences";
 import { APP_UPDATE_ACTIVE, message, settingsApi, settingsKeys, useAppUpdate, useUpdateCheck, type AppUpdateState, type UpdateCheck } from "./api";
 import { useRestartStalled } from "./updateWatcher";
 
@@ -27,7 +30,40 @@ export function AboutSection() {
         )}
       </Section>
       {status.data && <UpdateSection packaged={packaged} running={status.data.running_count} />}
+      <LegacySwitch />
     </div>
+  );
+}
+
+/** One release keeps the previous panel at /legacy/ as a way back. */
+function LegacySwitch() {
+  const confirm = useConfirm();
+  const { setInterface } = usePreferences();
+  const [busy, setBusy] = useState(false);
+
+  const switchBack = async () => {
+    const ok = await confirm({
+      title: "切换回旧版界面？",
+      description: "窗口会改用旧版界面，之后每次打开也是旧版，直到你在旧版里点“试用新界面”。数据和设置不受影响。",
+      confirmLabel: "切换",
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await setInterface("legacy");
+      page.assign(LEGACY_PANEL_URL);
+    } catch {
+      // The preference provider already told the user why it was not saved.
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Section id="interface" title="界面版本" description="新界面已经是默认界面。旧版界面只在这个版本里保留，用来应对新界面里遇到的问题；下个版本会删除。">
+      <Button icon={<History className="h-4 w-4" />} loading={busy} disabled={busy} onClick={() => void switchBack()}>
+        切换回旧版界面
+      </Button>
+    </Section>
   );
 }
 

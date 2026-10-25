@@ -1680,7 +1680,7 @@ export interface paths {
         };
         /**
          * Serve Spa
-         * @description Serve React SPA — all non-API routes return index.html.
+         * @description Serve the React panel: every route that is not an API call returns a page.
          */
         get: operations["serve_spa__full_path__get"];
         put?: never;
@@ -3078,6 +3078,11 @@ export interface components {
             /** Binary Version */
             binary_version: string;
             /**
+             * Data Newer Than App
+             * @default false
+             */
+            data_newer_than_app: boolean;
+            /**
              * Host Os
              * @enum {string}
              */
@@ -3119,6 +3124,12 @@ export interface components {
          *     so they survive a port change, a reinstall and a backup restore.
          */
         UiPreferencesModel: {
+            /**
+             * Interface
+             * @default new
+             * @enum {string}
+             */
+            interface: "new" | "legacy";
             /**
              * Sidebar Collapsed
              * @default false

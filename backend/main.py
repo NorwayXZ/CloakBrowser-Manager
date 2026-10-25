@@ -28,7 +28,7 @@ from urllib.parse import quote, urlparse
 
 import httpx
 from fastapi import Body, FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 import starlette.requests
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -2640,6 +2640,7 @@ async def get_system_status():
         runtime_mode=browser_mgr.runtime.runtime_mode,
         viewer_mode=browser_mgr.runtime.viewer_mode,
         host_screen=list(primary_screen_size() or []) or None,
+        data_newer_than_app=db.data_is_newer_than_program(),
     )
 
 
@@ -3276,15 +3277,29 @@ async def cdp_page_proxy(websocket: WebSocket, profile_id: str, path: str):
 
 # ── Static Frontend ───────────────────────────────────────────────────────────
 
-def _spa_page(full_path: str) -> Path:
+def _ui_interface() -> str:
+    """"new" or "legacy": which panel "/" opens, from the saved UI preferences."""
+    raw = db.get_setting(UI_PREFERENCES_SETTING_KEY)
+    if raw:
+        try:
+            return UiPreferencesModel.model_validate_json(raw).interface
+        except ValueError:
+            pass
+    return "new"
+
+
+def _spa_page(full_path: str, interface: str = "new") -> Path:
     """The HTML page for a client-side route.
 
-    The redesigned panel is a second page under /next/ until it replaces the
-    current one; everything else gets the current panel.
+    The redesigned panel is the root page. The previous panel is built as a
+    second page under /legacy/ and is also what "/" opens while the saved
+    preference says "legacy". When the legacy page was not built, the new one
+    is served instead so a stale preference can never leave a blank window.
     """
-    next_page = FRONTEND_DIR / "next" / "index.html"
-    if (full_path == "next" or full_path.startswith("next/")) and next_page.is_file():
-        return next_page
+    legacy_page = FRONTEND_DIR / "legacy" / "index.html"
+    wants_legacy = full_path == "legacy" or full_path.startswith("legacy/") or (full_path == "" and interface == "legacy")
+    if wants_legacy and legacy_page.is_file():
+        return legacy_page
     return FRONTEND_DIR / "index.html"
 
 
@@ -3292,24 +3307,33 @@ def _spa_page(full_path: str) -> Path:
 if FRONTEND_DIR.exists():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIR / "assets"), name="assets")
 
-    @app.get("/{full_path:path}")
-    async def serve_spa(full_path: str):
-        """Serve React SPA — all non-API routes return index.html."""
-        if full_path.startswith("api/"):
-            raise HTTPException(status_code=404, detail="Not found")
-        if full_path:
-            # Prevent path traversal: resolve and ensure the target stays inside
-            # FRONTEND_DIR. Without this, encoded `..` segments could escape the
-            # web root and read arbitrary local files (the route also bypasses
-            # the auth middleware because it is not under /api/).
-            try:
-                file_path = (FRONTEND_DIR / full_path).resolve()
-                if not file_path.is_relative_to(FRONTEND_DIR.resolve()):
-                    raise HTTPException(status_code=404, detail="Not found")
-            except (ValueError, HTTPException):
+
+# The page must be revalidated: a stale cached index.html keeps loading the
+# previous release's bundle after the app is upgraded.
+_NO_CACHE = {"Cache-Control": "no-cache"}
+
+
+@app.get("/{full_path:path}")
+async def serve_spa(full_path: str, request: Request):
+    """Serve the React panel: every route that is not an API call returns a page."""
+    if full_path.startswith("api/") or not FRONTEND_DIR.exists():
+        raise HTTPException(status_code=404, detail="Not found")
+    if full_path == "next" or full_path.startswith("next/"):
+        # The redesigned panel used to live here while it was in preview.
+        query = f"?{request.url.query}" if request.url.query else ""
+        return RedirectResponse("/" + full_path[len("next/"):] + query, status_code=307)
+    if full_path:
+        # Prevent path traversal: resolve and ensure the target stays inside
+        # FRONTEND_DIR. Without this, encoded `..` segments could escape the
+        # web root and read arbitrary local files (the route also bypasses
+        # the auth middleware because it is not under /api/).
+        try:
+            file_path = (FRONTEND_DIR / full_path).resolve()
+            if not file_path.is_relative_to(FRONTEND_DIR.resolve()):
                 raise HTTPException(status_code=404, detail="Not found")
-            if file_path.exists() and file_path.is_file():
-                return FileResponse(file_path)
-        # The page must be revalidated: a stale cached index.html keeps loading
-        # the previous release's bundle after the app is upgraded.
-        return FileResponse(_spa_page(full_path), headers={"Cache-Control": "no-cache"})
+        except (ValueError, HTTPException):
+            raise HTTPException(status_code=404, detail="Not found")
+        if file_path.exists() and file_path.is_file():
+            return FileResponse(file_path, headers=_NO_CACHE if file_path.suffix == ".html" else None)
+    interface = _ui_interface() if full_path == "" else "new"
+    return FileResponse(_spa_page(full_path, interface), headers=_NO_CACHE)

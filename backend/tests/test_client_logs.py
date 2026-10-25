@@ -1,4 +1,4 @@
-"""Panel log upload, UI preferences, and which page /next/ serves."""
+"""Panel log upload, UI preferences, and which page the server hands out."""
 
 from __future__ import annotations
 
@@ -72,10 +72,10 @@ def test_client_logs_endpoint_rejects_bad_batches(app_client: TestClient):
 
 
 def test_ui_preferences_default_then_round_trip(app_client: TestClient):
-    assert app_client.get("/api/settings/ui").json() == {"theme": "system", "sidebar_collapsed": False}
+    assert app_client.get("/api/settings/ui").json() == {"theme": "system", "sidebar_collapsed": False, "interface": "new"}
     resp = app_client.put("/api/settings/ui", json={"theme": "dark", "sidebar_collapsed": True})
     assert resp.status_code == 200
-    assert app_client.get("/api/settings/ui").json() == {"theme": "dark", "sidebar_collapsed": True}
+    assert app_client.get("/api/settings/ui").json() == {"theme": "dark", "sidebar_collapsed": True, "interface": "new"}
 
 
 def test_ui_preferences_reject_unknown_theme(app_client: TestClient):
@@ -84,22 +84,66 @@ def test_ui_preferences_reject_unknown_theme(app_client: TestClient):
 
 def test_ui_preferences_fall_back_when_stored_value_is_unreadable(app_client: TestClient):
     db.set_setting(main.UI_PREFERENCES_SETTING_KEY, "{not json")
-    assert app_client.get("/api/settings/ui").json() == {"theme": "system", "sidebar_collapsed": False}
+    assert app_client.get("/api/settings/ui").json() == {"theme": "system", "sidebar_collapsed": False, "interface": "new"}
 
 
-def test_spa_page_serves_next_only_under_next(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    (tmp_path / "next").mkdir()
-    (tmp_path / "index.html").write_text("old")
-    (tmp_path / "next" / "index.html").write_text("new")
+def _built(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, legacy: bool = True):
+    (tmp_path / "index.html").write_text("new")
+    if legacy:
+        (tmp_path / "legacy").mkdir()
+        (tmp_path / "legacy" / "index.html").write_text("old")
     monkeypatch.setattr(main, "FRONTEND_DIR", tmp_path)
-    assert main._spa_page("") == tmp_path / "index.html"
-    assert main._spa_page("profiles") == tmp_path / "index.html"
-    assert main._spa_page("nextgen") == tmp_path / "index.html"
-    assert main._spa_page("next") == tmp_path / "next" / "index.html"
-    assert main._spa_page("next/settings/appearance") == tmp_path / "next" / "index.html"
 
 
-def test_spa_page_falls_back_when_next_was_not_built(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    (tmp_path / "index.html").write_text("old")
-    monkeypatch.setattr(main, "FRONTEND_DIR", tmp_path)
-    assert main._spa_page("next/settings") == tmp_path / "index.html"
+def test_spa_page_serves_the_new_panel_by_default_and_the_old_one_under_legacy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _built(tmp_path, monkeypatch)
+    new, old = tmp_path / "index.html", tmp_path / "legacy" / "index.html"
+    assert main._spa_page("") == new
+    assert main._spa_page("profiles") == new
+    assert main._spa_page("settings/about") == new
+    assert main._spa_page("legacygen") == new
+    assert main._spa_page("legacy") == old
+    assert main._spa_page("legacy/anything") == old
+
+
+def test_spa_page_root_follows_the_saved_interface_preference(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _built(tmp_path, monkeypatch)
+    new, old = tmp_path / "index.html", tmp_path / "legacy" / "index.html"
+    assert main._spa_page("", "legacy") == old
+    # Only the root follows it: a deep link into the new panel stays in the new panel.
+    assert main._spa_page("profiles", "legacy") == new
+    assert main._spa_page("", "new") == new
+
+
+def test_spa_page_falls_back_to_the_new_panel_when_legacy_was_not_built(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _built(tmp_path, monkeypatch, legacy=False)
+    assert main._spa_page("legacy") == tmp_path / "index.html"
+    assert main._spa_page("", "legacy") == tmp_path / "index.html"
+
+
+def test_root_serves_the_page_the_preference_asks_for(app_client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _built(tmp_path, monkeypatch)
+    assert app_client.get("/").text == "new"
+    assert app_client.put("/api/settings/ui", json={"theme": "dark", "sidebar_collapsed": False, "interface": "legacy"}).json()["interface"] == "legacy"
+    assert app_client.get("/").text == "old"
+    assert app_client.get("/profiles").text == "new"
+    assert app_client.get("/legacy/").text == "old"
+    assert app_client.get("/").headers["cache-control"] == "no-cache"
+    assert app_client.put("/api/settings/ui", json={"theme": "dark", "sidebar_collapsed": False}).json()["interface"] == "new"
+    assert app_client.get("/").text == "new"
+
+
+def test_old_preview_addresses_redirect_to_the_same_page_without_next(app_client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _built(tmp_path, monkeypatch)
+    for source, target in [("/next", "/"), ("/next/", "/"), ("/next/settings/about", "/settings/about"), ("/next/checks?report=abc", "/checks?report=abc")]:
+        response = app_client.get(source, follow_redirects=False)
+        assert response.status_code == 307, source
+        assert response.headers["location"] == target, source
+    assert app_client.get("/nextgen").text == "new"
+
+
+def test_interface_preference_defaults_to_new_and_rejects_unknown_values(app_client: TestClient):
+    assert app_client.get("/api/settings/ui").json()["interface"] == "new"
+    assert app_client.put("/api/settings/ui", json={"theme": "system", "sidebar_collapsed": False, "interface": "classic"}).status_code == 422
+    db.set_setting(main.UI_PREFERENCES_SETTING_KEY, '{"theme": "dark", "sidebar_collapsed": true}')
+    assert app_client.get("/api/settings/ui").json() == {"theme": "dark", "sidebar_collapsed": True, "interface": "new"}

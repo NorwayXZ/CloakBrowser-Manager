@@ -1,7 +1,7 @@
 """End-to-end smoke test of the redesigned panel against a real Manager.
 
 Starts its own Manager on a free port with a throwaway data directory (same
-isolation as capture_baseline_ui.py), drives /next/ with Playwright's Chromium,
+isolation as capture_baseline_ui.py), drives the panel with Playwright's Chromium,
 and checks each result through the API. It never launches a browser profile:
 that needs the real kernel and a license seat, and stays a manual check.
 
@@ -30,7 +30,7 @@ def step(name: str):
 
 
 def run(page: Page, base: str) -> None:
-    page.goto(base + "/next/profiles")
+    page.goto(base + "/profiles")
     expect(page.get_by_role("row", name="Amazon Seller #1")).to_be_visible()
 
     step("search narrows the list and can be cleared")
@@ -103,7 +103,7 @@ def run(page: Page, base: str) -> None:
     assert name not in {p["name"] for p in call(base, "GET", "/api/profiles/trash")}
 
     step("create with the editor: custom SOCKS5 proxy, group, notes")
-    page.goto(base + "/next/profiles/new")
+    page.goto(base + "/profiles/new")
     page.get_by_role("textbox", name="名称").fill("编辑器创建的环境")
     page.get_by_label("分组").select_option("冒烟测试组")
     page.get_by_role("radiogroup", name="代理方式").get_by_role("radio", name="自定义代理").click()
@@ -121,7 +121,7 @@ def run(page: Page, base: str) -> None:
     assert made["fingerprint_options"].get("storage_quota_mb") == 50000
 
     step("edit: leaving with changes asks first; Ctrl/Cmd+S saves")
-    page.goto(base + f"/next/profiles/{made['id']}/edit")
+    page.goto(base + f"/profiles/{made['id']}/edit")
     page.get_by_label("备注").fill("改过的备注")
     page.get_by_role("button", name="取消").click()
     page.get_by_role("dialog", name="放弃没保存的修改？").get_by_role("button", name="继续编辑").click()
@@ -131,7 +131,7 @@ def run(page: Page, base: str) -> None:
 
     step("typing stays responsive with a large cookie field")
     big = "[" + ",".join(f'{{"name":"c{i}","value":"{"x" * 40}","domain":".example.com","path":"/"}}' for i in range(400)) + "]"
-    page.goto(base + f"/next/profiles/{made['id']}/edit")
+    page.goto(base + f"/profiles/{made['id']}/edit")
     page.get_by_placeholder("支持 JSON、Netscape", exact=False).fill(big)
     name = page.get_by_role("textbox", name="名称")
     name.click()
@@ -157,7 +157,7 @@ def run(page: Page, base: str) -> None:
     page.get_by_role("dialog", name="放弃没保存的修改？").get_by_role("button", name="放弃修改").click()
 
     step("proxies: add one, add a batch, delete one")
-    page.goto(base + "/next/proxies")
+    page.goto(base + "/proxies")
     page.get_by_label("代理名称").fill("冒烟 SOCKS5")
     page.get_by_placeholder("192.168.100.1 或 proxy.example.com").fill("203.0.113.88")
     page.get_by_placeholder("1090").fill("1080")
@@ -175,7 +175,7 @@ def run(page: Page, base: str) -> None:
     expect(page.get_by_role("row", name="冒烟 SOCKS5")).to_have_count(0)
 
     step("data: full backup is created and downloaded")
-    page.goto(base + "/next/data")
+    page.goto(base + "/data")
     with page.expect_download(timeout=120_000) as download:
         page.get_by_role("button", name="立即完整备份").click()
     assert download.value.suggested_filename.endswith(".zip"), download.value.suggested_filename
@@ -215,7 +215,7 @@ def run(page: Page, base: str) -> None:
     first, second = list(profiles_by_name(base).values())[:2]
     call(base, "DELETE", f"/api/profiles/{first['id']}")
     call(base, "DELETE", f"/api/profiles/{second['id']}")
-    page.goto(base + "/next/data/trash")
+    page.goto(base + "/data/trash")
     page.get_by_role("button", name=f"恢复「{first['name']}」").click()
     expect(page.get_by_text(f"已恢复「{first['name']}」")).to_be_visible()
     page.get_by_role("button", name=f"彻底删除「{second['name']}」").click()
@@ -225,23 +225,23 @@ def run(page: Page, base: str) -> None:
     assert second["id"] not in {p["id"] for p in call(base, "GET", "/api/profiles/trash")}
 
     step("checks: reports start empty; evolution switch saves; linkability analyses saved profiles")
-    page.goto(base + "/next/checks")
+    page.goto(base + "/checks")
     expect(page.get_by_text("还没有检测报告")).to_be_visible()
     expect(page.get_by_role("button", name="开始一键检测")).to_be_enabled()
-    page.goto(base + "/next/checks/evolution")
+    page.goto(base + "/checks/evolution")
     expect(page.get_by_label("进化的环境")).not_to_have_value("")
     target = page.get_by_label("进化的环境").input_value()
     page.get_by_role("switch", name="自动进化").click()
     expect(page.get_by_role("switch", name="自动进化")).to_be_checked()
     page.wait_for_timeout(500)
     assert {p["id"]: p for p in call(base, "GET", "/api/profiles")}[target]["evolution_enabled"] is True
-    page.goto(base + "/next/checks/links")
+    page.goto(base + "/checks/links")
     expect(page.get_by_text("个环境", exact=False).first).to_be_visible()
     analysis = call(base, "GET", "/api/linkability")
     assert analysis["profile_count"] == len(call(base, "GET", "/api/profiles")), analysis["profile_count"]
 
     step("settings: automation hours, AI endpoint (key write-only), kernel update policy")
-    page.goto(base + "/next/settings/automation")
+    page.goto(base + "/settings/automation")
     page.get_by_label("允许的时段").fill("09-18")
     page.get_by_role("button", name="保存", exact=True).click()
     expect(page.get_by_text("自动化时段已设为 09-18")).to_be_visible()
@@ -255,7 +255,7 @@ def run(page: Page, base: str) -> None:
     expect(page.get_by_text("已取消自动化时段限制")).to_be_visible()
     assert call(base, "GET", "/api/automation/hours")["hours"] is None
 
-    page.goto(base + "/next/settings/ai")
+    page.goto(base + "/settings/ai")
     page.get_by_label("接口地址").fill("http://127.0.0.1:9/v1")
     page.get_by_label("模型", exact=True).fill("smoke-model")
     page.get_by_label("API 密钥").fill("sk-smoke-test-value")
@@ -266,19 +266,37 @@ def run(page: Page, base: str) -> None:
     assert llm["configured"] and llm["has_api_key"] and llm["model"] == "smoke-model", llm
     assert "sk-smoke-test-value" not in str(llm)
 
-    page.goto(base + "/next/settings/kernel")
+    page.goto(base + "/settings/kernel")
     page.get_by_role("switch", name="启动浏览器时自动下载新内核").click()
     page.get_by_role("button", name="保存设置").click()
     expect(page.get_by_text("内核设置已保存")).to_be_visible()
     assert call(base, "GET", "/api/kernel")["settings"]["auto_update"] is False
 
-    page.goto(base + "/next/settings/about")
+    page.goto(base + "/settings/about")
     expect(page.get_by_text("源码版（Git 安装）")).to_be_visible()
     # 拉取更新 would run git pull in this checkout, so it is not clicked here.
     expect(page.get_by_role("button", name="拉取更新")).to_be_enabled()
 
+    step("cutover: old /next/ links redirect; the old panel is one click away and one click back")
+    page.goto(base + "/next/settings/about?x=1")
+    expect(page.get_by_role("heading", name="界面版本")).to_be_visible()
+    assert page.url == base + "/settings/about?x=1", page.url
+    page.get_by_role("button", name="切换回旧版界面").click()
+    page.get_by_role("dialog").get_by_role("button", name="切换").click()
+    expect(page.get_by_role("button", name="试用新界面")).to_be_visible()
+    assert page.url == base + "/legacy/", page.url
+    assert call(base, "GET", "/api/settings/ui")["interface"] == "legacy"
+    # "/" now opens the old panel too, which is what the app window loads on the next start.
+    page.goto(base + "/")
+    expect(page.get_by_role("button", name="试用新界面")).to_be_visible()
+    page.get_by_role("button", name="试用新界面").click()
+    expect(page.get_by_role("navigation", name="页面")).to_be_visible()
+    assert call(base, "GET", "/api/settings/ui")["interface"] == "new"
+    page.goto(base + "/")
+    expect(page.get_by_role("navigation", name="页面")).to_be_visible()
+
     step("preflight opens and cancels without launching")
-    page.goto(base + "/next/profiles")
+    page.goto(base + "/profiles")
     page.get_by_role("button", name="打开「Etsy UK」").first.click()
     page.get_by_role("dialog", name="启动前检查").get_by_role("button", name="取消").click()
     assert profiles_by_name(base)["Etsy UK"]["status"] != "running"
@@ -293,7 +311,7 @@ def run_login(browser) -> None:
     proc = start_server(port, {"ADMIN_USERNAME": "smoke", "ADMIN_PASSWORD": first})
     try:
         page = browser.new_page(viewport={"width": 1280, "height": 800}, locale="zh-CN")
-        page.goto(base + "/next/profiles")
+        page.goto(base + "/profiles")
         expect(page.get_by_label("用户名")).to_have_value("smoke")
         page.get_by_label("密码").fill("not-the-password")
         page.get_by_role("button", name="登录").click()
@@ -302,7 +320,7 @@ def run_login(browser) -> None:
         page.get_by_role("button", name="登录").click()
         expect(page.get_by_role("navigation", name="页面")).to_be_visible()
 
-        page.goto(base + "/next/settings/account")
+        page.goto(base + "/settings/account")
         page.get_by_label("当前密码").fill(first)
         page.get_by_label("新密码", exact=True).fill(second)
         page.get_by_label("确认新密码").fill(second)
@@ -329,8 +347,8 @@ def run_login(browser) -> None:
 
 
 def main() -> int:
-    if not (ROOT / "frontend" / "dist" / "next" / "index.html").exists():
-        print("frontend/dist/next is missing: run `npm run build` in frontend/ first", file=sys.stderr)
+    if not (ROOT / "frontend" / "dist" / "index.html").exists():
+        print("frontend/dist is missing: run `npm run build` in frontend/ first", file=sys.stderr)
         return 1
     port = free_port()
     base = f"http://127.0.0.1:{port}"

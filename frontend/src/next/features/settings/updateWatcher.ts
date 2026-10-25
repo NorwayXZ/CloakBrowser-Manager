@@ -1,14 +1,12 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
+import { page } from "../../shared/lib/page";
 import { appApi } from "../app/api";
 import { settingsKeys, useAppUpdate, type AppUpdateState } from "./api";
 
 const POLL_MS = 1_000;
 const RESTART_TIMEOUT_MS = 3 * 60_000;
 const STALLED_KEY = ["app", "update-stalled"] as const;
-
-/** Replaced in tests: jsdom cannot reload. */
-export const pageReloader = { reload: () => window.location.reload() };
 
 /**
  * While the packaged app swaps itself for a new version the server goes away
@@ -42,7 +40,7 @@ export function useAppUpdateWatcher() {
         const status = await appApi.status();
         if (status.app_version === awaiting) {
           window.clearInterval(timer);
-          pageReloader.reload();
+          page.reload();
           return;
         }
         // An answer from a server whose job is no longer restarting, still on the

@@ -13,6 +13,7 @@ import { useToast } from "../../ui";
 
 export type UiPreferences = components["schemas"]["UiPreferencesModel"];
 export type ThemePreference = UiPreferences["theme"];
+export type InterfacePreference = UiPreferences["interface"];
 export type ResolvedTheme = "light" | "dark";
 
 const KEY = ["settings", "ui"] as const;
@@ -20,24 +21,41 @@ const THEME_CACHE = "cbm.theme";
 const SIDEBAR_CACHE = "cbm.sidebar";
 
 function readCache(): Required<UiPreferences> {
-  const fallback = { theme: "system" as ThemePreference, sidebar_collapsed: false };
+  const fallback = { theme: "system" as ThemePreference, sidebar_collapsed: false, interface: "new" as InterfacePreference };
   try {
     const theme = window.localStorage.getItem(THEME_CACHE);
     return {
       theme: theme === "light" || theme === "dark" || theme === "system" ? theme : fallback.theme,
       sidebar_collapsed: window.localStorage.getItem(SIDEBAR_CACHE) === "1",
+      interface: fallback.interface,
     };
   } catch {
     return fallback;
   }
 }
 
-function writeCache(prefs: Required<UiPreferences>) {
+function writeCache(prefs: Pick<Required<UiPreferences>, "theme" | "sidebar_collapsed">) {
   try {
     window.localStorage.setItem(THEME_CACHE, prefs.theme);
     window.localStorage.setItem(SIDEBAR_CACHE, prefs.sidebar_collapsed ? "1" : "0");
   } catch {
     // Storage blocked: the backend still has the value.
+  }
+}
+
+declare global {
+  interface Window {
+    /** Present in the macOS app's WKWebView, where the window follows the panel's theme. */
+    webkit?: { messageHandlers?: Record<string, { postMessage(message: unknown): void } | undefined> };
+  }
+}
+
+/** Tell the macOS app window which theme was chosen, so its own background and title bar match. */
+function reportThemeToWindow(theme: ThemePreference) {
+  try {
+    window.webkit?.messageHandlers?.cbmTheme?.postMessage({ theme });
+  } catch {
+    // Not in the app window, or the bridge is gone: the panel works without it.
   }
 }
 
@@ -63,6 +81,8 @@ interface PreferencesValue {
   sidebarCollapsed: boolean;
   setTheme: (theme: ThemePreference) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
+  /** Which panel "/" opens next time. Resolves once the Manager has stored it. */
+  setInterface: (next: InterfacePreference) => Promise<void>;
   saving: boolean;
   /** The running Manager predates this panel: it has no /api/settings/ui. */
   backendOutdated: boolean;
@@ -83,6 +103,8 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
   const prefs: Required<UiPreferences> = {
     theme: query.data?.theme ?? initial.theme,
     sidebar_collapsed: query.data?.sidebar_collapsed ?? initial.sidebar_collapsed,
+    // Carried through every save so a theme change cannot undo the choice of panel.
+    interface: query.data?.interface ?? initial.interface,
   };
 
   const mutation = useMutation({
@@ -101,10 +123,17 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
   });
 
   const { mutate } = mutation;
-  const { theme, sidebar_collapsed: sidebarCollapsed } = prefs;
+  const { theme, sidebar_collapsed: sidebarCollapsed, interface: interfaceChoice } = prefs;
   const update = useCallback(
-    (patch: Partial<UiPreferences>) => mutate({ theme, sidebar_collapsed: sidebarCollapsed, ...patch } as Required<UiPreferences>),
-    [mutate, theme, sidebarCollapsed],
+    (patch: Partial<UiPreferences>) => mutate({ theme, sidebar_collapsed: sidebarCollapsed, interface: interfaceChoice, ...patch } as Required<UiPreferences>),
+    [mutate, theme, sidebarCollapsed, interfaceChoice],
+  );
+  const { mutateAsync } = mutation;
+  const setInterface = useCallback(
+    async (next: InterfacePreference) => {
+      await mutateAsync({ theme, sidebar_collapsed: sidebarCollapsed, interface: next });
+    },
+    [mutateAsync, theme, sidebarCollapsed],
   );
 
   const system = useSystemTheme();
@@ -118,6 +147,8 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
     writeCache({ theme, sidebar_collapsed: sidebarCollapsed });
   }, [theme, sidebarCollapsed]);
 
+  useEffect(() => reportThemeToWindow(theme), [theme]);
+
   const saving = mutation.isPending;
   const backendOutdated = query.isError && isApiError(query.error) && query.error.status === 404;
   const value = useMemo<PreferencesValue>(
@@ -127,10 +158,11 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
       sidebarCollapsed,
       setTheme: (next) => update({ theme: next }),
       setSidebarCollapsed: (next) => update({ sidebar_collapsed: next }),
+      setInterface,
       saving,
       backendOutdated,
     }),
-    [theme, sidebarCollapsed, resolvedTheme, update, saving, backendOutdated],
+    [theme, sidebarCollapsed, resolvedTheme, update, setInterface, saving, backendOutdated],
   );
 
   return <PreferencesCtx.Provider value={value}>{children}</PreferencesCtx.Provider>;

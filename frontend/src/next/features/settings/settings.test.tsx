@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetConnectionForTests } from "../../shared/api/connection";
 import { expectNoAxeViolations, mockFetch, renderApp, shellRoutes, STATUS, type MockRoute } from "../../test/utils";
 import type { AppUpdateState, KernelOverview } from "./api";
-import { pageReloader } from "./updateWatcher";
+import { page } from "../../shared/lib/page";
 
 const MB = 1024 * 1024;
 
@@ -499,6 +499,53 @@ describe("login", () => {
   });
 });
 
+describe("settings › interface switch", () => {
+  it("stores the choice of the old panel, then opens it", async () => {
+    const assign = vi.spyOn(page, "assign").mockImplementation(() => undefined);
+    const { fetchMock } = await open(
+      "/settings/about",
+      [{ path: "/api/settings/ui", respond: { theme: "dark", sidebar_collapsed: true, interface: "new" } }],
+      "界面版本",
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "切换回旧版界面" }));
+    await cancelDialog();
+    expect(assign).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "切换回旧版界面" }));
+    await confirmWith("切换");
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("/legacy/"));
+    // The theme and sidebar choices travel with it, so nothing else is reset.
+    expect(bodies(fetchMock, "PUT", "/api/settings/ui")).toEqual([{ theme: "dark", sidebar_collapsed: true, interface: "legacy" }]);
+  });
+
+  it("stays in the new panel and says so when the choice cannot be stored", async () => {
+    const assign = vi.spyOn(page, "assign").mockImplementation(() => undefined);
+    await open(
+      "/settings/about",
+      [
+        { path: "/api/settings/ui", respond: { theme: "system", sidebar_collapsed: false, interface: "new" } },
+        { method: "PUT", path: "/api/settings/ui", status: 500, respond: { detail: "数据库被锁定" } },
+      ],
+      "界面版本",
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "切换回旧版界面" }));
+    await confirmWith("切换");
+    expect(await screen.findByText("界面偏好没有保存")).toBeInTheDocument();
+    expect(assign).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "切换回旧版界面" })).toBeEnabled();
+  });
+
+  it("keeps the saved choice of panel when only the theme changes", async () => {
+    const { fetchMock } = await open(
+      "/settings",
+      [{ path: "/api/settings/ui", respond: { theme: "system", sidebar_collapsed: false, interface: "legacy" } }],
+      "外观",
+    );
+    fireEvent.click(await screen.findByRole("radio", { name: "深色" }));
+    await waitFor(() => expect(bodies(fetchMock, "PUT", "/api/settings/ui")).toHaveLength(1));
+    expect(bodies(fetchMock, "PUT", "/api/settings/ui")[0]).toEqual({ theme: "dark", sidebar_collapsed: false, interface: "legacy" });
+  });
+});
+
 describe("settings › about and update", () => {
   const PACKAGED_CHECK = {
     ok: true,
@@ -589,7 +636,7 @@ describe("settings › about and update", () => {
   });
 
   it("reloads once the new version answers", async () => {
-    const reload = vi.spyOn(pageReloader, "reload").mockImplementation(() => undefined);
+    const reload = vi.spyOn(page, "reload").mockImplementation(() => undefined);
     let version = "0.7.2";
     mockFetch(
       shellRoutes([
@@ -606,7 +653,7 @@ describe("settings › about and update", () => {
 
   it("says the restart looks stuck after 3 minutes without the new version", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const reload = vi.spyOn(pageReloader, "reload").mockImplementation(() => undefined);
+    const reload = vi.spyOn(page, "reload").mockImplementation(() => undefined);
     mockFetch(shellRoutes([{ path: "/api/app/update", respond: updateState({ phase: "restarting", label: "正在安装，应用会自动重启", target: "0.8.0" }) }]));
     renderApp("/settings/about");
     expect(await screen.findByText(/新版本启动后这个页面会自动刷新/)).toBeInTheDocument();

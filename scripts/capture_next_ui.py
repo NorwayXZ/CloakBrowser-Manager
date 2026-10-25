@@ -1,4 +1,4 @@
-"""Screenshot the redesigned panel (/next/) and check its layout.
+"""Screenshot the redesigned panel (the root page) and check its layout.
 
 Same isolation as capture_baseline_ui.py (own Manager, throwaway data
 directory, example data, no browser profile launched). Every screen is taken
@@ -159,25 +159,25 @@ def screens(page: Page, base: str):
         return run
 
     first_row = lambda: page.locator("tr[data-row]").first
-    yield "01-profiles", go("/next/profiles", "tr[data-row]"), False
-    yield "01b-profiles-drawer", with_action("/next/profiles", "tr[data-row]",
+    yield "01-profiles", go("/profiles", "tr[data-row]"), False
+    yield "01b-profiles-drawer", with_action("/profiles", "tr[data-row]",
                                              lambda: first_row().locator("td").nth(2).click()), False
-    yield "01c-profiles-batch", with_action("/next/profiles", "tr[data-row]", lambda: (
+    yield "01c-profiles-batch", with_action("/profiles", "tr[data-row]", lambda: (
         page.get_by_role("checkbox", name="全选当前列表").click())), False
-    yield "01d-profiles-row-menu", with_action("/next/profiles", "tr[data-row]",
+    yield "01d-profiles-row-menu", with_action("/profiles", "tr[data-row]",
                                                lambda: page.get_by_role("button", name="的更多操作").first.click()), False
-    yield "01e-preflight", with_action("/next/profiles", "tr[data-row]", lambda: (
+    yield "01e-preflight", with_action("/profiles", "tr[data-row]", lambda: (
         page.locator("tr[data-row]", has_text="Etsy UK").get_by_role("button", name="打开「Etsy UK」").click(),
         page.wait_for_selector("text=启动前检查"))), False
-    yield "01f-sentence", go("/next/profiles?create=sentence", "text=一句话描述"), False
-    yield "01f2-sentence-preview", with_action("/next/profiles?create=sentence", "text=一句话描述", lambda: (
+    yield "01f-sentence", go("/profiles?create=sentence", "text=一句话描述"), False
+    yield "01f2-sentence-preview", with_action("/profiles?create=sentence", "text=一句话描述", lambda: (
         page.get_by_role("textbox", name="一句话描述").fill("建个美国号，西雅图，喜欢露营摄影"),
         page.get_by_role("button", name="解析").click(),
         page.wait_for_selector("text=一句话建号预览"))), False
-    yield "01g-disposable", go("/next/profiles?create=disposable", "text=新建一次性身份"), False
-    yield "01h-no-match", go("/next/profiles?q=zzzz", "text=没有匹配的环境"), False
+    yield "01g-disposable", go("/profiles?create=disposable", "text=新建一次性身份"), False
+    yield "01h-no-match", go("/profiles?q=zzzz", "text=没有匹配的环境"), False
     def edit_first():
-        page.goto(base + "/next/profiles")
+        page.goto(base + "/profiles")
         page.wait_for_selector("tr[data-row]")
         page.get_by_role("button", name="「Amazon Seller #1」的更多操作").click()
         page.get_by_role("menuitem", name="编辑").click()
@@ -191,54 +191,54 @@ def screens(page: Page, base: str):
             page.wait_for_timeout(900)
         return run
 
-    yield "02a-editor-new", go("/next/profiles/new", "#form-basic"), False
+    yield "02a-editor-new", go("/profiles/new", "#form-basic"), False
     yield "02b-editor-edit", edit_first, False
     yield "02c-editor-proxy", section("代理信息"), False
     yield "02d-editor-fingerprint", section("指纹配置"), False
     yield "02e-editor-more", section("更多指纹"), False
-    yield "02f-editor-advanced", with_action("/next/profiles/new", "#form-basic", lambda: (
+    yield "02f-editor-advanced", with_action("/profiles/new", "#form-basic", lambda: (
         page.get_by_role("navigation", name="表单分区").get_by_role("button", name="高级设置").click(),
         page.get_by_role("checkbox", name="养号（定时自动浏览养护）").click(),
         page.wait_for_timeout(600))), False
-    yield "02g-editor-leave", with_action("/next/profiles/new", "#form-basic", lambda: (
+    yield "02g-editor-leave", with_action("/profiles/new", "#form-basic", lambda: (
         page.get_by_role("textbox", name="名称").fill("没保存的环境"),
         page.get_by_role("button", name="取消").click(),
         page.wait_for_selector("text=放弃没保存的修改？"))), False
-    yield "03a-proxies", go("/next/proxies", "text=美国 SOCKS5"), False
-    yield "03b-proxies-batch", with_action("/next/proxies", "text=美国 SOCKS5", lambda: (
+    yield "03a-proxies", go("/proxies", "text=美国 SOCKS5"), False
+    yield "03b-proxies-batch", with_action("/proxies", "text=美国 SOCKS5", lambda: (
         page.get_by_role("tab", name="批量导入").click(),
         page.get_by_label("批量代理").fill("192.168.0.1:8000\nsocks5://user:pass@10.0.0.1:1080\nvless://uuid@edge.example.com:443?security=tls#东京\n写错的一行"))), False
-    yield "04a-data", go("/next/data", "text=备份记录"), True
-    yield "04b-data-restore-confirm", with_action("/next/data", "text=备份记录", lambda: (
+    yield "04a-data", go("/data", "text=备份记录"), True
+    yield "04b-data-restore-confirm", with_action("/data", "text=备份记录", lambda: (
         page.get_by_role("button", name="恢复到", exact=False).first.click(),
         page.wait_for_selector("role=dialog"))), False
-    yield "04c-trash", go("/next/data/trash", "text=已删除的旧环境"), False
-    yield "05a-checks", go("/next/checks", "text=检测哪些网站"), False
-    yield "05b-checks-report", go("/next/checks?report=20261024-100000-Etsy_UK", "text=和上次不同"), True
-    yield "05c-checks-evolution", go("/next/checks/evolution", "text=进化时间线"), False
-    yield "05d-checks-links", go("/next/checks/links", "text=关联分析"), False
-    yield "02-settings-appearance", go("/next/settings", "text=主题"), False
-    yield "06a-settings-kernel", go("/next/settings/kernel", "text=已下载的内核", fake({"/api/kernel": KERNEL_FIXTURE})), True
-    yield "06b-settings-ai", go("/next/settings/ai", "text=执行强度"), False
-    yield "06c-settings-automation", go("/next/settings/automation", "text=允许的时段"), False
-    yield "06d-settings-account", go("/next/settings/account", "text=没有开启登录保护"), False
-    yield "06e-settings-about", go("/next/settings/about", "text=还没有检查过"), False
-    yield "06f-settings-updating", go("/next/settings/about", "text=正在下载新版本", fake({"/api/app/update": UPDATE_FIXTURE})), False
-    yield "06g-login", go("/next/profiles", "text=输入管理员账号和密码", fake({"/api/auth/status": SIGNED_OUT_FIXTURE})), False
-    yield "04-running-popover", with_action("/next/settings", "text=主题",
+    yield "04c-trash", go("/data/trash", "text=已删除的旧环境"), False
+    yield "05a-checks", go("/checks", "text=检测哪些网站"), False
+    yield "05b-checks-report", go("/checks?report=20261024-100000-Etsy_UK", "text=和上次不同"), True
+    yield "05c-checks-evolution", go("/checks/evolution", "text=进化时间线"), False
+    yield "05d-checks-links", go("/checks/links", "text=关联分析"), False
+    yield "02-settings-appearance", go("/settings", "text=主题"), False
+    yield "06a-settings-kernel", go("/settings/kernel", "text=已下载的内核", fake({"/api/kernel": KERNEL_FIXTURE})), True
+    yield "06b-settings-ai", go("/settings/ai", "text=执行强度"), False
+    yield "06c-settings-automation", go("/settings/automation", "text=允许的时段"), False
+    yield "06d-settings-account", go("/settings/account", "text=没有开启登录保护"), False
+    yield "06e-settings-about", go("/settings/about", "text=还没有检查过"), False
+    yield "06f-settings-updating", go("/settings/about", "text=正在下载新版本", fake({"/api/app/update": UPDATE_FIXTURE})), False
+    yield "06g-login", go("/profiles", "text=输入管理员账号和密码", fake({"/api/auth/status": SIGNED_OUT_FIXTURE})), False
+    yield "04-running-popover", with_action("/settings", "text=主题",
                                             lambda: page.get_by_role("button", name="未运行").click()), False
-    yield "05-theme-menu", with_action("/next/settings", "text=主题",
+    yield "05-theme-menu", with_action("/settings", "text=主题",
                                        lambda: page.get_by_role("button", name="外观：跟随系统").click()), False
-    yield "06-shortcuts", with_action("/next/settings", "text=主题", lambda: page.keyboard.press("Shift+Slash")), False
-    yield "07-gallery", go("/next/__ui", "text=组件展示"), True
-    yield "08-confirm-dialog", with_action("/next/__ui", "text=组件展示",
+    yield "06-shortcuts", with_action("/settings", "text=主题", lambda: page.keyboard.press("Shift+Slash")), False
+    yield "07-gallery", go("/__ui", "text=组件展示"), True
+    yield "08-confirm-dialog", with_action("/__ui", "text=组件展示",
                                            lambda: page.get_by_role("button", name="确认对话框").click()), False
-    yield "09-not-found", go("/next/whatever", "text=没有这个页面"), False
+    yield "09-not-found", go("/whatever", "text=没有这个页面"), False
 
 
 def main() -> int:
-    if not (ROOT / "frontend" / "dist" / "next" / "index.html").exists():
-        print("frontend/dist/next is missing: run `npm run build` in frontend/ first", file=sys.stderr)
+    if not (ROOT / "frontend" / "dist" / "index.html").exists():
+        print("frontend/dist is missing: run `npm run build` in frontend/ first", file=sys.stderr)
         return 1
     port = free_port()
     base = f"http://127.0.0.1:{port}"

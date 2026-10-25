@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetConnectionForTests } from "../shared/api/connection";
 import { resetLogForTests } from "../shared/log/logger";
-import { expectNoAxeViolations, mockFetch, renderApp, shellRoutes, testQueryClient } from "../test/utils";
+import { expectNoAxeViolations, mockFetch, renderApp, shellRoutes, STATUS, testQueryClient } from "../test/utils";
 import { AppProviders } from "./providers";
 import { AuthGate } from "./AuthGate";
 import { RouteErrorBoundary } from "./RouteErrorBoundary";
@@ -117,7 +117,7 @@ describe("app shell", () => {
     fireEvent.click(screen.getByRole("button", { name: "收起侧栏" }));
     expect(await screen.findByRole("button", { name: "展开侧栏" })).toBeInTheDocument();
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith("/api/settings/ui", expect.objectContaining({ method: "PUT", body: JSON.stringify({ theme: "system", sidebar_collapsed: true }) })),
+      expect(fetchMock).toHaveBeenCalledWith("/api/settings/ui", expect.objectContaining({ method: "PUT", body: JSON.stringify({ theme: "system", sidebar_collapsed: true, interface: "new" }) })),
     );
     expect(window.localStorage.getItem("cbm.sidebar")).toBe("1");
   });
@@ -142,6 +142,14 @@ describe("app shell", () => {
     renderApp("/settings");
     expect(await screen.findByText("Manager 服务是旧版本，需要重启")).toBeInTheDocument();
     expect(screen.getByText(/\.\/bin\/cloak restart/)).toBeInTheDocument();
+  });
+
+  it("warns when the data was written by a newer release", async () => {
+    controllableMedia({});
+    mockFetch(shellRoutes([{ path: "/api/status", respond: { ...STATUS, data_newer_than_app: true } }]));
+    renderApp("/settings");
+    expect(await screen.findByText("这份数据来自更新版本的 Manager")).toBeInTheDocument();
+    expect(screen.getByText(/做一次完整备份/)).toBeInTheDocument();
   });
 
   it("does not ask for a restart when the Manager is current", async () => {
@@ -180,9 +188,30 @@ describe("theme", () => {
     fireEvent.click(screen.getByRole("radio", { name: "浅色" }));
     await waitFor(() => expect(document.documentElement.dataset.theme).toBe("light"));
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith("/api/settings/ui", expect.objectContaining({ method: "PUT", body: JSON.stringify({ theme: "light", sidebar_collapsed: false }) })),
+      expect(fetchMock).toHaveBeenCalledWith("/api/settings/ui", expect.objectContaining({ method: "PUT", body: JSON.stringify({ theme: "light", sidebar_collapsed: false, interface: "new" }) })),
     );
     expect(window.localStorage.getItem("cbm.theme")).toBe("light");
+  });
+
+  it("tells the macOS app window which theme was chosen, and works without that bridge", async () => {
+    controllableMedia({ [DARK]: false });
+    const postMessage = vi.fn();
+    window.webkit = { messageHandlers: { cbmTheme: { postMessage } } };
+    try {
+      mockFetch(shellRoutes());
+      renderApp("/settings");
+      await waitFor(() => expect(postMessage).toHaveBeenCalledWith({ theme: "system" }));
+      fireEvent.click(screen.getByRole("radio", { name: "深色" }));
+      await waitFor(() => expect(postMessage).toHaveBeenLastCalledWith({ theme: "dark" }));
+      // A bridge that throws must not break the panel.
+      postMessage.mockImplementation(() => {
+        throw new Error("bridge gone");
+      });
+      fireEvent.click(screen.getByRole("radio", { name: "浅色" }));
+      await waitFor(() => expect(document.documentElement.dataset.theme).toBe("light"));
+    } finally {
+      delete window.webkit;
+    }
   });
 
   it("uses the cached theme before the server answers", () => {

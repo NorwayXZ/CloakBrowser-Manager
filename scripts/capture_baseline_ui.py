@@ -116,7 +116,7 @@ def screens(page: Page, base: str):
     """Yield (name, setup) pairs; each setup starts from a fresh list view."""
 
     def home():
-        page.goto(base + "/")
+        page.goto(base + "/legacy/")
         page.wait_for_selector("text=Amazon Seller #1")
         settle(page)
 

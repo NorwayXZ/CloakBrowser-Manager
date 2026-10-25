@@ -2,7 +2,7 @@ import type { Config } from "tailwindcss";
 
 export default {
   // The redesigned panel (src/next) has its own config: tailwind.next.config.ts.
-  content: ["./index.html", "./src/**/*.{ts,tsx}", "!./src/next/**"],
+  content: ["./legacy/index.html", "./src/**/*.{ts,tsx}", "!./src/next/**"],
   darkMode: "class",
   theme: {
     extend: {

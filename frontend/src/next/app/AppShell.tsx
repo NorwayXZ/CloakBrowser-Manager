@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router";
+import { useManagerStatus } from "../features/app/api";
 import { usePreferences } from "../features/settings/preferences";
 import { onReconnect, useConnectionState } from "../shared/api/connection";
 import { useHotkeys, useMediaQuery } from "../shared/lib/hotkeys";
@@ -36,6 +37,7 @@ export function AppShell() {
         <Toolbar onShowShortcuts={() => setShortcutsOpen(true)} />
         <ConnectionBanner />
         <OutdatedBackendBanner />
+        <DowngradeBanner />
         <main id="main" tabIndex={-1} className="min-h-0 flex-1 overflow-auto focus:outline-none">
           <RouteErrorBoundary key={location.pathname}>
             <Outlet />
@@ -64,6 +66,19 @@ function OutdatedBackendBanner() {
     <div className="shrink-0 border-b border-border bg-surface px-4 py-2">
       <Banner tone="warning" title="Manager 服务是旧版本，需要重启">
         面板已经更新，但正在运行的 Manager 服务还是旧版本，部分功能用不了。源码版请运行 ./bin/cloak restart；安装包版请从菜单栏或托盘退出后重新打开。
+      </Banner>
+    </div>
+  );
+}
+
+/** The data was last used by a newer release than the one running now. */
+function DowngradeBanner() {
+  const { data } = useManagerStatus();
+  if (!data?.data_newer_than_app) return null;
+  return (
+    <div className="shrink-0 border-b border-border bg-surface px-4 py-2">
+      <Banner tone="warning" title="这份数据来自更新版本的 Manager">
+        你现在运行的是较旧的版本，它可能读不全或写坏新版本保存的内容。建议先更新到最新版本再继续使用；如果要保留现在的数据，请先在“数据”里做一次完整备份。
       </Banner>
     </div>
   );

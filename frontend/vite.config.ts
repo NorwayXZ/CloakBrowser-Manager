@@ -2,16 +2,17 @@ import { resolve } from "node:path";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 
-// The redesigned panel is a second page served under /next/ while the old one
-// stays at /. In dev, deep links such as /next/settings must load its page.
-function nextPageFallback(): Plugin {
+// The redesigned panel is the root page. The previous one stays as a second
+// page under /legacy/ for one release (switch-back safety net). In dev, deep
+// links under /legacy/ must load that page instead of the root one.
+function legacyPageFallback(): Plugin {
   return {
-    name: "next-page-fallback",
+    name: "legacy-page-fallback",
     configureServer(server) {
       server.middlewares.use((req, _res, next) => {
         const url = req.url ?? "";
-        if (url === "/next" || (url.startsWith("/next/") && !url.slice(6).includes("."))) {
-          req.url = "/next/index.html";
+        if (url === "/legacy" || (url.startsWith("/legacy/") && !url.slice(8).includes("."))) {
+          req.url = "/legacy/index.html";
         }
         next();
       });
@@ -20,12 +21,12 @@ function nextPageFallback(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), nextPageFallback()],
+  plugins: [react(), legacyPageFallback()],
   build: {
     rollupOptions: {
       input: {
         main: resolve(__dirname, "index.html"),
-        next: resolve(__dirname, "next/index.html"),
+        legacy: resolve(__dirname, "legacy/index.html"),
       },
     },
   },

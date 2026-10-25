@@ -305,6 +305,8 @@ class StatusResponse(BaseModel):
     viewer_mode: ViewerMode
     # This computer's screen, which profiles following it launch with.
     host_screen: list[int] | None = None
+    # The data was last written by a newer release than this one (a downgrade).
+    data_newer_than_app: bool = False
 
 
 class ManagerUpdateResponse(BaseModel):
@@ -646,6 +648,9 @@ class UiPreferencesModel(BaseModel):
 
     theme: Literal["system", "light", "dark"] = "system"
     sidebar_collapsed: bool = False
+    # Which panel the window opens at "/": the redesigned one, or the previous
+    # one kept at /legacy/ for a release as a way back.
+    interface: Literal["new", "legacy"] = "new"
 
 
 class ClientLogEntry(BaseModel):
