@@ -4,6 +4,8 @@ CloakBrowser Manager 带一个独立的 **stdio MCP 服务器**（`backend/mcp_s
 
 桥不新增任何监听端口，不直接碰浏览器；Manager 本体是唯一的执行者。
 
+> 给 agent 看的使用说明（概念、标准流程、禁忌、错误码）在 [AGENT.md](AGENT.md)；桥连接时也会通过 MCP `instructions` 把要点发给 agent。
+
 ## 使用前提
 
 1. **先打开 Manager**（面板后端在跑）。桥连不上 Manager 时，所有工具只会回结构化错误 `manager_unreachable`，不会假装成功。
@@ -18,7 +20,8 @@ CloakBrowser Manager 带一个独立的 **stdio MCP 服务器**（`backend/mcp_s
 | --- | --- |
 | `off` | 桥拒绝服务，工具列表为空 |
 | `read-only`（默认） | 只读 14 个工具；动作工具不在列表里出现，直调也会被拒绝并记审计 |
-| `full` | 只读 14 个 + 动作 5 个（启动/关闭画像、跑检测、跑养号、跑进化） |
+| `full` | 只读 14 个 + 动作 5 个（启动/关闭画像、跑检测、跑养号、跑进化）；`launch_profile` 只能 `manual` 模式 |
+| `automation` | `full` 的全部，再加浏览器工具 2 个（`open_browser`、`get_cdp_endpoint`），`launch_profile` 可用 `debug` 模式——这一档会把 CDP 端点交给 agent |
 
 查看 / 修改（面板 UI 暂未提供，用 API）：
 
@@ -28,6 +31,8 @@ curl -X PUT http://127.0.0.1:8080/api/settings/mcp -H 'Content-Type: application
 ```
 
 第一次让 agent 碰你的浏览器，建议先在 `read-only` 下用几天，确认它读得对、说得清，再开 `full`。
+
+**`automation` 的风险**：CDP 能读取页面的全部 Cookie，等于把该画像的登录态交给了 agent。所以它单独成档，不并进 `full`。只在需要 agent 操作页面时开，用完改回 `full`。
 
 ## 客户端配置
 
@@ -72,11 +77,19 @@ Muse mcp add cloakbrowser-manager -- python -m backend.mcp_server
 
 只读（14）：`manager_status`、`list_profiles`、`get_profile`、`get_profile_preflight`、`list_device_templates`、`get_linkability`、`list_site_check_reports`、`get_site_check_report`、`get_current_site_check`、`get_fingerprint_report`、`get_warmup_state`、`list_warmup_scripts`、`get_evolution`、`get_kernel_info`。
 
-动作（5，需 `full`）：`launch_profile`、`stop_profile`、`run_site_check`、`run_warmup`、`run_evolution`。
+动作（5，需 `full` 或 `automation`）：`launch_profile`、`stop_profile`、`run_site_check`、`run_warmup`、`run_evolution`。
 
-结构化错误（工具失败时回 `{ok: false, reason, detail}`，agent 能据此决定下一步）：`manager_unreachable`（Manager 没开）、`not_found`、`already_running` / `not_running`、`automation_busy`（带 `owner`，另一个自动化在跑）、`seat_busy`（撞授权单座位，等几分钟座位释放，不要立刻重试）、`mode_read_only` / `mcp_disabled`、`conflict`、`invalid_argument`。
+浏览器（2，需 `automation`）：
+- `open_browser(profile)`：画像 id 或名称。确保以 `debug` 模式在跑并返回 CDP 连接信息；已经以 `debug` 在跑就直接返回（`started=false`），以 `manual` 在跑则回 `already_running`，不会替你重启。
+- `get_cdp_endpoint(profile_id)`：对已在 `debug` 模式运行的画像返回 CDP 连接信息（HTTP/WebSocket 端点、页面标签、接入写法）。
 
-**永远不会有的工具**（设计如此，不是没做完）：删除/焚毁画像、批准或驳回进化提案与养号剧本（批准权只留面板人工）、Cookie 读取/导出、CDP 控制、license 写入、备份恢复与应用更新。
+端点指向 Manager 自己的 CDP 代理 `/api/profiles/{id}/cdp`，不是 Chrome 的原始调试端口；开了鉴权时返回里只有 `auth_required` 和提示，不回显 token。
+
+`launch_profile` 另有可选参数 `launch_mode`（`manual` 默认 / `debug`）。`debug` 需要 `automation` 档，成功时一并返回 CDP 连接信息。
+
+结构化错误（工具失败时回 `{ok: false, reason, detail}`，agent 能据此决定下一步）：`manager_unreachable`（Manager 没开）、`not_found`、`already_running` / `not_running`、`cdp_unavailable`（画像是 `manual` 模式启动的，没有 CDP）、`automation_busy`（带 `owner`，另一个自动化在跑）、`seat_busy`（撞授权单座位，等几分钟座位释放，不要立刻重试）、`mode_read_only` / `mode_not_automation` / `mcp_disabled`、`conflict`、`invalid_argument`。
+
+**永远不会有的工具**（设计如此，不是没做完）：删除/焚毁画像、批准或驳回进化提案与养号剧本（批准权只留面板人工）、Cookie 读取/导出、license 写入、备份恢复与应用更新。CDP 只在 `automation` 档以连接信息的形式交出，桥本身不代 agent 发 CDP 命令。
 
 ## 字段政策（agent 看不到什么）
 
@@ -84,7 +97,7 @@ Muse mcp add cloakbrowser-manager -- python -m backend.mcp_server
 - 画像的 `notes`、`warmup_persona`（你的自由文本）默认不回；剧本批次的 persona 快照同样不回（剧本意图/搜索词会回，那是审核材料）。
 - `cookies_json` 与任何 Cookie 值不回——MCP 层没有任何 Cookie 主题工具。
 - license key 的值在 REST 层就不存在（只有 tier/plan/到期/`key_stored`），桥自然也拿不到。
-- `cdp_url`、VNC 端口、`user_data_dir` 等本机访问路径不回。
+- VNC 端口、显示号、`user_data_dir` 等本机访问路径不回。`cdp_url` 只在 `automation` 档以 Manager 代理端点的形式交出（见上）。
 
 ## 审计
 
@@ -94,6 +107,8 @@ Muse mcp add cloakbrowser-manager -- python -m backend.mcp_server
 
 - 工具全回 `manager_unreachable`：Manager 没开，或端口不一致（检查 `CLOAKBROWSER_MANAGER_PORT` 两边是否一致）。
 - 动作工具不见了：当前是 `read-only`（默认）；改 `full` 后重启客户端（工具列表在连接时协商）。
+- `open_browser` / `get_cdp_endpoint` 不见了：需要 `automation` 档，同样改完要重启客户端。
+- `open_browser` 回 `already_running`：画像是以 `manual` 模式开着的（可能人在用），确认可以关后 `stop_profile` 再调。
 - 桥进程一启动就退出并在 stderr 抱怨被关闭：`mcp.mode=off`，改成 `read-only`/`full` 再启动客户端。
 - 回 `seat_busy`：免费授权只有一个并发座位，先 `stop_profile` 关掉在跑的浏览器，或等约 4 分钟座位释放。
 

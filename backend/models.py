@@ -640,8 +640,10 @@ class LlmSettingsModel(BaseModel):
 
 class McpSettingsModel(BaseModel):
     # off = bridge refuses to serve; read-only = the 14 read tools only;
-    # full = read tools + the 5 action tools. Stored as settings["mcp.mode"].
-    mode: Literal["off", "read-only", "full"] = "read-only"
+    # full = read tools + the 5 action tools; automation = full + the browser
+    # tools that hand the agent a CDP endpoint (CDP can read cookies, so it is
+    # its own opt-in tier). Stored as settings["mcp.mode"].
+    mode: Literal["off", "read-only", "full", "automation"] = "read-only"
 
 
 class McpAuditIn(BaseModel):

@@ -27,12 +27,15 @@ class FakeManager:
         self.mode = mode
         self.requests: list[tuple[str, str]] = []
         self.audits: list[dict] = []
+        self.bodies: dict[tuple[str, str], dict] = {}
         self.routes: dict[tuple[str, str], tuple[int, object]] = {}
         self.transport = httpx.MockTransport(self._handle)
 
     def _handle(self, request: httpx.Request) -> httpx.Response:
         method, path = request.method, request.url.path
         self.requests.append((method, path))
+        if method == "POST" and request.content:
+            self.bodies[(method, path)] = json.loads(request.content)
         if path == "/api/settings/mcp":
             return httpx.Response(200, json={"mode": self.mode})
         if path == "/api/mcp/audit" and method == "POST":
@@ -114,12 +117,41 @@ EXPECTED_READ_TOOLS = {
     "get_kernel_info": NO_ARGS,
 }
 
+LAUNCH_PROFILE_ARGS = {
+    "type": "object",
+    "properties": {
+        "profile_id": {"type": "string", "description": "画像 id（先用 list_profiles 查）"},
+        "launch_mode": {
+            "type": "string",
+            "enum": ["manual", "debug"],
+            "default": "manual",
+            "description": (
+                "manual（默认）：给人用，没有 CDP。"
+                "debug：开放 CDP 供 agent 操作页面，只在 mcp.mode=automation 下可用；"
+                "要操作页面更省事的是直接用 open_browser。"
+            ),
+        },
+    },
+    "required": ["profile_id"],
+}
+
 EXPECTED_ACTION_TOOLS = {
-    "launch_profile": PROFILE_ID_ARGS,
+    "launch_profile": LAUNCH_PROFILE_ARGS,
     "stop_profile": PROFILE_ID_ARGS,
     "run_site_check": PROFILE_ID_ARGS,
     "run_warmup": PROFILE_ID_ARGS,
     "run_evolution": PROFILE_ID_ARGS,
+}
+
+EXPECTED_BROWSER_TOOLS = {
+    "get_cdp_endpoint": PROFILE_ID_ARGS,
+    "open_browser": {
+        "type": "object",
+        "properties": {
+            "profile": {"type": "string", "description": "画像 id 或画像名称（名称需完全一致且唯一）"},
+        },
+        "required": ["profile"],
+    },
 }
 
 
@@ -136,6 +168,13 @@ def test_tool_snapshot_full_mode():
     assert {t.name: t.input_schema for t in tools} == expected
 
 
+def test_tool_snapshot_automation_mode():
+    tools = mcp_server.build_mcp_tools("automation")
+    expected = {**EXPECTED_READ_TOOLS, **EXPECTED_ACTION_TOOLS, **EXPECTED_BROWSER_TOOLS}
+    assert [t.name for t in tools] == list(expected)
+    assert {t.name: t.input_schema for t in tools} == expected
+
+
 def test_tool_snapshot_off_mode_is_empty():
     assert mcp_server.build_mcp_tools("off") == []
 
@@ -148,8 +187,21 @@ def test_no_cookie_or_destructive_tools_exist():
         assert "purge" not in forbidden
         assert "delete" not in forbidden
         assert "approve" not in forbidden
-        assert "cdp" not in forbidden
         assert "clipboard" not in forbidden
+        # CDP handout lives only in the automation-tier "browser" layer.
+        if "cdp" in forbidden:
+            assert mcp_server.TOOLS[forbidden].layer == "browser"
+
+
+def test_instructions_name_real_tools():
+    for name in (
+        "manager_status", "list_profiles", "get_profile_preflight", "open_browser",
+        "launch_profile", "stop_profile", "get_fingerprint_report", "get_cdp_endpoint",
+    ):
+        assert name in mcp_server.TOOLS, name
+        assert name in mcp_server.INSTRUCTIONS, name
+    server = mcp_server.build_server(FakeManager().client())
+    assert server.instructions == mcp_server.INSTRUCTIONS
 
 
 # ── Mapping integration ──────────────────────────────────────────────────────
@@ -570,6 +622,214 @@ async def test_no_secret_appears_in_any_tool_output(tmp_path):
     assert results["get_profile"]["live_status"]["status"] == "running"
 
 
+# ── Automation tier: launch_mode, get_cdp_endpoint, open_browser ─────────────
+
+PID = "p-auto"
+CDP_PATH = f"/api/profiles/{PID}/cdp"
+
+
+def debug_running_status(**overrides) -> dict:
+    return {
+        "status": "running",
+        "runtime_mode": "native",
+        "viewer_mode": "native-window",
+        "vnc_ws_port": 6080,
+        "display": ":0",
+        "cdp_url": CDP_PATH,
+        "browser_engine": "cloak",
+        "launch_mode": "debug",
+        **overrides,
+    }
+
+
+def automation_fake() -> FakeManager:
+    fake = FakeManager(mode="automation")
+    fake.routes[("GET", "/api/profiles")] = (
+        200,
+        [{"id": PID, "name": "店铺A"}, {"id": "p-b", "name": "重名"}, {"id": "p-c", "name": "重名"}],
+    )
+    fake.routes[("GET", f"{CDP_PATH}/json/list")] = (
+        200,
+        [
+            {"id": "T1", "type": "page", "title": "Example", "url": "https://example.com/",
+             "webSocketDebuggerUrl": f"ws://127.0.0.1:9999{CDP_PATH}/devtools/page/T1"},
+            {"id": "SW", "type": "service_worker", "title": "sw", "url": "https://example.com/sw.js"},
+        ],
+    )
+    return fake
+
+
+async def test_browser_tools_are_rejected_below_automation_mode():
+    for mode in ("read-only", "full"):
+        fake = automation_fake()
+        fake.mode = mode
+        for name, args in (("get_cdp_endpoint", {"profile_id": PID}), ("open_browser", {"profile": PID})):
+            result = await mcp_server.dispatch(fake.client(), name, args)
+            assert result["ok"] is False
+            assert result["reason"] == "mode_not_automation", (mode, name, result)
+        # Nothing reached the Manager's profile endpoints, and each was audited.
+        assert not any(path.startswith("/api/profiles") for _, path in fake.requests)
+        assert [a["reason"] for a in fake.audits] == ["mode_not_automation"] * 2
+
+
+async def test_launch_debug_needs_automation_mode():
+    fake = automation_fake()
+    fake.mode = "full"
+    result = await mcp_server.dispatch(
+        fake.client(), "launch_profile", {"profile_id": PID, "launch_mode": "debug"}
+    )
+    assert result["reason"] == "mode_not_automation"
+    assert not fake.hit("POST", f"/api/profiles/{PID}/launch")
+
+
+async def test_launch_manual_never_hands_out_cdp_even_in_automation_mode():
+    fake = automation_fake()
+    fake.routes[("POST", f"/api/profiles/{PID}/launch")] = (
+        200, {"profile_id": PID, "status": "running", "cdp_url": None, "launch_mode": "manual"},
+    )
+    result = await mcp_server.dispatch(fake.client(), "launch_profile", {"profile_id": PID})
+    assert result["ok"] is True
+    assert fake.bodies[("POST", f"/api/profiles/{PID}/launch")] == {"launch_mode": "manual"}
+    assert "cdp" not in json.dumps(result)
+
+
+async def test_launch_rejects_unknown_launch_mode():
+    fake = automation_fake()
+    result = await mcp_server.dispatch(
+        fake.client(), "launch_profile", {"profile_id": PID, "launch_mode": "headless"}
+    )
+    assert result["reason"] == "invalid_argument"
+    assert not fake.hit("POST", f"/api/profiles/{PID}/launch")
+
+
+async def test_launch_debug_in_automation_mode_returns_cdp_info():
+    fake = automation_fake()
+    fake.routes[("POST", f"/api/profiles/{PID}/launch")] = (
+        200, {"profile_id": PID, "status": "running", "cdp_url": CDP_PATH, "launch_mode": "debug"},
+    )
+    fake.routes[("GET", f"/api/profiles/{PID}/status")] = (200, debug_running_status())
+    result = await mcp_server.dispatch(
+        fake.client(), "launch_profile", {"profile_id": PID, "launch_mode": "debug"}
+    )
+    assert result["ok"] is True
+    assert fake.bodies[("POST", f"/api/profiles/{PID}/launch")] == {"launch_mode": "debug"}
+    assert result["cdp_http_endpoint"] == f"http://127.0.0.1:9999{CDP_PATH}"
+    assert result["cdp_ws_endpoint"] == f"ws://127.0.0.1:9999{CDP_PATH}"
+
+
+async def test_get_cdp_endpoint_returns_endpoints_and_page_tabs_only():
+    fake = automation_fake()
+    fake.routes[("GET", f"/api/profiles/{PID}/status")] = (200, debug_running_status())
+    result = await mcp_server.dispatch(fake.client(), "get_cdp_endpoint", {"profile_id": PID})
+    assert result["ok"] is True
+    assert result["cdp_http_endpoint"] == f"http://127.0.0.1:9999{CDP_PATH}"
+    assert result["cdp_ws_endpoint"] == f"ws://127.0.0.1:9999{CDP_PATH}"
+    assert result["tabs"] == [{"id": "T1", "title": "Example", "url": "https://example.com/"}]
+    assert result["auth_required"] is False
+    assert "auth_hint" not in result
+    assert "--cdp-endpoint" in result["usage"]["playwright_mcp"]
+    # Local access paths other than the Manager proxy stay hidden.
+    blob = json.dumps(result)
+    assert "6080" not in blob and '":0"' not in blob
+
+
+async def test_get_cdp_endpoint_auth_hint_never_echoes_the_token():
+    fake = automation_fake()
+    fake.routes[("GET", f"/api/profiles/{PID}/status")] = (200, debug_running_status())
+    client = mcp_server.RestClient(
+        "http://127.0.0.1:9999", transport=fake.transport, token="SECRET_AUTH_TOKEN_XYZ"
+    )
+    result = await mcp_server.dispatch(client, "get_cdp_endpoint", {"profile_id": PID})
+    assert result["auth_required"] is True
+    assert "Bearer" in result["auth_hint"]
+    assert "SECRET_AUTH_TOKEN_XYZ" not in json.dumps(result)
+
+
+async def test_get_cdp_endpoint_error_states():
+    fake = automation_fake()
+    status_path = ("GET", f"/api/profiles/{PID}/status")
+    fake.routes[status_path] = (200, {"status": "stopped"})
+    result = await mcp_server.dispatch(fake.client(), "get_cdp_endpoint", {"profile_id": PID})
+    assert result["reason"] == "not_running"
+    fake.routes[status_path] = (200, debug_running_status(cdp_url=None, launch_mode="manual"))
+    result = await mcp_server.dispatch(fake.client(), "get_cdp_endpoint", {"profile_id": PID})
+    assert result["reason"] == "cdp_unavailable"
+    assert "stop_profile" in result["detail"]
+    result = await mcp_server.dispatch(fake.client(), "get_cdp_endpoint", {"profile_id": "missing"})
+    assert result["reason"] == "not_found"
+    result = await mcp_server.dispatch(fake.client(), "get_cdp_endpoint", {})
+    assert result["reason"] == "invalid_argument"
+
+
+async def test_open_browser_launches_in_debug_mode_when_stopped():
+    fake = automation_fake()
+    status_path = f"/api/profiles/{PID}/status"
+    # First status: stopped; after launch: running with CDP.
+    responses = [(200, {"status": "stopped"}), (200, debug_running_status())]
+
+    def handle_status(request):
+        status, payload = responses[0] if len(responses) == 1 else responses.pop(0)
+        return httpx.Response(status, json=payload)
+
+    original = fake._handle
+
+    def handle(request):
+        if request.url.path == status_path:
+            fake.requests.append((request.method, request.url.path))
+            return handle_status(request)
+        return original(request)
+
+    fake.transport = httpx.MockTransport(handle)
+    fake.routes[("POST", f"/api/profiles/{PID}/launch")] = (200, {"profile_id": PID, "status": "running"})
+    result = await mcp_server.dispatch(fake.client(), "open_browser", {"profile": "店铺A"})
+    assert result["ok"] is True
+    assert result["started"] is True
+    assert result["profile_id"] == PID
+    assert fake.bodies[("POST", f"/api/profiles/{PID}/launch")] == {"launch_mode": "debug"}
+    assert result["cdp_http_endpoint"].endswith(CDP_PATH)
+
+
+async def test_open_browser_reuses_a_running_debug_browser():
+    fake = automation_fake()
+    fake.routes[("GET", f"/api/profiles/{PID}/status")] = (200, debug_running_status())
+    result = await mcp_server.dispatch(fake.client(), "open_browser", {"profile": PID})
+    assert result["ok"] is True
+    assert result["started"] is False
+    assert not fake.hit("POST", f"/api/profiles/{PID}/launch")
+    assert not fake.hit("POST", f"/api/profiles/{PID}/stop")
+
+
+async def test_open_browser_never_restarts_a_manual_browser():
+    fake = automation_fake()
+    fake.routes[("GET", f"/api/profiles/{PID}/status")] = (
+        200, debug_running_status(cdp_url=None, launch_mode="manual")
+    )
+    result = await mcp_server.dispatch(fake.client(), "open_browser", {"profile": PID})
+    assert result["ok"] is False
+    assert result["reason"] == "already_running"
+    assert not fake.hit("POST", f"/api/profiles/{PID}/launch")
+    assert not fake.hit("POST", f"/api/profiles/{PID}/stop")
+
+
+async def test_open_browser_resolution_errors():
+    fake = automation_fake()
+    result = await mcp_server.dispatch(fake.client(), "open_browser", {"profile": "重名"})
+    assert result["reason"] == "invalid_argument"
+    assert "p-b" in result["detail"] and "p-c" in result["detail"]
+    result = await mcp_server.dispatch(fake.client(), "open_browser", {"profile": "没有这个"})
+    assert result["reason"] == "not_found"
+    result = await mcp_server.dispatch(fake.client(), "open_browser", {"profile": "  "})
+    assert result["reason"] == "invalid_argument"
+
+
+async def test_open_browser_maps_seat_busy():
+    fake = automation_fake()
+    fake.routes[("GET", f"/api/profiles/{PID}/status")] = (200, {"status": "stopped"})
+    fake.routes[("POST", f"/api/profiles/{PID}/launch")] = (409, {"detail": "license seat in use (session limit)"})
+    result = await mcp_server.dispatch(fake.client(), "open_browser", {"profile": PID})
+    assert result["reason"] == "seat_busy"
+
+
 # ── Manager-side endpoints ───────────────────────────────────────────────────
 
 
@@ -581,6 +841,9 @@ def test_mcp_settings_default_read_only_and_update(app_client):
     assert resp.status_code == 200
     assert resp.json() == {"mode": "full"}
     assert app_client.get("/api/settings/mcp").json() == {"mode": "full"}
+    resp = app_client.put("/api/settings/mcp", json={"mode": "automation"})
+    assert resp.status_code == 200
+    assert app_client.get("/api/settings/mcp").json() == {"mode": "automation"}
     resp = app_client.put("/api/settings/mcp", json={"mode": "bogus"})
     assert resp.status_code == 422
 

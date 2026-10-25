@@ -9,8 +9,10 @@ Design (see MCP-PLAN.md):
 * Tools are layered. The 14 read tools are always available unless the mode
   is ``off``; the 5 action tools (launch / stop / site-check / warm-up /
   evolution) only register when the Manager setting ``mcp.mode`` is ``full``
-  (default ``read-only``). Destructive operations, proposal approvals and
-  anything Cookie-shaped are not tools at all — by construction.
+  (default ``read-only``). The 2 browser tools (``open_browser`` /
+  ``get_cdp_endpoint``, which hand out a CDP endpoint) are a separate tier that
+  only registers when the mode is ``automation``. Destructive operations,
+  proposal approvals and Cookie tools are not tools at all — by construction.
 * Field policy: profile payloads are rebuilt from an allowlist, proxies are
   reduced to ``scheme://host:port`` (credentials stripped), and the user's
   free-text fields (``notes`` / ``warmup_persona``) plus ``cookies_json``
@@ -51,7 +53,12 @@ SERVER_NAME = "cloakbrowser-manager"
 MODE_OFF = "off"
 MODE_READ_ONLY = "read-only"
 MODE_FULL = "full"
-_MODES = (MODE_OFF, MODE_READ_ONLY, MODE_FULL)
+# full + the "browser" tools: the only tier that hands out a CDP endpoint.
+MODE_AUTOMATION = "automation"
+_MODES = (MODE_OFF, MODE_READ_ONLY, MODE_FULL, MODE_AUTOMATION)
+_ACTION_MODES = (MODE_FULL, MODE_AUTOMATION)
+
+LAUNCH_MODES = ("manual", "debug")
 
 READ_TIMEOUT_S = 30.0
 ACTION_TIMEOUT_S = 180.0  # browser launches take a while
@@ -124,6 +131,10 @@ class RestClient:
         except ValueError:
             return resp.status_code, None
 
+    @property
+    def auth_required(self) -> bool:
+        return bool(self._token)
+
     async def get(self, path: str, *, timeout: float = READ_TIMEOUT_S) -> tuple[int, Any]:
         return await self.request("GET", path, timeout=timeout)
 
@@ -181,6 +192,17 @@ def error_result(status: int, payload: Any, *, tool: str = "") -> dict[str, Any]
 
 def unreachable_result(exc: ManagerUnreachable) -> dict[str, Any]:
     return {"ok": False, "reason": "manager_unreachable", "detail": str(exc)}
+
+
+def not_automation_result() -> dict[str, Any]:
+    return {
+        "ok": False,
+        "reason": "mode_not_automation",
+        "detail": (
+            "浏览器控制（CDP）只在 mcp.mode=automation 下开放。CDP 能读取画像的 Cookie，"
+            "所以单独成档：在 Manager 设置里把 mcp.mode 改成 automation 并重启客户端。"
+        ),
+    }
 
 
 # ── Field policy (MCP-PLAN §3) ───────────────────────────────────────────────
@@ -256,7 +278,7 @@ class ToolDef:
     name: str
     description: str
     input_schema: dict[str, Any]
-    layer: str  # "read" | "action"
+    layer: str  # "read" | "action" | "browser"
     handler: Handler
 
 
@@ -282,8 +304,10 @@ PROFILE_ID_ARGS: dict[str, Any] = {
 def visible_tools(mode: str) -> list[ToolDef]:
     if mode == MODE_OFF:
         return []
-    if mode == MODE_FULL:
+    if mode == MODE_AUTOMATION:
         return list(TOOLS.values())
+    if mode == MODE_FULL:
+        return [tool for tool in TOOLS.values() if tool.layer in ("read", "action")]
     return [tool for tool in TOOLS.values() if tool.layer == "read"]
 
 
@@ -365,12 +389,14 @@ async def dispatch(
                     "reason": "mcp_disabled",
                     "detail": "MCP 接口已在 Manager 设置里关闭（mcp.mode=off）。",
                 }
-            elif tool.layer == "action" and mode != MODE_FULL:
+            elif tool.layer == "action" and mode not in _ACTION_MODES:
                 result = {
                     "ok": False,
                     "reason": "mode_read_only",
                     "detail": "当前是只读模式（mcp.mode=read-only）；动作工具要在 Manager 设置里把 mcp.mode 改成 full 才开放。",
                 }
+            elif tool.layer == "browser" and mode != MODE_AUTOMATION:
+                result = not_automation_result()
             else:
                 try:
                     result = await tool.handler(client, args)
@@ -654,32 +680,142 @@ async def _get_kernel_info(client: RestClient, args: dict[str, Any]) -> dict[str
 # ── Tools: action layer (registered only when mcp.mode == "full") ────────────
 
 
+LAUNCH_PROFILE_ARGS: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "profile_id": {"type": "string", "description": "画像 id（先用 list_profiles 查）"},
+        "launch_mode": {
+            "type": "string",
+            "enum": list(LAUNCH_MODES),
+            "default": "manual",
+            "description": (
+                "manual（默认）：给人用，没有 CDP。"
+                "debug：开放 CDP 供 agent 操作页面，只在 mcp.mode=automation 下可用；"
+                "要操作页面更省事的是直接用 open_browser。"
+            ),
+        },
+    },
+    "required": ["profile_id"],
+}
+
+OPEN_BROWSER_ARGS: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "profile": {"type": "string", "description": "画像 id 或画像名称（名称需完全一致且唯一）"},
+    },
+    "required": ["profile"],
+}
+
+# What the agent needs to attach a CDP client; nothing else of the profile.
+_CDP_FIELDS = ("cdp_http_endpoint", "cdp_ws_endpoint", "auth_required", "auth_hint", "tabs", "usage")
+
+
+async def _cdp_endpoint_info(client: RestClient, profile_id: str, *, tool: str) -> dict[str, Any]:
+    """CDP connection info for a running debug-mode profile, or a structured
+    error. The endpoints point at the Manager's own CDP proxy
+    (``/api/profiles/{id}/cdp``), never at Chrome's raw debugging port."""
+    quoted = quote(profile_id, safe="")
+    status, payload = await client.get(f"/api/profiles/{quoted}/status")
+    if status >= 300 or not isinstance(payload, dict):
+        return error_result(status, payload, tool=tool)
+    if payload.get("status") != "running":
+        return {
+            "ok": False,
+            "reason": "not_running",
+            "detail": "这个画像没在运行。用 open_browser 启动它。",
+        }
+    if not payload.get("cdp_url"):
+        return {
+            "ok": False,
+            "reason": "cdp_unavailable",
+            "detail": (
+                "这个画像是以 manual 模式启动的，没有 CDP。先 stop_profile，"
+                "再用 open_browser（或 launch_profile launch_mode=debug）重新启动。"
+            ),
+        }
+    cdp_path = f"/api/profiles/{quoted}/cdp"
+    http_endpoint = f"{client.base_url}{cdp_path}"
+    ws_base = client.base_url.replace("https://", "wss://", 1).replace("http://", "ws://", 1)
+    tabs: list[dict[str, Any]] = []
+    tabs_status, tabs_payload = await client.get(f"{cdp_path}/json/list")
+    if tabs_status < 300 and isinstance(tabs_payload, list):
+        tabs = [
+            {key: tab.get(key) for key in ("id", "title", "url")}
+            for tab in tabs_payload
+            if isinstance(tab, dict) and tab.get("type") == "page"
+        ]
+    result: dict[str, Any] = {
+        "ok": True,
+        "profile_id": profile_id,
+        "browser_engine": payload.get("browser_engine"),
+        "launch_mode": payload.get("launch_mode"),
+        "cdp_http_endpoint": http_endpoint,
+        "cdp_ws_endpoint": f"{ws_base}{cdp_path}",
+        "auth_required": client.auth_required,
+        "tabs": tabs,
+        "usage": {
+            "playwright": f"chromium.connect_over_cdp('{http_endpoint}')",
+            "playwright_mcp": f"npx @playwright/mcp@latest --cdp-endpoint {http_endpoint}",
+            "chrome_devtools_mcp": f"npx chrome-devtools-mcp@latest --browser-url {http_endpoint}",
+        },
+    }
+    if client.auth_required:
+        result["auth_hint"] = (
+            "Manager 开了鉴权：CDP 客户端连接时要带 Authorization: Bearer <AUTH_TOKEN> 请求头"
+            "（token 与 Manager 的 AUTH_TOKEN 相同，这里不回显）。"
+        )
+    return result
+
+
+def _with_cdp(result: dict[str, Any], info: dict[str, Any]) -> dict[str, Any]:
+    if info.get("ok"):
+        result.update({key: info[key] for key in _CDP_FIELDS if key in info})
+    else:
+        result["cdp_error"] = {"reason": info.get("reason"), "detail": info.get("detail")}
+    return result
+
+
 @register(
     "launch_profile",
-    "启动一个画像的浏览器。已在跑会回 already_running；撞上授权单座位会回 seat_busy（座位释放需要几分钟，不要立刻重试）。",
-    PROFILE_ID_ARGS,
+    "启动一个画像的浏览器。已在跑会回 already_running；撞上授权单座位会回 seat_busy（座位释放需要几分钟，不要立刻重试）。"
+    "launch_mode=debug 会同时开放 CDP 并回连接信息，仅 mcp.mode=automation 可用；想操作页面直接用 open_browser。",
+    LAUNCH_PROFILE_ARGS,
     "action",
 )
 async def _launch_profile(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
     profile_id, err = _profile_id_arg(args)
     if err:
         return err
+    launch_mode = str(args.get("launch_mode") or "manual")
+    if launch_mode not in LAUNCH_MODES:
+        return {
+            "ok": False,
+            "reason": "invalid_argument",
+            "detail": f"launch_mode 只能是 {'/'.join(LAUNCH_MODES)}，收到：{launch_mode}",
+        }
+    # debug opens a CDP port, and CDP can read cookies: automation tier only.
+    if launch_mode == "debug" and await fetch_mode(client) != MODE_AUTOMATION:
+        return not_automation_result()
     status, payload = await client.post(
         f"/api/profiles/{quote(profile_id, safe='')}/launch",
-        json_body={},
+        json_body={"launch_mode": launch_mode},
         timeout=ACTION_TIMEOUT_S,
     )
     if status >= 300 or not isinstance(payload, dict):
         return error_result(status, payload, tool="launch_profile")
     # LaunchResponse also carries cdp_url / vnc_ws_port / display — local
-    # access paths the agent must not get (CDP handout is a hard no).
-    return {
+    # access paths the agent does not get; in automation mode the CDP info is
+    # rebuilt by _cdp_endpoint_info instead of passing cdp_url through.
+    result: dict[str, Any] = {
         "ok": True,
         **{
             key: payload.get(key)
             for key in ("profile_id", "status", "runtime_mode", "viewer_mode", "browser_engine", "launch_mode")
         },
     }
+    if launch_mode == "debug":
+        _with_cdp(result, await _cdp_endpoint_info(client, profile_id, tool="launch_profile"))
+    return result
 
 
 @register("stop_profile", "关闭一个正在运行的画像浏览器。没在跑会回 not_running。", PROFILE_ID_ARGS, "action")
@@ -744,7 +880,119 @@ async def _run_evolution(client: RestClient, args: dict[str, Any]) -> dict[str, 
     return {"ok": True, "started": bool(isinstance(payload, dict) and payload.get("started"))}
 
 
+# ── Tools: browser layer (registered only when mcp.mode == "automation") ─────
+
+
+@register(
+    "get_cdp_endpoint",
+    "拿一个正在运行（debug 模式）的画像的 CDP 连接信息：HTTP/WebSocket 端点、当前标签页、"
+    "Playwright / playwright-mcp / chrome-devtools-mcp 的接入写法。没在跑回 not_running，"
+    "是 manual 模式启动的回 cdp_unavailable。",
+    PROFILE_ID_ARGS,
+    "browser",
+)
+async def _get_cdp_endpoint(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    profile_id, err = _profile_id_arg(args)
+    if err:
+        return err
+    return await _cdp_endpoint_info(client, profile_id, tool="get_cdp_endpoint")
+
+
+async def _resolve_profile(client: RestClient, ref: str) -> tuple[str, dict[str, Any] | None]:
+    """Profile id from an id or an exact, unique name."""
+    status, payload = await client.get("/api/profiles")
+    if status >= 300 or not isinstance(payload, list):
+        return "", error_result(status, payload, tool="open_browser")
+    profiles = [p for p in payload if isinstance(p, dict)]
+    by_id = [p for p in profiles if p.get("id") == ref]
+    if by_id:
+        return str(by_id[0]["id"]), None
+    by_name = [p for p in profiles if p.get("name") == ref]
+    if len(by_name) == 1:
+        return str(by_name[0]["id"]), None
+    if len(by_name) > 1:
+        ids = ", ".join(str(p.get("id")) for p in by_name)
+        return "", {
+            "ok": False,
+            "reason": "invalid_argument",
+            "detail": f"有多个画像叫「{ref}」，请改用 id：{ids}",
+        }
+    return "", {
+        "ok": False,
+        "reason": "not_found",
+        "detail": f"没有 id 或名称是「{ref}」的画像，先用 list_profiles 查。",
+    }
+
+
+@register(
+    "open_browser",
+    "一步到位：确保画像的浏览器以 debug 模式在跑，并回 CDP 连接信息（同 get_cdp_endpoint）。"
+    "画像参数可以是 id 或名称。已经以 debug 模式在跑就直接回信息（started=false），不会重启；"
+    "是 manual 模式在跑回 already_running，需要先 stop_profile。撞授权单座位回 seat_busy。",
+    OPEN_BROWSER_ARGS,
+    "browser",
+)
+async def _open_browser(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    ref = str(args.get("profile") or "").strip()
+    if not ref:
+        return {"ok": False, "reason": "invalid_argument", "detail": "缺少 profile（画像 id 或名称），先用 list_profiles 查。"}
+    profile_id, err = await _resolve_profile(client, ref)
+    if err:
+        return err
+    quoted = quote(profile_id, safe="")
+    status, payload = await client.get(f"/api/profiles/{quoted}/status")
+    if status >= 300 or not isinstance(payload, dict):
+        return error_result(status, payload, tool="open_browser")
+    started = False
+    if payload.get("status") == "running":
+        if not payload.get("cdp_url"):
+            return {
+                "ok": False,
+                "reason": "already_running",
+                "detail": "这个画像已在以 manual 模式运行（没有 CDP）。不会替你重启；确认可以关掉后先 stop_profile，再调 open_browser。",
+            }
+    else:
+        status, payload = await client.post(
+            f"/api/profiles/{quoted}/launch",
+            json_body={"launch_mode": "debug"},
+            timeout=ACTION_TIMEOUT_S,
+        )
+        if status >= 300:
+            return error_result(status, payload, tool="open_browser")
+        started = True
+    info = await _cdp_endpoint_info(client, profile_id, tool="open_browser")
+    if not info.get("ok"):
+        return info
+    return {**info, "started": started}
+
+
 # ── MCP server wiring (the only place the SDK is touched) ────────────────────
+
+# Shown to the agent at connect time (MCP `instructions`). Full guide: docs/AGENT.md.
+INSTRUCTIONS = """\
+CloakBrowser Manager：管理「指纹浏览器画像」（profile）的本机服务。每个画像是一个独立的浏览器身份\
+（指纹、代理、Cookie、登录状态都隔离）。你通过这组工具看懂并启停画像；在 automation 档还能拿到 CDP 去操作页面。
+CloakBrowser Manager runs isolated fingerprint-browser profiles on this machine. These tools inspect and start/stop them; in `automation` mode they also give you a CDP endpoint to drive pages.
+
+标准流程 / Standard flow:
+1. manager_status — 先打招呼：版本、运行数、是否有自动化在跑。
+2. list_profiles — 找到要用的画像（id 或名称）。
+3. get_profile_preflight — 可选：确认现在能不能启动。
+4. open_browser(profile) — 以 debug 模式启动并拿 CDP 端点（automation 档）。已在跑则直接返回信息。
+   只想打开给人看：launch_profile（manual 模式，无 CDP）。
+5. 用返回的 cdp_http_endpoint 接 Playwright / playwright-mcp / chrome-devtools-mcp 操作页面。
+6. 用完 stop_profile。
+
+规则 / Rules:
+- 权限由 Manager 设置 mcp.mode 决定：read-only 只读；full 加启停与检测/养号/进化；automation 再加 open_browser / get_cdp_endpoint。工具列表在连接时协商，改模式后要重启客户端。
+- CDP 能读 Cookie：只对当前任务需要的画像开，用完就关；不要导出或回显 Cookie、账号、代理凭据。
+- 不要改画像的指纹配置来「绕过」问题；指纹异常先看 get_fingerprint_report / get_profile_preflight。
+- 免费授权只有一个并发座位：同时只开一个画像。seat_busy 表示座位未释放，等几分钟，不要立刻重试。
+- automation_busy 表示另一个自动化（检测/养号/进化）在跑，等它结束。
+- 工具失败回 {ok:false, reason, detail}，按 reason 决定下一步，不要盲目重试。
+- 没有删除画像、批准提案、Cookie 读取、备份恢复这类工具，这是设计如此。
+完整说明见仓库 docs/AGENT.md。
+"""
 
 
 def build_server(client: RestClient) -> Server:
@@ -774,7 +1022,12 @@ def build_server(client: RestClient) -> Server:
             is_error=result.get("reason") == "unknown_tool",
         )
 
-    return Server(SERVER_NAME, on_list_tools=on_list_tools, on_call_tool=on_call_tool)
+    return Server(
+        SERVER_NAME,
+        instructions=INSTRUCTIONS,
+        on_list_tools=on_list_tools,
+        on_call_tool=on_call_tool,
+    )
 
 
 async def _serve(client: RestClient) -> None:

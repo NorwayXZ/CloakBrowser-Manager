@@ -1,5 +1,11 @@
 # Agent Instructions
 
+## Operating the browser (agents using CloakBrowser Manager)
+
+If your task is to *use* the fingerprint browser rather than develop this repo, read [docs/AGENT.md](docs/AGENT.md) first (concepts, standard flow, rules, error codes). Connection setup is in [docs/MCP.md](docs/MCP.md).
+
+## Developing this repo
+
 This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
 
 ## Quick Reference

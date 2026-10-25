@@ -1733,7 +1733,7 @@ async def update_llm_settings(body: LlmSettingsModel):
 # audit endpoint below. No tool ever approves proposals or touches cookies.
 
 MCP_MODE_SETTING_KEY = "mcp.mode"
-MCP_MODES = ("off", "read-only", "full")
+MCP_MODES = ("off", "read-only", "full", "automation")
 MCP_DEFAULT_MODE = "read-only"
 
 
