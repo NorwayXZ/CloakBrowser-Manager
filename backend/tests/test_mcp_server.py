@@ -169,7 +169,7 @@ EXPECTED_BROWSER_TOOLS = {
 # Page tools: pinned by name; their schemas all take a `profile` and are checked below.
 PAGE_TOOLS = (
     "browser_navigate", "browser_snapshot", "browser_get_text", "browser_click", "browser_type",
-    "browser_press_key", "browser_scroll", "browser_screenshot", "browser_wait_for",
+    "browser_press_key", "browser_scroll", "browser_screenshot", "browser_wait_for", "browser_dialog", "browser_batch", "browser_upload", "browser_downloads",
     "browser_back", "browser_tabs",
 )
 
@@ -928,7 +928,8 @@ async def test_page_tools_resolve_the_profile_hold_the_lease_and_call_the_page_e
 
 async def test_page_tool_bodies():
     fake = automation_fake()
-    for action in ("click", "type", "press_key", "scroll", "screenshot", "wait_for", "back", "tabs", "snapshot", "get_text"):
+    for action in ("click", "type", "press_key", "scroll", "screenshot", "wait_for", "back", "tabs", "snapshot", "get_text",
+                   "dialog", "batch", "upload", "downloads"):
         fake.routes[("POST", f"/api/profiles/{PID}/page/{action}")] = (200, {"url": "u"})
     client = fake.client()
     calls = [
@@ -937,7 +938,14 @@ async def test_page_tool_bodies():
         ("browser_press_key", {"key": "Enter"}, "press_key", {"key": "Enter"}),
         ("browser_scroll", {}, "scroll", {"direction": "down", "amount": 600}),
         ("browser_screenshot", {"full_page": True}, "screenshot", {"full_page": True, "format": "jpeg"}),
-        ("browser_wait_for", {"text": "Done"}, "wait_for", {"text": "Done", "ms": None}),
+        ("browser_wait_for", {"text": "Done", "url": "/ok"}, "wait_for",
+         {"text": "Done", "text_gone": None, "url": "/ok", "selector": None, "ms": None, "timeout_ms": None}),
+        ("browser_dialog", {"action": "accept", "text": "Ada"}, "dialog", {"action": "accept", "text": "Ada"}),
+        ("browser_upload", {"ref": "label=File", "paths": ["/x/a.pdf"]}, "upload",
+         {"ref": "label=File", "paths": ["/x/a.pdf"]}),
+        ("browser_downloads", {}, "downloads", {}),
+        ("browser_batch", {"steps": [{"do": "back"}]}, "batch",
+         {"steps": [{"do": "back"}], "snapshot_after": True, "viewport_only": False, "stop_on_error": True}),
         ("browser_back", {}, "back", {}),
         ("browser_tabs", {"action": "select", "index": 1}, "tabs", {"action": "select", "index": 1, "url": None}),
         ("browser_snapshot", {}, "snapshot", {"viewport_only": False}),

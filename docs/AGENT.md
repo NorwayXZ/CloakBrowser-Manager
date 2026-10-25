@@ -70,7 +70,7 @@ curl -X POST http://127.0.0.1:8080/api/agent/tools/open_browser \
 | `off` | 全部拒绝 |
 | `read-only`（默认） | 14 个只读工具：看画像、预检、检测报告、养号/进化状态、内核信息 |
 | `full` | 再加启停画像、跑检测/养号/进化（`launch_profile` 只能 `manual`） |
-| `automation` | 再加 `open_browser`、`get_cdp_endpoint` 和 11 个页面工具，`launch_profile` 可用 `debug` |
+| `automation` | 再加 `open_browser`、`get_cdp_endpoint` 和 15 个页面工具，`launch_profile` 可用 `debug` |
 
 **为什么页面控制单独成档**：CDP 能读取页面的全部 Cookie，而桥在其他档位刻意不提供任何 Cookie 读取。开 `automation` 等于允许 agent 接触该画像的登录态，请只在需要操作页面时开，用完改回 `full` 或 `read-only`。
 
@@ -94,12 +94,16 @@ curl -X POST http://127.0.0.1:8080/api/agent/tools/open_browser \
 | `browser_navigate(profile, url)` | 当前标签页打开网址。**只允许 http/https**，`file:` `chrome:` `javascript:` `data:` 一律拒绝 |
 | `browser_snapshot(profile, viewport_only?)` | 读页面：文字轮廓，可交互元素带 `ref`，如 `[e3] button "登录"`；iframe 里的内容会列在 `--- iframe ... ---` 段，ref 全局连续编号，可以直接点；`viewport_only=true` 只列当前屏 |
 | `browser_get_text(profile, ref?, offset?, max_chars?, whole_page?)` | 读纯文字，分页返回（`next_offset` 接着读）；默认只读页面主体内容，跳过菜单页脚 |
-| `browser_click(profile, ref)` | 点击；若打开了新标签页会自动切过去 |
+| `browser_click(profile, ref)` | 点击；若打开了新标签页会自动切过去。`ref` 可以是快照里的 `e3`，也可以是语义选择器（见下） |
 | `browser_type(profile, ref, text, submit?)` | 填输入框（下拉框按选项文字选）；`submit` 填完按回车 |
 | `browser_press_key(profile, key)` | 按键或组合键，如 `Enter`、`Control+A` |
 | `browser_scroll(profile, direction?, amount?)` | 滚动 |
 | `browser_screenshot(profile, full_page?, format?)` | 截图（默认 jpeg）；MCP 里作为图片内容返回，CLI 存成文件 |
-| `browser_wait_for(profile, text?, ms?)` | 等文字出现，或等一会儿（最多 30 秒） |
+| `browser_wait_for(profile, text?, text_gone?, url?, selector?, ms?, timeout_ms?)` | 等条件成立：文字出现 / 消失、网址包含某段、选择器可见（给几个就全部要满足），或单纯等 `ms`。每个条件最多等 `timeout_ms`（默认 15 秒，最大 30 秒） |
+| `browser_dialog(profile, action, text?)` | 处理 JS 对话框（alert / confirm / prompt / beforeunload）：`accept` 或 `dismiss`，prompt 用 `text` 填内容 |
+| `browser_batch(profile, steps, snapshot_after?, viewport_only?, stop_on_error?)` | 一次调用按顺序做最多 20 步（见下） |
+| `browser_upload(profile, ref, paths)` | 上传文件到文件输入框，或点一个会弹出文件选择器的按钮；**只允许 agent 文件目录里的文件**（见下） |
+| `browser_downloads(profile)` | 列出这个画像下载过的文件和 agent 文件目录的位置 |
 | `browser_back(profile)` | 后退 |
 | `browser_tabs(profile, action, index?, url?)` | `list` / `new` / `select` / `close` |
 
@@ -108,6 +112,49 @@ curl -X POST http://127.0.0.1:8080/api/agent/tools/open_browser \
 读长页面：快照最多列约 2 万字符（`truncated=true` 时最后一行会告诉你）。要看后面的内容，`browser_scroll` 往下，再用 `viewport_only=true` 快照，只看当前一屏（在 Wikipedia 长文章上约 2 千字符，是整页快照的八分之一）；只想读文章正文，直接 `browser_get_text` 分页读。
 
 点击或回车提交表单之后，工具会等页面跳转完成才返回，所以紧接着 `browser_snapshot` 是安全的。
+
+### 语义选择器
+
+`browser_click`、`browser_type`、`browser_get_text`、`browser_upload` 的 `ref` 除了快照里的 `e3`，还可以写：
+
+| 写法 | 含义 |
+| --- | --- |
+| `text=登录` | 含这段文字的元素（不分大小写）；`text="登录"` 带引号是整句精确匹配 |
+| `role=button[name="登录"]` | 按角色和名称，名称部分匹配；也可以只写 `role=textbox` |
+| `label=邮箱` / `placeholder=搜索` | 按关联的标签文字 / 占位符 |
+| `css=#submit` | CSS 选择器 |
+
+选择器必须恰好匹配**一个可见元素**（文件上传例外：文件输入框常常是隐藏的，所以不要求可见）：没有匹配回 `selector_not_found`，多于一个回 `ambiguous_selector` 并告诉你数量，不会去猜点哪个。选择器只在顶层文档里找；iframe 里的元素请用快照的 `ref`。
+
+选择器的最大好处是**页面跳转后依然有效**，快照的 `ref` 不行。所以跨页面的步骤（尤其是批量动作）用选择器。
+
+### 批量动作 `browser_batch`
+
+一次调用顺序执行最多 20 步，省掉来回往返。`steps` 里每步是 `{"do": 动词, ...该动词自己的参数}`：
+
+```json
+{"profile": "店铺A", "steps": [
+  {"do": "type", "ref": "placeholder=搜索", "text": "widgets"},
+  {"do": "click", "ref": "role=button[name=\"Go\"]"},
+  {"do": "wait_for", "url": "/result", "timeout_ms": 5000},
+  {"do": "get_text", "max_chars": 500}
+]}
+```
+
+动词：`navigate(url)`、`click(ref)`、`type(ref, text, submit?)`、`press_key(key)`、`scroll(direction?, amount?)`、`wait_for(...)`、`back`、`get_text(ref?, offset?, max_chars?)`、`dialog(answer=accept|dismiss, text?)`、`tabs(tab_action, index?, url?)`、`upload(ref, paths)`。
+
+- 某一步出错就停（返回里 `stopped="error"`、`stopped_at` 是第几步，每步的结果在 `steps` 里）；`stop_on_error=false` 则继续后面的步骤。
+- 某一步弹出了对话框，如果下一步不是 `dialog` 就停（`stopped="dialog"`），因为页面被冻住了；下一步是 `dialog` 就接着处理。
+- 默认在最后附一次快照（`snapshot_after=false` 关闭，`viewport_only=true` 只看当前屏）。
+
+### JS 对话框
+
+`alert`、`confirm`、`prompt`、`beforeunload` 会把页面冻住。工具不会卡死：触发它的动作会立刻返回，结果里带 `dialog`（类型、文字）和提示；这时其他操作都回 `dialog_open`，直到你调 `browser_dialog` 处理。没人处理 2 分钟后自动取消。
+
+### 上传和下载
+
+- **下载**：页面里触发的下载自动保存到 Manager 数据目录下的 `agent-files/downloads/<画像 id>/`。点了下载按钮之后调 `browser_downloads`，拿到文件的完整路径、大小和状态（链接里的查询参数不会回显，可能带密钥）。
+- **上传**：为防止 agent 把本机任意文件传给网站，`browser_upload` **只认 `agent-files/` 里的文件**（符号链接和 `..` 逃逸都会被拒，单个最大 50 MB，一次最多 10 个）。要上传别处的文件，先复制进这个目录；目录位置在 `browser_downloads` 返回的 `files_dir` 里。
 
 要点：
 
@@ -236,7 +283,10 @@ MCP 客户端除了工具，还能读到：
 | `not_running` | 画像没在跑 | `open_browser` |
 | `cdp_unavailable` | 画像是 `manual` 模式启动的，没有 CDP | `stop_profile` 后 `open_browser` |
 | `profile_leased` | 画像被别人（常是用户）控制，带 `lease` | 等租约过期或用户归还 |
-| `unknown_ref` / `stale_ref` | 元素引用无效 / 页面已跳转 | 重新 `browser_snapshot` |
+| `unknown_ref` / `stale_ref` | 元素引用无效 / 页面已跳转 | 重新 `browser_snapshot`，或改用语义选择器 |
+| `selector_not_found` / `ambiguous_selector` | 选择器没匹配到 / 匹配到多个 | 写具体一点（加 `name=`），或用快照 `ref` |
+| `dialog_open` / `no_dialog` | 页面被 JS 对话框冻住 / 现在没有对话框 | 先 `browser_dialog` 处理 |
+| `path_not_allowed` / `files_disabled` | 上传的文件不在 agent 文件目录 / 没配置该目录 | 把文件复制进 `files_dir` 再传 |
 | `page_navigating` | 页面还在跳转中 | 等一两秒再 `browser_snapshot` |
 | `no_page` | 没有打开的标签页 | `browser_tabs(action=new)` 或 `browser_navigate` |
 | `navigation_failed` / `timeout` | 网址打不开 / 操作超时 | `browser_snapshot` 看现状，检查代理出口 |

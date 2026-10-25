@@ -53,6 +53,12 @@ _REASON_STATUS = {
     "unknown_ref": 409,
     "stale_ref": 409,
     "no_page": 409,
+    "dialog_open": 409,
+    "path_not_allowed": 403,
+    "files_disabled": 409,
+    "no_dialog": 409,
+    "selector_not_found": 409,
+    "ambiguous_selector": 409,
     "page_navigating": 409,
     "timeout": 504,
     "navigation_failed": 502,
@@ -239,6 +245,24 @@ def create_router(deps: AgentDeps) -> APIRouter:
                 result = await pages.wait_for(
                     context, profile_id, text=body.get("text") or None,
                     ms=int(body["ms"]) if body.get("ms") is not None else None,
+                    text_gone=body.get("text_gone") or None, url=body.get("url") or None,
+                    selector=body.get("selector") or None,
+                    timeout_ms=int(body["timeout_ms"]) if body.get("timeout_ms") is not None else None,
+                )
+            elif action == "batch":
+                result = await pages.batch(
+                    context, profile_id, body.get("steps"),
+                    snapshot_after=body.get("snapshot_after", True) is not False,
+                    viewport_only=bool(body.get("viewport_only")),
+                    stop_on_error=body.get("stop_on_error", True) is not False,
+                )
+            elif action == "upload":
+                result = await pages.upload(context, profile_id, str(body.get("ref") or ""), body.get("paths"))
+            elif action == "downloads":
+                result = await pages.downloads(context, profile_id)
+            elif action == "dialog":
+                result = await pages.dialog(
+                    context, profile_id, str(body.get("action") or ""), body.get("text")
                 )
             elif action == "back":
                 result = await pages.back(context, profile_id)

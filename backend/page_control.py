@@ -27,8 +27,10 @@ import asyncio
 import base64
 import logging
 import re
+import time
 import weakref
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -38,6 +40,9 @@ from playwright.async_api import TimeoutError as PlaywrightTimeout
 logger = logging.getLogger("cloakbrowser.manager.page_control")
 
 ALLOWED_SCHEMES = frozenset({"http", "https"})
+_REF_RE = re.compile(r"^e\d+$")
+_SELECTOR_RE = re.compile(r"^(text|role|label|placeholder|css)=(.*)$", re.S)
+_ROLE_RE = re.compile(r"^([A-Za-z][\w-]*)(?:\[name=(?:\"([^\"]*)\"|'([^']*)'|([^\]]*))\])?$")
 NAV_TIMEOUT_MS = 30_000
 ACTION_TIMEOUT_MS = 10_000
 MAX_WAIT_MS = 30_000
@@ -45,9 +50,22 @@ MAX_SNAPSHOT_ELEMENTS = 400
 MAX_SNAPSHOT_TEXT_LINES = 250
 SCROLL_DEFAULT_PX = 600
 MAX_TEXT_LEN = 20_000
+MAX_BATCH_STEPS = 20
+MAX_UPLOAD_FILES = 10
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+MAX_DOWNLOAD_RECORDS = 50
+DOWNLOAD_WAIT_S = 15.0
+_BATCH_VERBS = frozenset(
+    {"navigate", "click", "type", "press_key", "scroll", "wait_for", "back", "get_text", "dialog", "tabs", "upload"}
+)
 SETTLE_TIMEOUT_S = 10.0
+DIALOG_AUTO_DISMISS_S = 120.0
 TEXT_DEFAULT_CHARS = 6_000
 TEXT_MAX_CHARS = 20_000
+
+
+# Returned by _guarded when the action opened a JS dialog before it could finish.
+_DIALOG = object()
 
 
 class PageControlError(Exception):
@@ -238,6 +256,7 @@ class _ProfileState:
     refs_stale: bool = False
     # Main-frame navigations seen on the current pages: how many have started,
     # and whether one is still waiting for its document to load.
+    downloads: list = field(default_factory=list)
     nav_counter: int = 0
     nav_pending: bool = False
     hooked: Any = field(default_factory=weakref.WeakSet)
@@ -265,8 +284,15 @@ def _live_pages(context: Any) -> list[Any]:
 class PageController:
     """Page state for every profile; one instance lives in the Manager."""
 
-    def __init__(self) -> None:
+    def __init__(self, files_dir: Path | None = None) -> None:
         self._states: dict[str, _ProfileState] = {}
+        # The only folder agents may upload from and the one downloads land in.
+        self._files_dir = files_dir
+        # JS dialogs (alert/confirm/prompt/beforeunload) waiting for the agent, per page.
+        self._dialogs: "weakref.WeakKeyDictionary[Any, Any]" = weakref.WeakKeyDictionary()
+        self._dialog_events: "weakref.WeakKeyDictionary[Any, asyncio.Event]" = weakref.WeakKeyDictionary()
+        self._dialog_timers: "weakref.WeakKeyDictionary[Any, Any]" = weakref.WeakKeyDictionary()
+        self._background: set[Any] = set()  # actions left running behind an open dialog
 
     def forget(self, profile_id: str) -> None:
         self._states.pop(profile_id, None)
@@ -297,7 +323,26 @@ class PageController:
                     state.refs.clear()  # a new document: element references from the old one are dead
                     state.refs_stale = True
 
+            def on_dialog(dialog: Any) -> None:
+                # An open dialog freezes the page; keep it for browser_dialog and make
+                # sure a vanished agent cannot leave the page frozen for good.
+                self._dialogs[page] = dialog
+                self._dialog_events.setdefault(page, asyncio.Event()).set()
+                timer = asyncio.get_running_loop().call_later(
+                    DIALOG_AUTO_DISMISS_S, lambda: asyncio.ensure_future(self._auto_dismiss(page, dialog))
+                )
+                self._dialog_timers[page] = timer
+
+            def on_download(download: Any) -> None:
+                # Register the record right away, so a list call made a moment later sees it.
+                record: dict[str, Any] = {"filename": None, "path": None, "bytes": None, "status": "saving", "url": None}
+                state.downloads.append(record)
+                del state.downloads[:-MAX_DOWNLOAD_RECORDS]
+                asyncio.ensure_future(self._save_download(profile_id, download, record))
+
             page.on("request", on_request)
+            page.on("dialog", on_dialog)
+            page.on("download", on_download)
             page.on("domcontentloaded", on_loaded)
             page.on("close", lambda *_: setattr(state, "nav_pending", False))
         return page
@@ -333,12 +378,93 @@ class PageController:
         pages = _live_pages(context)
         return pages.index(page) if page in pages else -1
 
+    @staticmethod
+    def _describe_dialog(dialog: Any) -> dict[str, Any]:
+        return {"type": dialog.type, "message": dialog.message, "default_value": dialog.default_value or None}
+
     async def _page_info(self, context: Any, page: Any) -> dict[str, Any]:
+        dialog = self._dialogs.get(page)
+        if dialog is not None:
+            # An open dialog blocks page.title(); report the dialog instead.
+            return {
+                "url": page.url, "title": "", "tab": self._tab_index(context, page),
+                "dialog": self._describe_dialog(dialog),
+                "dialog_hint": "页面被一个 JS 对话框挡住了，先调 browser_dialog(accept 或 dismiss)。",
+            }
         try:
             title = await page.title()
         except PlaywrightError:
             title = ""
         return {"url": page.url, "title": title, "tab": self._tab_index(context, page)}
+
+    def _raise_if_dialog(self, page: Any) -> None:
+        dialog = self._dialogs.get(page)
+        if dialog is not None:
+            raise PageControlError(
+                "dialog_open",
+                f"页面有一个未处理的 {dialog.type} 对话框：{dialog.message[:120]!r}。先调 browser_dialog。",
+            )
+
+    async def _auto_dismiss(self, page: Any, dialog: Any) -> None:
+        if self._dialogs.get(page) is not dialog:
+            return
+        self._dialogs.pop(page, None)
+        try:
+            await dialog.dismiss()
+        except PlaywrightError:
+            pass
+
+    async def _guarded(self, page: Any, awaitable: Any) -> Any:
+        """Run a page action; if it opens a JS dialog first (which freezes the page and
+        would hang the action) return ``_DIALOG`` and let the action finish behind it."""
+        event = self._dialog_events.setdefault(page, asyncio.Event())
+        event.clear()
+        task = asyncio.ensure_future(awaitable)
+        waiter = asyncio.ensure_future(event.wait())
+        try:
+            done, _ = await asyncio.wait({task, waiter}, return_when=asyncio.FIRST_COMPLETED)
+        except asyncio.CancelledError:
+            task.cancel()
+            waiter.cancel()
+            raise
+        waiter.cancel()
+        if task in done:
+            return task.result()
+        self._background.add(task)
+        task.add_done_callback(self._background.discard)
+        task.add_done_callback(lambda t: t.cancelled() or t.exception())  # consume late errors
+        return _DIALOG
+
+    async def dialog(
+        self, context: Any, profile_id: str, action: str, text: str | None = None
+    ) -> dict[str, Any]:
+        if action not in ("accept", "dismiss"):
+            raise PageControlError("invalid_argument", "action 只能是 accept 或 dismiss。")
+        state = self._state(profile_id)
+        candidates = [state.page, *_live_pages(context)]
+        page = next((p for p in candidates if p is not None and p in self._dialogs), None)
+        if page is None:
+            raise PageControlError("no_dialog", "现在没有待处理的 JS 对话框。")
+        dialog = self._dialogs[page]
+        described = self._describe_dialog(dialog)
+        try:
+            if action == "accept":
+                await dialog.accept(text) if text is not None else await dialog.accept()
+            else:
+                await dialog.dismiss()
+        except (PlaywrightError, PlaywrightTimeout) as exc:
+            raise self._wrap(exc, "处理对话框") from exc
+        finally:
+            self._dialogs.pop(page, None)
+            timer = self._dialog_timers.pop(page, None)
+            if timer is not None:
+                timer.cancel()
+            event = self._dialog_events.get(page)
+            if event is not None:
+                event.clear()
+        await asyncio.sleep(0.3)  # the action that raised it can finish now
+        info = await self._page_info(context, page)
+        return {**info, "handled": action, "handled_dialog": described}
 
     async def _adopt_new_tab(self, context: Any, profile_id: str, before: list[Any]) -> bool:
         """After an action: if it opened a tab, make that the current one."""
@@ -362,6 +488,63 @@ class PageController:
         if "not attached" in str(exc) or "detached" in str(exc):
             return PageControlError("stale_ref", f"页面已变化，元素引用失效。重新调用 browser_snapshot。（{text}）")
         return PageControlError("action_failed", f"{what}失败：{text}")
+
+    @staticmethod
+    def _locator(page: Any, selector: str) -> Any:
+        """A Playwright locator for ``text=…`` / ``role=…`` / ``label=…`` / ``placeholder=…`` / ``css=…``."""
+        match = _SELECTOR_RE.match(selector)
+        if match is None:
+            raise PageControlError(
+                "invalid_argument",
+                f"看不懂选择器「{selector}」。用快照里的 ref（如 e3），或 text=… / role=button[name=\"…\"] / "
+                "label=… / placeholder=… / css=…",
+            )
+        kind, value = match.group(1), match.group(2).strip()
+        if not value:
+            raise PageControlError("invalid_argument", f"选择器 {kind}= 后面不能为空。")
+        if kind == "text":
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                return page.get_by_text(value[1:-1], exact=True)
+            return page.get_by_text(value)
+        if kind == "role":
+            role_match = _ROLE_RE.match(value)
+            if role_match is None:
+                raise PageControlError("invalid_argument", "role 选择器写法：role=button 或 role=button[name=\"登录\"]。")
+            name = role_match.group(2) or role_match.group(3) or role_match.group(4)
+            return page.get_by_role(role_match.group(1), name=name) if name else page.get_by_role(role_match.group(1))
+        if kind == "label":
+            return page.get_by_label(value)
+        if kind == "placeholder":
+            return page.get_by_placeholder(value)
+        return page.locator(value)
+
+    async def _target(self, page: Any, profile_id: str, ref: str, *, visible_only: bool = True) -> Any:
+        """The element a ``ref`` names: a snapshot ref (``e3``) or a semantic selector.
+
+        Selectors must match exactly one visible element in the top document, so a
+        vague one fails loudly instead of clicking the wrong thing. ``visible_only=False``
+        also considers hidden elements (file inputs are usually hidden behind a button).
+        """
+        ref = (ref or "").strip()
+        if not ref or _REF_RE.match(ref):
+            return self._element(profile_id, ref)
+        try:
+            locator = self._locator(page, ref)
+            if visible_only:
+                locator = locator.filter(visible=True)
+            count = await locator.count()
+            if count == 0:
+                raise PageControlError("selector_not_found", f"页面上没有可见元素匹配 {ref}。先 browser_snapshot 看看页面现状。")
+            if count > 1:
+                raise PageControlError(
+                    "ambiguous_selector",
+                    f"{ref} 匹配到 {count} 个元素，写得更具体一些（加上 name=…），或者用 browser_snapshot 里的 ref。",
+                )
+            return await locator.element_handle(timeout=ACTION_TIMEOUT_MS)
+        except PageControlError:
+            raise
+        except (PlaywrightError, PlaywrightTimeout) as exc:
+            raise PageControlError("invalid_argument", f"选择器 {ref} 不可用：{str(exc).splitlines()[0][:160]}") from exc
 
     def _element(self, profile_id: str, ref: str) -> Any:
         ref = (ref or "").strip()
@@ -423,8 +606,11 @@ class PageController:
     async def navigate(self, context: Any, profile_id: str, url: str) -> dict[str, Any]:
         target = _check_url(url)
         page = await self._current_page(context, profile_id)
+        self._raise_if_dialog(page)
         try:
-            response = await page.goto(target, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
+            response = await self._guarded(page, page.goto(target, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS))
+            if response is _DIALOG:  # e.g. a beforeunload prompt on the page being left
+                return await self._page_info(context, page)
         except (PlaywrightError, PlaywrightTimeout) as exc:
             if isinstance(exc, PlaywrightTimeout):
                 raise self._wrap(exc, "打开网页") from exc
@@ -435,8 +621,9 @@ class PageController:
 
     async def back(self, context: Any, profile_id: str) -> dict[str, Any]:
         page = await self._current_page(context, profile_id, create=False)
+        self._raise_if_dialog(page)
         try:
-            await page.go_back(wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
+            await self._guarded(page, page.go_back(wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS))
         except (PlaywrightError, PlaywrightTimeout) as exc:
             raise self._wrap(exc, "后退") from exc
         return await self._page_info(context, page)
@@ -448,6 +635,7 @@ class PageController:
     ) -> dict[str, Any]:
         page = await self._current_page(context, profile_id)
         state = self._state(profile_id)
+        self._raise_if_dialog(page)
         await self._wait_idle(profile_id)  # a navigation the last action started
         for attempt in range(3):
             try:
@@ -560,12 +748,13 @@ class PageController:
         ``whole_page`` reads the full body.
         """
         page = await self._current_page(context, profile_id, create=False)
+        self._raise_if_dialog(page)
         await self._wait_idle(profile_id)
         offset = max(0, int(offset or 0))
         max_chars = max(100, min(int(max_chars or TEXT_DEFAULT_CHARS), TEXT_MAX_CHARS))
         try:
             if ref:
-                text = await self._element(profile_id, ref).inner_text(timeout=ACTION_TIMEOUT_MS)
+                text = await (await self._target(page, profile_id, ref)).inner_text()
             else:
                 text = await page.evaluate(_PAGE_TEXT_JS, bool(whole_page))
         except (PlaywrightError, PlaywrightTimeout) as exc:
@@ -588,6 +777,7 @@ class PageController:
         if fmt not in ("jpeg", "png"):
             raise PageControlError("invalid_argument", "format 只能是 jpeg 或 png。")
         page = await self._current_page(context, profile_id, create=False)
+        self._raise_if_dialog(page)
         try:
             kwargs: dict[str, Any] = {"type": fmt, "full_page": full_page, "timeout": ACTION_TIMEOUT_MS * 2}
             if fmt == "jpeg":
@@ -604,13 +794,16 @@ class PageController:
     # ── acting ─────────────────────────────────────────────────────────────
 
     async def click(self, context: Any, profile_id: str, ref: str) -> dict[str, Any]:
-        element = self._element(profile_id, ref)
         page = await self._current_page(context, profile_id)
+        self._raise_if_dialog(page)
+        element = await self._target(page, profile_id, ref)
         before = _live_pages(context)
         started = self._state(profile_id).nav_counter
         try:
             await element.scroll_into_view_if_needed(timeout=ACTION_TIMEOUT_MS)
-            await element.click(timeout=ACTION_TIMEOUT_MS)
+            clicked = await self._guarded(page, element.click(timeout=ACTION_TIMEOUT_MS))
+            if clicked is _DIALOG:  # the click raised an alert/confirm: the page is frozen until handled
+                return {**await self._page_info(context, page), "new_tab": False}
             await self._settle(profile_id, started)  # a click may start a navigation
             new_tab = await self._adopt_new_tab(context, profile_id, before)
         except (PlaywrightError, PlaywrightTimeout) as exc:
@@ -622,8 +815,9 @@ class PageController:
     async def type_text(
         self, context: Any, profile_id: str, ref: str, text: str, *, submit: bool = False
     ) -> dict[str, Any]:
-        element = self._element(profile_id, ref)
         page = await self._current_page(context, profile_id)
+        self._raise_if_dialog(page)
+        element = await self._target(page, profile_id, ref)
         if not isinstance(text, str):
             raise PageControlError("invalid_argument", "text 必须是字符串。")
         try:
@@ -634,7 +828,9 @@ class PageController:
                 await element.fill(text, timeout=ACTION_TIMEOUT_MS)
             if submit:
                 started = self._state(profile_id).nav_counter
-                await element.press("Enter", timeout=ACTION_TIMEOUT_MS)
+                pressed = await self._guarded(page, element.press("Enter", timeout=ACTION_TIMEOUT_MS))
+                if pressed is _DIALOG:
+                    return await self._page_info(context, page)
                 await self._settle(profile_id, started)
         except (PlaywrightError, PlaywrightTimeout) as exc:
             raise self._wrap(exc, f"输入 {ref} ") from exc
@@ -645,9 +841,12 @@ class PageController:
         if not key:
             raise PageControlError("invalid_argument", "缺少 key（如 Enter、Tab、Escape、ArrowDown、Control+A）。")
         page = await self._current_page(context, profile_id)
+        self._raise_if_dialog(page)
         started = self._state(profile_id).nav_counter
         try:
-            await page.keyboard.press(key)
+            pressed = await self._guarded(page, page.keyboard.press(key))
+            if pressed is _DIALOG:
+                return await self._page_info(context, page)
             await self._settle(profile_id, started)  # Enter may submit a form
         except (PlaywrightError, PlaywrightTimeout) as exc:
             raise self._wrap(exc, f"按键 {key} ") from exc
@@ -661,6 +860,7 @@ class PageController:
             raise PageControlError("invalid_argument", "direction 只能是 up/down/left/right。")
         amount = max(1, min(int(amount), 5000))
         page = await self._current_page(context, profile_id)
+        self._raise_if_dialog(page)
         dx, dy = deltas[direction]
         try:
             await page.mouse.wheel(dx * amount, dy * amount)
@@ -669,18 +869,246 @@ class PageController:
         return await self._page_info(context, page)
 
     async def wait_for(
-        self, context: Any, profile_id: str, *, text: str | None = None, ms: int | None = None
+        self, context: Any, profile_id: str, *, text: str | None = None, ms: int | None = None,
+        text_gone: str | None = None, url: str | None = None, selector: str | None = None,
+        timeout_ms: int | None = None,
     ) -> dict[str, Any]:
+        """Wait until every given condition holds (each bounded by ``timeout_ms``).
+
+        ``text`` appears, ``text_gone`` disappears, the URL contains ``url``, a
+        semantic ``selector`` becomes visible, or just ``ms`` pass.
+        """
+        if not (text or text_gone or url or selector or ms is not None):
+            raise PageControlError("invalid_argument", "text、text_gone、url、selector、ms 至少给一个。")
+        timeout = max(100, min(int(timeout_ms or 15_000), MAX_WAIT_MS))
         page = await self._current_page(context, profile_id)
+        self._raise_if_dialog(page)
         try:
             if text:
-                await page.get_by_text(text).first.wait_for(state="visible", timeout=MAX_WAIT_MS)
-            elif ms is not None:
+                await self._wait_condition(
+                    page.get_by_text(text).first.wait_for(state="visible", timeout=timeout), f"文字「{text}」出现", timeout
+                )
+            if text_gone:
+                await self._wait_condition(
+                    page.get_by_text(text_gone).first.wait_for(state="hidden", timeout=timeout), f"文字「{text_gone}」消失", timeout
+                )
+            if url:
+                await self._wait_condition(
+                    page.wait_for_url(re.compile(re.escape(url)), timeout=timeout, wait_until="commit"),
+                    f"网址包含「{url}」", timeout,
+                )
+            if selector:
+                if _REF_RE.match(selector.strip()):
+                    raise PageControlError("invalid_argument", "selector 要写语义选择器（text=… / role=… / css=…），不能用快照 ref。")
+                await self._wait_condition(
+                    self._locator(page, selector.strip()).first.wait_for(state="visible", timeout=timeout),
+                    f"元素 {selector} 出现", timeout,
+                )
+            if ms is not None:
                 await page.wait_for_timeout(max(0, min(int(ms), MAX_WAIT_MS)))
-            else:
-                raise PageControlError("invalid_argument", "text 和 ms 至少给一个。")
         except PageControlError:
             raise
         except (PlaywrightError, PlaywrightTimeout) as exc:
             raise self._wrap(exc, "等待") from exc
         return await self._page_info(context, page)
+
+    @staticmethod
+    async def _wait_condition(awaitable: Any, what: str, timeout: int) -> None:
+        try:
+            await awaitable
+        except PlaywrightTimeout as exc:
+            raise PageControlError("timeout", f"等待{what}超时（{timeout} ms）。browser_snapshot 看看页面现状。") from exc
+
+    # ── batch ──────────────────────────────────────────────────────────────
+
+    async def batch(
+        self, context: Any, profile_id: str, steps: Any, *,
+        snapshot_after: bool = True, viewport_only: bool = False, stop_on_error: bool = True,
+    ) -> dict[str, Any]:
+        """Run up to ``MAX_BATCH_STEPS`` page actions in one call.
+
+        Each step is ``{"do": <verb>, ...}`` with the verb's own parameters
+        (``dialog`` uses ``answer``/``text``; ``tabs`` uses ``tab_action``/``index``/``url``).
+        A step that fails, or that raises a JS dialog the next step does not
+        handle, stops the run; a snapshot of where it ended up is appended.
+        """
+        if not isinstance(steps, list) or not steps:
+            raise PageControlError("invalid_argument", "steps 必须是非空数组，每项形如 {\"do\": \"click\", \"ref\": \"e3\"}。")
+        if len(steps) > MAX_BATCH_STEPS:
+            raise PageControlError("invalid_argument", f"一次最多 {MAX_BATCH_STEPS} 步，拆成几批。")
+        for index, step in enumerate(steps):
+            verb = step.get("do") if isinstance(step, dict) else None
+            if verb not in _BATCH_VERBS:
+                raise PageControlError(
+                    "invalid_argument",
+                    f"第 {index} 步的 do 必须是 {'/'.join(sorted(_BATCH_VERBS))} 之一（读页面用 snapshot_after，截图单独调）。",
+                )
+
+        records: list[dict[str, Any]] = []
+        last: dict[str, Any] = {}
+        stopped: str | None = None
+        stopped_at: int | None = None
+        for index, step in enumerate(steps):
+            verb = step["do"]
+            record: dict[str, Any] = {"i": index, "do": verb}
+            try:
+                result = await self._run_step(context, profile_id, verb, step)
+            except PageControlError as exc:
+                record.update(ok=False, reason=exc.reason, detail=exc.detail)
+                records.append(record)
+                if stop_on_error:
+                    stopped, stopped_at = "error", index
+                    break
+                continue
+            record["ok"] = True
+            if verb == "get_text":
+                record["text"] = result.get("text")
+                record["next_offset"] = result.get("next_offset")
+            if result.get("dialog"):
+                record["dialog"] = result["dialog"]
+            records.append(record)
+            last = result
+            nxt = steps[index + 1] if index + 1 < len(steps) else None
+            if result.get("dialog") and not (nxt and nxt.get("do") == "dialog"):
+                stopped, stopped_at = "dialog", index
+                break
+
+        out: dict[str, Any] = {
+            "steps": records,
+            "completed": sum(1 for r in records if r.get("ok")),
+            "total": len(steps),
+            "stopped": stopped,
+            "stopped_at": stopped_at,
+        }
+        if snapshot_after and stopped != "dialog":
+            try:
+                snap = await self.snapshot(context, profile_id, viewport_only=viewport_only)
+                out.update(snap)
+            except PageControlError as exc:
+                out["snapshot_error"] = {"reason": exc.reason, "detail": exc.detail}
+        else:
+            page = await self._current_page(context, profile_id, create=False)
+            out.update(await self._page_info(context, page))
+        if last.get("dialog") and "dialog" not in out:
+            out["dialog"] = last["dialog"]
+        return out
+
+    async def _run_step(self, context: Any, profile_id: str, verb: str, step: dict[str, Any]) -> dict[str, Any]:
+        def arg(name: str, default: Any = None) -> Any:
+            value = step.get(name)
+            return default if value is None else value
+
+        if verb == "navigate":
+            return await self.navigate(context, profile_id, str(arg("url", "")))
+        if verb == "click":
+            return await self.click(context, profile_id, str(arg("ref", "")))
+        if verb == "type":
+            return await self.type_text(context, profile_id, str(arg("ref", "")), arg("text"), submit=bool(arg("submit", False)))
+        if verb == "press_key":
+            return await self.press_key(context, profile_id, str(arg("key", "")))
+        if verb == "scroll":
+            return await self.scroll(context, profile_id, str(arg("direction", "down")), int(arg("amount", SCROLL_DEFAULT_PX)))
+        if verb == "wait_for":
+            return await self.wait_for(
+                context, profile_id, text=arg("text"), ms=arg("ms"), text_gone=arg("text_gone"),
+                url=arg("url"), selector=arg("selector"), timeout_ms=arg("timeout_ms"),
+            )
+        if verb == "back":
+            return await self.back(context, profile_id)
+        if verb == "get_text":
+            return await self.get_text(
+                context, profile_id, ref=arg("ref"), offset=int(arg("offset", 0)),
+                max_chars=int(arg("max_chars", TEXT_DEFAULT_CHARS)), whole_page=bool(arg("whole_page", False)),
+            )
+        if verb == "dialog":
+            return await self.dialog(context, profile_id, str(arg("answer", "")), arg("text"))
+        if verb == "upload":
+            return await self.upload(context, profile_id, str(arg("ref", "")), arg("paths"))
+        if verb == "tabs":
+            return await self.tabs(
+                context, profile_id, str(arg("tab_action", "list")), index=arg("index"), url=arg("url")
+            )
+        raise PageControlError("invalid_argument", f"不支持的步骤 {verb}")
+
+    # ── files ──────────────────────────────────────────────────────────────
+
+    def _require_files_dir(self) -> Path:
+        if self._files_dir is None:
+            raise PageControlError("files_disabled", "这个 Manager 没有配置 agent 文件目录，上传下载不可用。")
+        return self._files_dir
+
+    async def _save_download(self, profile_id: str, download: Any, record: dict[str, Any]) -> None:
+        """Save a download the page started into ``<files>/downloads/<profile>/``."""
+        try:
+            folder = self._require_files_dir() / "downloads" / profile_id
+            folder.mkdir(parents=True, exist_ok=True)
+            name = _safe_filename(download.suggested_filename)
+            target = folder / f"{int(time.time())}-{name}"
+            record["filename"] = name
+            record["url"] = str(download.url).split("?", 1)[0][:200]
+            await download.save_as(str(target))
+            record.update(path=str(target), bytes=target.stat().st_size, status="done")
+        except Exception as exc:  # a failed download must never take the Manager down
+            record.update(status="failed", error=str(exc).splitlines()[0][:160] if str(exc) else type(exc).__name__)
+
+    async def downloads(self, context: Any, profile_id: str) -> dict[str, Any]:
+        """Files the profile downloaded (waits briefly for ones still being saved)."""
+        folder = self._require_files_dir()
+        state = self._state(profile_id)
+        await asyncio.sleep(0.3)  # a download the last click started may still be arriving
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + DOWNLOAD_WAIT_S
+        while any(r["status"] == "saving" for r in state.downloads) and loop.time() < deadline:
+            await asyncio.sleep(0.2)
+        return {
+            "files_dir": str(folder),
+            "downloads": list(reversed(state.downloads)),
+            "note": "下载的文件保存在 files_dir 下；要上传的文件也必须放在 files_dir 里（browser_upload 只认这个目录）。",
+        }
+
+    def _upload_paths(self, paths: Any) -> list[str]:
+        folder = self._require_files_dir().resolve()
+        if not isinstance(paths, list) or not paths or not all(isinstance(p, str) and p for p in paths):
+            raise PageControlError("invalid_argument", "paths 必须是非空的路径字符串数组。")
+        if len(paths) > MAX_UPLOAD_FILES:
+            raise PageControlError("invalid_argument", f"一次最多上传 {MAX_UPLOAD_FILES} 个文件。")
+        resolved = []
+        for raw in paths:
+            path = Path(raw).expanduser().resolve()
+            if not path.is_relative_to(folder):
+                raise PageControlError(
+                    "path_not_allowed",
+                    f"只允许上传 {folder} 里的文件（防止把本机其他文件传给网站）。先把文件复制到那个目录。",
+                )
+            if not path.is_file():
+                raise PageControlError("invalid_argument", f"文件不存在：{path}")
+            if path.stat().st_size > MAX_UPLOAD_BYTES:
+                raise PageControlError("invalid_argument", f"{path.name} 超过 {MAX_UPLOAD_BYTES // 1024 // 1024} MB。")
+            resolved.append(str(path))
+        return resolved
+
+    async def upload(self, context: Any, profile_id: str, ref: str, paths: Any) -> dict[str, Any]:
+        """Attach files to a file input, or to the chooser a button opens."""
+        files = self._upload_paths(paths)
+        page = await self._current_page(context, profile_id)
+        self._raise_if_dialog(page)
+        element = await self._target(page, profile_id, ref, visible_only=False)
+        try:
+            is_file_input = await element.evaluate("e => e.tagName === 'INPUT' && e.type === 'file'")
+            if is_file_input:
+                await element.set_input_files(files, timeout=ACTION_TIMEOUT_MS)
+            else:
+                async with page.expect_file_chooser(timeout=ACTION_TIMEOUT_MS) as chooser_info:
+                    await element.click(timeout=ACTION_TIMEOUT_MS)
+                chooser = await chooser_info.value
+                await chooser.set_files(files)
+        except (PlaywrightError, PlaywrightTimeout) as exc:
+            raise self._wrap(exc, f"上传到 {ref} ") from exc
+        info = await self._page_info(context, page)
+        return {**info, "uploaded": [Path(f).name for f in files]}
+
+
+def _safe_filename(name: str | None) -> str:
+    cleaned = re.sub(r"[^\w.\- ()\u4e00-\u9fff]", "_", (name or "download").replace("\\", "/").split("/")[-1])
+    cleaned = cleaned.strip(" .") or "download"
+    return cleaned[:120]

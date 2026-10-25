@@ -408,6 +408,12 @@ NEXT_STEPS: dict[str, str] = {
     "stale_ref": "页面变了，引用失效：重新调 browser_snapshot。",
     "page_navigating": "页面还在跳转：等一两秒再调 browser_snapshot。",
     "no_page": "没有打开的标签页：用 browser_tabs(action=new) 或 browser_navigate。",
+    "path_not_allowed": "上传只认 agent 文件目录：用 browser_downloads 看目录位置，把文件复制进去再传。",
+    "files_disabled": "这个 Manager 没开启 agent 文件目录：让用户检查版本和配置。",
+    "dialog_open": "页面被 JS 对话框挡住：先调 browser_dialog(action=accept 或 dismiss)，再继续。",
+    "no_dialog": "现在没有待处理的对话框，直接继续操作即可。",
+    "selector_not_found": "没匹配到元素：browser_snapshot 看看页面现状，再换个写法或用 ref。",
+    "ambiguous_selector": "匹配到多个：把选择器写具体（加 name=…），或改用 browser_snapshot 里的 ref。",
     "navigation_failed": "网址打不开：检查网址和代理出口，必要时 get_fingerprint_report。",
     "timeout": "操作超时：页面可能还在加载，browser_snapshot 看看现状再决定是否重试。",
 }
@@ -1149,7 +1155,7 @@ async def _browser_snapshot(client: RestClient, args: dict[str, Any]) -> dict[st
     "默认只读页面的主体内容（跳过菜单和页脚），要整页文字设 whole_page=true。",
     _page_schema(
         {
-            "ref": {"type": "string", "description": "可选：只读这个元素（来自最近一次快照）"},
+            "ref": {"type": "string", "description": "可选：只读这个元素（快照 ref 或语义选择器）"},
             "offset": {"type": "integer", "default": 0, "description": "从第几个字符开始"},
             "max_chars": {"type": "integer", "default": 6000, "description": "本次最多返回多少字符，100~20000"},
             "whole_page": {"type": "boolean", "default": False, "description": "读整页文字（含菜单页脚），默认只读主体内容"},
@@ -1171,8 +1177,8 @@ async def _browser_get_text(client: RestClient, args: dict[str, Any]) -> dict[st
 
 @register(
     "browser_click",
-    "点击最近一次 browser_snapshot 里的某个元素（用它的 ref，如 e3）。点击若打开新标签页会自动切过去。",
-    _page_schema({"ref": {"type": "string", "description": "快照里的元素引用，如 e3"}}, ("ref",)),
+    "点击一个元素：最近一次 browser_snapshot 里的 ref（如 e3），或语义选择器（text=登录、role=button[name=\"登录\"] 等，页面跳转后依然有效）。点击若打开新标签页会自动切过去。",
+    _page_schema({"ref": {"type": "string", "description": "快照里的元素引用（如 e3），或语义选择器：text=登录 / role=button[name=\"登录\"] / label=邮箱 / placeholder=… / css=…（必须恰好匹配一个可见元素）"}}, ("ref",)),
     "browser",
 )
 async def _browser_click(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
@@ -1184,7 +1190,7 @@ async def _browser_click(client: RestClient, args: dict[str, Any]) -> dict[str, 
     "往输入框（或下拉框，按选项文字选）填内容。默认替换原有内容；submit=true 填完按回车。",
     _page_schema(
         {
-            "ref": {"type": "string", "description": "快照里的元素引用，如 e5"},
+            "ref": {"type": "string", "description": "快照里的元素引用（如 e3），或语义选择器：text=登录 / role=button[name=\"登录\"] / label=邮箱 / placeholder=… / css=…（必须恰好匹配一个可见元素）"},
             "text": {"type": "string", "description": "要填的文字"},
             "submit": {"type": "boolean", "default": False, "description": "填完是否按回车提交"},
         },
@@ -1247,17 +1253,105 @@ async def _browser_screenshot(client: RestClient, args: dict[str, Any]) -> dict[
 
 @register(
     "browser_wait_for",
-    "等页面上出现某段文字（text），或单纯等一会儿（ms，最多 30000）。两个都给时以 text 为准。",
+    "等条件成立再往下走（给了几个就全部要满足）：text 出现、text_gone 消失、url 包含某段、selector（语义选择器）出现，"
+    "或单纯等 ms 毫秒。每个条件最多等 timeout_ms（默认 15000，最大 30000）。比固定等待可靠。",
     _page_schema(
         {
             "text": {"type": "string", "description": "等它出现的文字"},
+            "text_gone": {"type": "string", "description": "等它消失的文字（如加载提示）"},
+            "url": {"type": "string", "description": "等当前网址包含这段文字"},
+            "selector": {"type": "string", "description": "等它可见：text=… / role=button[name=\"…\"] / css=…"},
             "ms": {"type": "integer", "description": "单纯等待的毫秒数"},
+            "timeout_ms": {"type": "integer", "default": 15000, "description": "每个条件的最长等待，100~30000"},
         }
     ),
     "browser",
 )
 async def _browser_wait_for(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
-    return await _page_call(client, args, "wait_for", {"text": args.get("text"), "ms": args.get("ms")})
+    return await _page_call(
+        client, args, "wait_for",
+        {key: args.get(key) for key in ("text", "text_gone", "url", "selector", "ms", "timeout_ms")},
+    )
+
+
+@register(
+    "browser_dialog",
+    "处理页面弹出的 JS 对话框（alert / confirm / prompt / beforeunload）。动作返回里出现 dialog 字段就必须先处理它，"
+    "否则页面被冻住、其他操作都会回 dialog_open。accept=确定，dismiss=取消；prompt 可用 text 填内容。2 分钟没人处理会自动取消。",
+    _page_schema(
+        {
+            "action": {"type": "string", "enum": ["accept", "dismiss"]},
+            "text": {"type": "string", "description": "prompt 对话框要填的内容（仅 accept 时有效）"},
+        },
+        ("action",),
+    ),
+    "browser",
+)
+async def _browser_dialog(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    return await _page_call(client, args, "dialog", {"action": args.get("action"), "text": args.get("text")})
+
+
+@register(
+    "browser_batch",
+    "一次调用按顺序做最多 20 步，省掉来回往返。steps 是数组，每步 {\"do\": 动词, ...该动词自己的参数}，动词："
+    "navigate(url) click(ref) type(ref,text,submit?) press_key(key) scroll(direction?,amount?) "
+    "wait_for(text/text_gone/url/selector/ms) back get_text(ref?,offset?,max_chars?) dialog(answer=accept|dismiss,text?) "
+    "tabs(tab_action,index?,url?) upload(ref,paths)。页面跳转后 ref 会失效，所以跨页面的步骤请用语义选择器（text=… / role=…[name=…]）。"
+    "某步出错或弹出对话框就停（stopped/stopped_at 会说明），最后默认附一次快照（snapshot_after=false 关闭）。",
+    _page_schema(
+        {
+            "steps": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 20,
+                "items": {"type": "object", "properties": {"do": {"type": "string"}}, "required": ["do"]},
+                "description": "按顺序执行的步骤",
+            },
+            "snapshot_after": {"type": "boolean", "default": True, "description": "做完后附一次快照"},
+            "viewport_only": {"type": "boolean", "default": False, "description": "附带的快照只看当前屏"},
+            "stop_on_error": {"type": "boolean", "default": True, "description": "某步失败就停（false 则继续后面的步骤）"},
+        },
+        ("steps",),
+    ),
+    "browser",
+)
+async def _browser_batch(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    return await _page_call(
+        client, args, "batch",
+        {
+            "steps": args.get("steps"),
+            "snapshot_after": args.get("snapshot_after", True),
+            "viewport_only": bool(args.get("viewport_only")),
+            "stop_on_error": args.get("stop_on_error", True),
+        },
+    )
+
+
+@register(
+    "browser_upload",
+    "往文件输入框上传文件（ref 是 input[type=file]，或点它会弹出文件选择器的按钮）。"
+    "为防止把本机文件传给网站，只允许上传「agent 文件目录」里的文件，路径要写完整；目录位置见 browser_downloads 的 files_dir。",
+    _page_schema(
+        {
+            "ref": {"type": "string", "description": "文件输入框或上传按钮：快照 ref 或语义选择器"},
+            "paths": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 10, "description": "要上传的文件的完整路径（必须在 agent 文件目录里，单个不超过 50 MB）"},
+        },
+        ("ref", "paths"),
+    ),
+    "browser",
+)
+async def _browser_upload(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    return await _page_call(client, args, "upload", {"ref": args.get("ref"), "paths": args.get("paths")})
+
+
+@register(
+    "browser_downloads",
+    "列出这个画像下载过的文件（自动保存到 agent 文件目录，返回完整路径、大小、状态），并告诉你目录在哪。点了下载按钮之后调它。",
+    _page_schema(),
+    "browser",
+)
+async def _browser_downloads(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    return await _page_call(client, args, "downloads")
 
 
 @register("browser_back", "当前标签页后退一步。", _page_schema(), "browser")
@@ -1316,7 +1410,11 @@ TOOL_EN: dict[str, str] = {
     "browser_press_key": "Press a key or combo (Enter, Tab, Control+A) on the focused element.",
     "browser_scroll": "Scroll the page up/down/left/right by pixels.",
     "browser_screenshot": "Screenshot the current page (jpeg default; full_page for the whole page).",
-    "browser_wait_for": "Wait for text to appear, or just wait up to 30 s.",
+    "browser_wait_for": "Wait until text appears / disappears, the URL contains a string, or a selector is visible (or just wait ms). Each condition is bounded by timeout_ms.",
+    "browser_batch": "Run up to 20 page steps in one call ({do: click|type|navigate|...}); stops on an error or a dialog and appends a snapshot. Use semantic selectors across page changes.",
+    "browser_upload": "Upload files to a file input or the chooser a button opens. Only files inside the agent files folder are allowed (see browser_downloads.files_dir).",
+    "browser_downloads": "List files this profile downloaded (auto-saved into the agent files folder) and where that folder is.",
+    "browser_dialog": "Accept or dismiss a JS dialog (alert/confirm/prompt/beforeunload) that froze the page. Required when an action result carries `dialog`.",
     "browser_back": "Go back one step in the current tab.",
     "browser_tabs": "List, open, select or close tabs.",
 }
@@ -1472,6 +1570,8 @@ CloakBrowser Manager runs isolated fingerprint-browser profiles on this machine.
    只想打开给人看：launch_profile（manual 模式，无页面控制）。
 5. 循环：browser_navigate → browser_snapshot → 用快照里的 ref 做 browser_click / browser_type；页面变了就重新 browser_snapshot。
    长页面：browser_scroll 后用 browser_snapshot(viewport_only=true) 看当前一屏，或用 browser_get_text 分页读正文。
+   省往返：browser_batch 一次做多步；跨页面的步骤用语义选择器（text=… / role=button[name=…]），快照 ref 在页面跳转后会失效。
+   动作结果里出现 dialog 字段，说明弹了 JS 对话框，先 browser_dialog 处理。上传只允许 agent 文件目录里的文件（browser_downloads 能看到目录位置）。
    也可以把 open_browser 返回的 cdp_http_endpoint 交给 Playwright / playwright-mcp / chrome-devtools-mcp。
 6. 用完 stop_profile。
 

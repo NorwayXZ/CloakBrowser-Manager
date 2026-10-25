@@ -446,7 +446,7 @@ browser_mgr = BrowserManager()
 
 # Agent surface: control leases, page control, scoped tokens (see agent_api.py).
 agent_leases = agent_lease.LeaseRegistry()
-agent_pages = PageController()
+agent_pages = PageController(files_dir=db.DATA_DIR / "agent-files")
 agent_cdp = agent_api.CdpConnections()
 agent_token_store = agent_auth.TokenStore(
     lambda key: db.get_setting(key), lambda key, value: db.set_setting(key, value)

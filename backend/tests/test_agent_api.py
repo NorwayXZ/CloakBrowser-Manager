@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -172,10 +173,18 @@ class FakeElement:
     async def press(self, key, **kw):
         self.pressed.append(key)
 
+    is_file = False
+    uploaded: list | None = None
+
     async def evaluate(self, js):
+        if "type === 'file'" in js:
+            return self.is_file
         return self.tag
 
-    async def inner_text(self, **kw):
+    async def set_input_files(self, files, **kw):
+        self.uploaded = list(files)
+
+    async def inner_text(self):  # strict like Playwright's ElementHandle.inner_text(): no timeout argument
         return self.text
 
     text = "element text"
@@ -274,7 +283,37 @@ class FakePage:
         self.url = "https://example.com/back"
 
     async def wait_for_timeout(self, ms):
-        return None
+        self.waited_ms = ms
+
+    def expect_file_chooser(self, timeout=None):
+        page = self
+
+        class Chooser:
+            async def set_files(self, files):
+                page.chooser_files = list(files)
+
+        class Manager:
+            async def __aenter__(self_inner):
+                async def value():
+                    return Chooser()
+
+                class Info:
+                    pass
+
+                info = Info()
+                info.value = value()
+                return info
+
+            async def __aexit__(self_inner, *exc):
+                return False
+
+        return Manager()
+
+    async def wait_for_url(self, pattern, timeout=None, wait_until=None):
+        from playwright.async_api import TimeoutError as PlaywrightTimeout
+
+        if not pattern.search(self.url):
+            raise PlaywrightTimeout(f"Timeout {timeout}ms exceeded waiting for {pattern.pattern}")
 
 
 class FakeContext:
@@ -976,3 +1015,479 @@ async def test_refs_go_stale_the_moment_a_new_document_loads():
     assert err.value.reason == "stale_ref" and "上一个页面" in err.value.detail
     await pages.snapshot(ctx, "p1")  # a fresh snapshot makes refs usable again
     await pages.click(ctx, "p1", "e0")
+
+
+# ── semantic selectors ───────────────────────────────────────────────────────
+
+
+class FakeLocator:
+    def __init__(self, matches: list, label: str = "") -> None:
+        self.matches = matches
+        self.label = label
+
+    def filter(self, **kw):
+        self.filtered = kw
+        return self
+
+    async def wait_for(self, state="visible", timeout=None):
+        from playwright.async_api import TimeoutError as PlaywrightTimeout
+
+        self.waited = (state, timeout)
+        if (state == "visible" and not self.matches) or (state == "hidden" and self.matches):
+            raise PlaywrightTimeout(f"Timeout {timeout}ms exceeded")
+
+    async def count(self):
+        return len(self.matches)
+
+    async def element_handle(self, **kw):
+        return self.matches[0]
+
+    @property
+    def first(self):
+        return self
+
+
+class SelectorPage(FakePage):
+    """A page whose locators answer from a table: {"text:Sign in": [element], ...}."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.table: dict[str, list] = {}
+        self.calls: list[tuple] = []
+
+    def _loc(self, kind, value, **kw):
+        self.calls.append((kind, value, kw))
+        return FakeLocator(self.table.get(f"{kind}:{value}", []))
+
+    def get_by_text(self, value, exact=False):
+        return self._loc("text", value, exact=exact)
+
+    def get_by_role(self, role, name=None):
+        return self._loc("role", f"{role}|{name}")
+
+    def get_by_label(self, value):
+        return self._loc("label", value)
+
+    def get_by_placeholder(self, value):
+        return self._loc("placeholder", value)
+
+    def locator(self, css):
+        return self._loc("css", css)
+
+
+async def selector_controller():
+    pages = PageController()
+    ctx = FakeContext()
+    page = SelectorPage()
+    ctx.pages.append(page)
+    return pages, ctx, page
+
+
+async def test_semantic_selectors_resolve_to_one_visible_element():
+    pages, ctx, page = await selector_controller()
+    button, box = FakeElement(), FakeElement("input")
+    page.table = {
+        "text:Sign in": [button],
+        "role:button|Sign in": [button],
+        "label:Email": [box],
+        "placeholder:you@example.com": [box],
+        "css:#go": [button],
+    }
+    for selector in ("text=Sign in", 'role=button[name="Sign in"]', "role=button[name='Sign in']", "css=#go"):
+        button.clicked = False
+        await pages.click(ctx, "p1", selector)
+        assert button.clicked, selector
+    await pages.type_text(ctx, "p1", "label=Email", "a@b.com")
+    await pages.type_text(ctx, "p1", "placeholder=you@example.com", "c@d.com")
+    assert box.filled == "c@d.com"
+    # quoted text is an exact match
+    page.table["text:Sign in"] = [button]
+    await pages.click(ctx, "p1", 'text="Sign in"')
+    assert ("text", "Sign in", {"exact": True}) in page.calls
+
+
+async def test_selector_that_matches_nothing_or_many_fails_loudly():
+    pages, ctx, page = await selector_controller()
+    page.table = {"text:Buy": [FakeElement(), FakeElement(), FakeElement()]}
+    with pytest.raises(PageControlError) as err:
+        await pages.click(ctx, "p1", "text=Missing")
+    assert err.value.reason == "selector_not_found"
+    with pytest.raises(PageControlError) as err:
+        await pages.click(ctx, "p1", "text=Buy")
+    assert err.value.reason == "ambiguous_selector" and "3" in err.value.detail
+
+
+async def test_malformed_selectors_are_invalid_arguments():
+    pages, ctx, page = await selector_controller()
+    for bad in ("Sign in", "xpath=//a", "text=", "role=", "role=bu tton[name=x]"):
+        with pytest.raises(PageControlError) as err:
+            await pages.click(ctx, "p1", bad)
+        assert err.value.reason in ("invalid_argument", "unknown_ref"), bad
+
+
+async def test_selectors_survive_a_navigation_that_kills_refs():
+    pages, ctx, page = await selector_controller()
+    button = FakeElement()
+    page.table = {"role:button|Next": [button]}
+    page.snapshot_handle = FakeSnapshotHandle(["x"], [FakeElement()])
+    await pages.snapshot(ctx, "p1")
+    page.emit("domcontentloaded")  # new document: e0 is dead...
+    with pytest.raises(PageControlError) as err:
+        await pages.click(ctx, "p1", "e0")
+    assert err.value.reason == "stale_ref"
+    await pages.click(ctx, "p1", 'role=button[name="Next"]')  # ...but a selector still works
+    assert button.clicked
+
+
+async def test_get_text_accepts_a_selector():
+    pages, ctx, page = await selector_controller()
+    el = FakeElement()
+    el.text = "price: 10"
+    page.table = {"css:.price": [el]}
+    assert (await pages.get_text(ctx, "p1", ref="css=.price"))["text"] == "price: 10"
+
+
+# ── condition waits ──────────────────────────────────────────────────────────
+
+
+async def test_wait_for_each_condition_kind():
+    pages, ctx, page = await selector_controller()
+    page.url = "https://shop.example.com/checkout/done"
+    page.table = {"text:Thanks": [FakeElement()], "role:button|Continue": [FakeElement()]}
+    info = await pages.wait_for(
+        ctx, "p1", text="Thanks", text_gone="Loading…", url="/checkout/done",
+        selector='role=button[name="Continue"]', ms=5, timeout_ms=2000,
+    )
+    assert info["url"].endswith("/done") and page.waited_ms == 5
+
+
+async def test_wait_for_times_out_naming_the_condition():
+    pages, ctx, page = await selector_controller()
+    page.url = "https://shop.example.com/cart"
+    page.table = {"text:Spinner": [FakeElement()]}
+    for kwargs, needle in (
+        ({"text": "Never"}, "Never"),
+        ({"text_gone": "Spinner"}, "Spinner"),
+        ({"url": "/checkout"}, "/checkout"),
+        ({"selector": "css=#missing"}, "#missing"),
+    ):
+        with pytest.raises(PageControlError) as err:
+            await pages.wait_for(ctx, "p1", timeout_ms=150, **kwargs)
+        assert err.value.reason == "timeout" and needle in err.value.detail, kwargs
+
+
+async def test_wait_for_validates_its_arguments():
+    pages, ctx, page = await selector_controller()
+    with pytest.raises(PageControlError) as err:
+        await pages.wait_for(ctx, "p1")
+    assert err.value.reason == "invalid_argument"
+    with pytest.raises(PageControlError) as err:
+        await pages.wait_for(ctx, "p1", selector="e3")  # snapshot refs are not waitable
+    assert err.value.reason == "invalid_argument"
+
+
+# ── JS dialogs ───────────────────────────────────────────────────────────────
+
+
+class FakeDialog:
+    def __init__(self, kind="confirm", message="Delete everything?", default="") -> None:
+        self.type, self.message, self.default_value = kind, message, default
+        self.handled: asyncio.Event = asyncio.Event()
+        self.result: tuple | None = None
+
+    async def accept(self, text=None):
+        self.result = ("accept", text)
+        self.handled.set()
+
+    async def dismiss(self):
+        self.result = ("dismiss", None)
+        self.handled.set()
+
+
+def dialog_click(page, dialog):
+    """A click handler that raises a dialog and blocks (like a real frozen page) until it is handled."""
+
+    async def click(**kw):
+        page.emit("dialog", dialog)
+        await dialog.handled.wait()
+
+    return click
+
+
+async def test_a_click_that_opens_a_dialog_returns_the_dialog_instead_of_hanging():
+    pages, ctx, page = await selector_controller()
+    button, dialog = FakeElement(), FakeDialog()
+    button.click = dialog_click(page, dialog)
+    page.table = {"role:button|Delete": [button]}
+    started = asyncio.get_running_loop().time()
+    result = await pages.click(ctx, "p1", 'role=button[name="Delete"]')
+    assert asyncio.get_running_loop().time() - started < 2
+    assert result["dialog"] == {"type": "confirm", "message": "Delete everything?", "default_value": None}
+    assert "browser_dialog" in result["dialog_hint"] and result["title"] == ""
+    # The page is frozen: everything else refuses until the dialog is handled.
+    for call in (pages.snapshot(ctx, "p1"), pages.get_text(ctx, "p1"), pages.screenshot(ctx, "p1"),
+                 pages.navigate(ctx, "p1", "https://example.com/"), pages.press_key(ctx, "p1", "Enter")):
+        with pytest.raises(PageControlError) as err:
+            await call
+        assert err.value.reason == "dialog_open"
+    handled = await pages.dialog(ctx, "p1", "accept")
+    assert dialog.result == ("accept", None)
+    assert handled["handled"] == "accept" and handled["handled_dialog"]["message"] == "Delete everything?"
+    assert "dialog" not in handled
+    await pages.snapshot(ctx, "p1")  # unfrozen
+    assert not pages._background  # the click that raised it has finished
+
+
+async def test_dismissing_and_answering_a_prompt():
+    pages, ctx, page = await selector_controller()
+    await pages._current_page(ctx, "p1")  # hooks the page
+    dialog = FakeDialog("prompt", "Your name?", "anon")
+    page.emit("dialog", dialog)
+    result = await pages.dialog(ctx, "p1", "accept", "Ada")
+    assert dialog.result == ("accept", "Ada") and result["handled_dialog"]["default_value"] == "anon"
+    second = FakeDialog("alert", "Done")
+    page.emit("dialog", second)
+    await pages.dialog(ctx, "p1", "dismiss")
+    assert second.result == ("dismiss", None)
+
+
+async def test_dialog_tool_errors():
+    pages, ctx, page = await selector_controller()
+    with pytest.raises(PageControlError) as err:
+        await pages.dialog(ctx, "p1", "accept")
+    assert err.value.reason == "no_dialog"
+    with pytest.raises(PageControlError) as err:
+        await pages.dialog(ctx, "p1", "maybe")
+    assert err.value.reason == "invalid_argument"
+
+
+async def test_an_unhandled_dialog_is_dismissed_after_a_while(monkeypatch):
+    from backend import page_control
+
+    monkeypatch.setattr(page_control, "DIALOG_AUTO_DISMISS_S", 0.1)
+    pages, ctx, page = await selector_controller()
+    await pages._current_page(ctx, "p1")
+    dialog = FakeDialog("alert", "Hi")
+    page.emit("dialog", dialog)
+    await asyncio.wait_for(dialog.handled.wait(), 2)
+    assert dialog.result == ("dismiss", None) and page not in pages._dialogs
+
+
+# ── batch ────────────────────────────────────────────────────────────────────
+
+
+async def batch_setup():
+    pages, ctx, page = await selector_controller()
+    box, button = FakeElement("input"), FakeElement()
+    page.table = {
+        "label:Email": [box],
+        "role:button|Log in": [button],
+        "text:Welcome": [FakeElement()],
+    }
+    page.snapshot_handle = FakeSnapshotHandle(['[e0] button "Log in"'], [FakeElement()])
+    return pages, ctx, page, box, button
+
+
+async def test_batch_runs_steps_in_order_and_appends_a_snapshot():
+    pages, ctx, page, box, button = await batch_setup()
+    result = await pages.batch(ctx, "p1", [
+        {"do": "navigate", "url": "https://example.com/login"},
+        {"do": "type", "ref": "label=Email", "text": "me@example.com"},
+        {"do": "click", "ref": 'role=button[name="Log in"]'},
+        {"do": "wait_for", "text": "Welcome", "timeout_ms": 500},
+        {"do": "get_text", "max_chars": 100},
+    ])
+    assert box.filled == "me@example.com" and button.clicked
+    assert result["completed"] == 5 and result["total"] == 5 and result["stopped"] is None
+    assert [r["do"] for r in result["steps"]] == ["navigate", "type", "click", "wait_for", "get_text"]
+    assert result["steps"][-1]["text"] == "body text"
+    assert result["url"] == "https://example.com/login" and '[e0] button "Log in"' in result["snapshot"]
+
+
+async def test_batch_stops_at_the_first_error_and_still_snapshots():
+    pages, ctx, page, box, button = await batch_setup()
+    result = await pages.batch(ctx, "p1", [
+        {"do": "type", "ref": "label=Email", "text": "x"},
+        {"do": "click", "ref": "text=Nope"},
+        {"do": "click", "ref": 'role=button[name="Log in"]'},
+    ])
+    assert result["stopped"] == "error" and result["stopped_at"] == 1 and result["completed"] == 1
+    assert result["steps"][1]["reason"] == "selector_not_found" and len(result["steps"]) == 2
+    assert button.clicked is False and "snapshot" in result
+    carry_on = await pages.batch(ctx, "p1", [
+        {"do": "click", "ref": "text=Nope"},
+        {"do": "click", "ref": 'role=button[name="Log in"]'},
+    ], stop_on_error=False)
+    assert carry_on["completed"] == 1 and carry_on["stopped"] is None and button.clicked
+
+
+async def test_batch_can_answer_the_dialog_a_step_raised():
+    pages, ctx, page, box, button = await batch_setup()
+    dialog = FakeDialog()
+    button.click = dialog_click(page, dialog)
+    result = await pages.batch(ctx, "p1", [
+        {"do": "click", "ref": 'role=button[name="Log in"]'},
+        {"do": "dialog", "answer": "accept"},
+        {"do": "wait_for", "ms": 1},
+    ])
+    assert result["completed"] == 3 and result["stopped"] is None and dialog.result == ("accept", None)
+    assert result["steps"][0]["dialog"]["type"] == "confirm"
+
+
+async def test_batch_stops_on_a_dialog_nobody_handles():
+    pages, ctx, page, box, button = await batch_setup()
+    dialog = FakeDialog()
+    button.click = dialog_click(page, dialog)
+    result = await pages.batch(ctx, "p1", [
+        {"do": "click", "ref": 'role=button[name="Log in"]'},
+        {"do": "type", "ref": "label=Email", "text": "x"},
+    ])
+    assert result["stopped"] == "dialog" and result["stopped_at"] == 0
+    assert result["dialog"]["message"] == "Delete everything?" and "snapshot" not in result
+    await pages.dialog(ctx, "p1", "dismiss")
+
+
+async def test_batch_without_a_snapshot_and_validation():
+    pages, ctx, page, box, button = await batch_setup()
+    result = await pages.batch(ctx, "p1", [{"do": "back"}], snapshot_after=False)
+    assert "snapshot" not in result and "url" in result
+    for bad in (None, [], "click", [{"do": "explode"}], [{"ref": "e1"}], ["click"], [{"do": "back"}] * 21):
+        with pytest.raises(PageControlError) as err:
+            await pages.batch(ctx, "p1", bad)
+        assert err.value.reason == "invalid_argument", bad
+
+
+# ── files: downloads and confined uploads ────────────────────────────────────
+
+
+class FakeDownload:
+    def __init__(self, name="report.csv", url="https://shop.example.com/export?token=secret", data=b"a,b\n1,2\n", fail=False, delay=0.0):
+        self.suggested_filename, self.url = name, url
+        self._data, self._fail, self._delay = data, fail, delay
+
+    async def save_as(self, path):
+        await asyncio.sleep(self._delay)
+        if self._fail:
+            raise RuntimeError("disk full")
+        Path(path).write_bytes(self._data)
+
+
+def files_controller(tmp_path):
+    files_dir = tmp_path / "agent-files"
+    files_dir.mkdir()
+    ctx = FakeContext()
+    page = SelectorPage()
+    ctx.pages.append(page)
+    return PageController(files_dir=files_dir), ctx, page, files_dir
+
+
+async def test_downloads_are_saved_into_the_agent_folder_and_listed(tmp_path):
+    pages, ctx, page, files_dir = files_controller(tmp_path)
+    await pages._current_page(ctx, "p1")
+    page.emit("download", FakeDownload("../../etc/evil.sh", delay=0.2))
+    page.emit("download", FakeDownload("bad.bin", fail=True))
+    listing = await pages.downloads(ctx, "p1")  # waits for the slow save
+    ok = next(d for d in listing["downloads"] if d["status"] == "done")
+    assert ok["filename"] == "evil.sh" and ok["bytes"] == len(b"a,b\n1,2\n")
+    assert Path(ok["path"]).resolve().is_relative_to((files_dir / "downloads" / "p1").resolve())
+    assert Path(ok["path"]).read_bytes() == b"a,b\n1,2\n"
+    assert "token=secret" not in ok["url"]  # query strings can carry secrets
+    failed = next(d for d in listing["downloads"] if d["status"] == "failed")
+    assert "disk full" in failed["error"]
+    assert listing["files_dir"] == str(files_dir)
+
+
+async def test_upload_accepts_only_files_inside_the_agent_folder(tmp_path):
+    pages, ctx, page, files_dir = files_controller(tmp_path)
+    page.table = {"label:Resume": [], }
+    box = FakeElement("input")
+    box.is_file = True
+    page.table = {"label:Resume": [box]}
+    good = files_dir / "cv.pdf"
+    good.write_bytes(b"%PDF")
+    result = await pages.upload(ctx, "p1", "label=Resume", [str(good)])
+    assert box.uploaded == [str(good.resolve())] and result["uploaded"] == ["cv.pdf"]
+
+    secret = tmp_path / "secret.txt"
+    secret.write_text("private")
+    (files_dir / "link.txt").symlink_to(secret)  # a symlink must not smuggle a file out
+    for bad, reason in (
+        (str(secret), "path_not_allowed"),
+        (str(files_dir / "link.txt"), "path_not_allowed"),
+        (str(files_dir / ".." / "secret.txt"), "path_not_allowed"),
+        (str(files_dir / "missing.pdf"), "invalid_argument"),
+    ):
+        with pytest.raises(PageControlError) as err:
+            await pages.upload(ctx, "p1", "label=Resume", [bad])
+        assert err.value.reason == reason, bad
+    for bad_list in ([], "cv.pdf", [str(good)] * 11, [""]):
+        with pytest.raises(PageControlError) as err:
+            await pages.upload(ctx, "p1", "label=Resume", bad_list)
+        assert err.value.reason == "invalid_argument"
+
+
+async def test_upload_through_a_button_that_opens_a_file_chooser(tmp_path):
+    pages, ctx, page, files_dir = files_controller(tmp_path)
+    button = FakeElement()  # not a file input
+    page.table = {"role:button|Attach": [button]}
+    doc = files_dir / "note.txt"
+    doc.write_text("hi")
+    await pages.upload(ctx, "p1", 'role=button[name="Attach"]', [str(doc)])
+    assert button.clicked and page.chooser_files == [str(doc.resolve())]
+
+
+async def test_file_tools_are_off_without_a_folder():
+    pages, ctx, page = await selector_controller()
+    for call in (pages.downloads(ctx, "p1"), pages.upload(ctx, "p1", "css=input", ["/x"])):
+        with pytest.raises(PageControlError) as err:
+            await call
+        assert err.value.reason == "files_disabled"
+
+
+async def test_upload_size_limit(tmp_path, monkeypatch):
+    from backend import page_control
+
+    pages, ctx, page, files_dir = files_controller(tmp_path)
+    box = FakeElement("input")
+    box.is_file = True
+    page.table = {"label:File": [box]}
+    big = files_dir / "big.bin"
+    big.write_bytes(b"x" * 20)
+    monkeypatch.setattr(page_control, "MAX_UPLOAD_BYTES", 10)
+    with pytest.raises(PageControlError) as err:
+        await pages.upload(ctx, "p1", "label=File", [str(big)])
+    assert err.value.reason == "invalid_argument" and "MB" in err.value.detail
+
+
+async def test_batch_can_upload(tmp_path):
+    pages, ctx, page, files_dir = files_controller(tmp_path)
+    box = FakeElement("input")
+    box.is_file = True
+    page.table = {"label:File": [box]}
+    page.snapshot_handle = FakeSnapshotHandle([], [])
+    doc = files_dir / "a.txt"
+    doc.write_text("a")
+    result = await pages.batch(ctx, "p1", [{"do": "upload", "ref": "label=File", "paths": [str(doc)]}])
+    assert result["completed"] == 1 and box.uploaded == [str(doc.resolve())]
+
+
+async def test_upload_finds_hidden_file_inputs_but_clicks_need_visible_elements(tmp_path):
+    pages, ctx, page, files_dir = files_controller(tmp_path)
+    box = FakeElement("input")
+    box.is_file = True
+    page.table = {"css:#f": [box]}
+    doc = files_dir / "a.txt"
+    doc.write_text("a")
+    locators: list[FakeLocator] = []
+    original = page._loc
+
+    def spy(kind, value, **kw):
+        loc = original(kind, value, **kw)
+        locators.append(loc)
+        return loc
+
+    page._loc = spy
+    await pages.upload(ctx, "p1", "css=#f", [str(doc)])
+    assert not hasattr(locators[-1], "filtered")  # no visibility filter for upload
+    await pages.click(ctx, "p1", "css=#f")
+    assert locators[-1].filtered == {"visible": True}
