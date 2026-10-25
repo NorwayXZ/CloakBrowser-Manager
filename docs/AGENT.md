@@ -63,7 +63,7 @@ curl -X POST http://127.0.0.1:8080/api/agent/tools/open_browser \
 
 ## 权限档位
 
-由人在 Manager 里设置（`mcp.mode`，CLI：`cloak mode`），决定你看到哪些工具。MCP 客户端改完模式要重启，工具列表是连接时协商的。
+由人在 Manager 里设置（面板左侧「AI 接入」，或命令行 `cloak mode`、API `PUT /api/settings/mcp`），决定你看到哪些工具。MCP 客户端改完模式要重启，工具列表是连接时协商的。
 
 | 模式 | 你能做什么 |
 | --- | --- |
@@ -132,9 +132,15 @@ curl -X POST http://127.0.0.1:8080/api/agent/tools/open_browser \
 }
 ```
 
-端点指向 Manager 自己的 CDP 代理，不是 Chrome 的原始调试端口。Playwright 的 `connect_over_cdp` 已在真实 Chrome 上验证；两个 MCP 工具的命令行参数名以对应工具当前版本为准。
+端点指向 Manager 自己的 CDP 代理，不是 Chrome 的原始调试端口。Playwright 的 `connect_over_cdp` 已在真实 Chrome 上验证；`--cdp-endpoint`（playwright-mcp）和 `--browser-url`（chrome-devtools-mcp）两个参数名已对照两个项目当前的官方文档核对过，但没有真的用这两个工具连过。
 
-如果 Manager 开了鉴权（`auth_required: true`），CDP 客户端连接时要带 `Authorization: Bearer <token>` 请求头；返回里不会回显 token。客户端不支持自定义请求头时，只能在不开鉴权的本机环境使用。
+如果 Manager 开了鉴权（`auth_required: true`），CDP 客户端连接时要带 `Authorization: Bearer <token>` 请求头；返回里不会回显 token，`usage` 里的写法用 `<TOKEN>` 占位：
+
+- playwright-mcp：`--cdp-endpoint <http 端点> --cdp-header 'Authorization: Bearer <TOKEN>'`
+- chrome-devtools-mcp：改用 `--wsEndpoint=<ws 端点> --wsHeaders='{"Authorization":"Bearer <TOKEN>"}'`（`--browser-url` 不能带头）
+- Playwright 代码：`connect_over_cdp(endpoint, headers={"Authorization": "Bearer <TOKEN>"})`
+
+用 `cdp` 档的 agent token 就够了，不需要管理员 token。
 
 ## 控制租约与人工接管
 
@@ -148,7 +154,7 @@ curl -X POST http://127.0.0.1:8080/api/agent/tools/open_browser \
 
 ## 范围化 token（Manager 开了鉴权时）
 
-管理员可以签发只给 agent 用的 token，比 `AUTH_TOKEN` 权限小：
+管理员可以签发只给 agent 用的 token，比 `AUTH_TOKEN` 权限小。面板左侧「AI 接入」里可以签发、撤销，也能看到最近的 agent 操作记录；命令行同样可以：
 
 ```bash
 ./bin/cloak token create "codex 笔记本" control     # 输出的 token 只显示一次
@@ -188,7 +194,7 @@ url = "http://127.0.0.1:8080/api/agent/mcp"
 # 开了鉴权时加 bearer_token_env_var = "CLOAK_AGENT_TOKEN"（环境变量里放 cbm_... token）
 ```
 
-用 `PYTHONPATH` 代替 `cwd`，这样不依赖客户端是否支持工作目录。上述 Codex 配置语法按其文档编写，未在 Codex 上实测。其他客户端（Claude Desktop、Muse）见 [MCP.md](MCP.md)。HTTP MCP 需要 Manager 所在环境装了 `mcp` 包，没装时该端点不可用，其余接口不受影响。
+字段名（`command`、`args`、`env`、`cwd`、`url`、`bearer_token_env_var`）已对照 Codex 的配置参考核对；Codex 也支持 `cwd`，这里用 `PYTHONPATH` 只是少依赖一个字段。没有真的在 Codex 里跑过。其他客户端（Claude Desktop、Muse）见 [MCP.md](MCP.md)。HTTP MCP 需要 Manager 所在环境装了 `mcp` 包，没装时该端点不可用，其余接口不受影响。
 
 ## MCP 资源与提示
 

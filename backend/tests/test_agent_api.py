@@ -706,3 +706,41 @@ def test_http_mcp_serves_the_guide_resource_and_task_prompts(app_client):
     assert "店铺A" in text and "查看订单" in text and "open_browser" in text
     missing = mcp_rpc(app_client, "prompts/get", {"name": "operate_profile", "arguments": {}}, rpc_id=5).json()
     assert "error" in missing
+
+
+def _ws_close_code(client: TestClient, path: str, headers: dict | None = None) -> int:
+    from starlette.websockets import WebSocketDisconnect
+
+    with pytest.raises(WebSocketDisconnect) as err:
+        # The request guard only accepts loopback Host names (TestClient's default is "testserver").
+        with client.websocket_connect(path, headers={"Host": "127.0.0.1:8080", **(headers or {})}):
+            pass
+    return err.value.code
+
+
+def test_cdp_websocket_auth_per_token_scope(auth_client):
+    """No token -> 4401, read/control token -> 4403, cdp token reaches the route
+    (which then says the profile is not running, 4004), admin does too."""
+    from backend import database as db
+
+    pid = db.create_profile(name="WS", fingerprint_seed=2)["id"]
+    read = {"Authorization": f"Bearer {mint(auth_client, 'read')['token']}"}
+    control = {"Authorization": f"Bearer {mint(auth_client, 'control')['token']}"}
+    cdp = {"Authorization": f"Bearer {mint(auth_client, 'cdp')['token']}"}
+    for path in (f"/api/profiles/{pid}/cdp", f"/api/profiles/{pid}/cdp/devtools/page/ABC"):
+        assert _ws_close_code(auth_client, path) == 4401, path
+        assert _ws_close_code(auth_client, path, read) == 4403, path
+        assert _ws_close_code(auth_client, path, control) == 4403, path
+        assert _ws_close_code(auth_client, path, cdp) == 4004, path
+        assert _ws_close_code(auth_client, path, ADMIN) == 4004, path
+
+
+def test_revoked_cdp_token_is_refused_on_the_websocket(auth_client):
+    from backend import database as db
+
+    pid = db.create_profile(name="WS2", fingerprint_seed=3)["id"]
+    made = mint(auth_client, "cdp")
+    headers = {"Authorization": f"Bearer {made['token']}"}
+    assert _ws_close_code(auth_client, f"/api/profiles/{pid}/cdp", headers) == 4004
+    auth_client.delete(f"/api/agent/tokens/{made['record']['id']}", headers=ADMIN)
+    assert _ws_close_code(auth_client, f"/api/profiles/{pid}/cdp", headers) == 4401

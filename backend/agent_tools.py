@@ -837,6 +837,15 @@ async def _cdp_endpoint_info(client: RestClient, profile_id: str, *, tool: str) 
         },
     }
     if client.auth_required:
+        # Placeholders only: the real token is never echoed back.
+        result["usage"]["playwright_mcp"] = (
+            f"npx @playwright/mcp@latest --cdp-endpoint {http_endpoint}"
+            " --cdp-header 'Authorization: Bearer <TOKEN>'"
+        )
+        result["usage"]["chrome_devtools_mcp"] = (
+            f"npx chrome-devtools-mcp@latest --wsEndpoint={result['cdp_ws_endpoint']}"
+            " --wsHeaders='{\"Authorization\":\"Bearer <TOKEN>\"}'"
+        )
         result["auth_hint"] = (
             "Manager 开了鉴权：CDP 客户端连接时要带 Authorization: Bearer <AUTH_TOKEN> 请求头"
             "（token 与 Manager 的 AUTH_TOKEN 相同，这里不回显）。"

@@ -99,6 +99,43 @@ export interface AgentLease {
   seconds_left: number;
 }
 
+export type McpMode = "off" | "read-only" | "full" | "automation";
+export type AgentTokenScope = "read" | "control" | "cdp";
+
+export interface AgentToken {
+  id: string;
+  name: string;
+  scope: AgentTokenScope;
+  created_at: number;
+}
+
+export interface AgentTokenList {
+  /** False when the Manager has no authentication: tokens are then not checked. */
+  enforced: boolean;
+  scopes: AgentTokenScope[];
+  tokens: AgentToken[];
+}
+
+export interface AgentTokenCreated {
+  /** Plaintext token, shown exactly once. */
+  token: string;
+  record: AgentToken;
+  enforced: boolean;
+  note: string;
+}
+
+export interface McpAuditEntry {
+  id: string;
+  ts: string;
+  client_name: string | null;
+  client_version: string | null;
+  tool: string;
+  args_summary: Record<string, unknown>;
+  ok: boolean;
+  reason: string | null;
+  duration_ms: number | null;
+}
+
 export interface ProfileCreateData {
   name: string;
   browser_engine?: BrowserEngine | null;
@@ -1092,6 +1129,27 @@ export const api = {
     ),
 
   getLlmSettings: () => request<LlmSettings>("/api/settings/llm"),
+
+  getMcpMode: () => request<{ mode: McpMode }>("/api/settings/mcp"),
+
+  setMcpMode: (mode: McpMode) =>
+    request<{ mode: McpMode }>("/api/settings/mcp", {
+      method: "PUT",
+      body: JSON.stringify({ mode }),
+    }),
+
+  listAgentTokens: () => request<AgentTokenList>("/api/agent/tokens"),
+
+  createAgentToken: (name: string, scope: AgentTokenScope) =>
+    request<AgentTokenCreated>("/api/agent/tokens", {
+      method: "POST",
+      body: JSON.stringify({ name, scope }),
+    }),
+
+  revokeAgentToken: (id: string) =>
+    request<{ ok: boolean }>(`/api/agent/tokens/${id}`, { method: "DELETE" }),
+
+  listMcpAudit: (limit = 30) => request<McpAuditEntry[]>(`/api/mcp/audit?limit=${limit}`),
 
   updateLlmSettings: (data: LlmSettingsUpdate) =>
     request<LlmSettings>("/api/settings/llm", {

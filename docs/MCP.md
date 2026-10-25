@@ -27,7 +27,7 @@ Manager 本体是唯一的执行者。
 | `full` | 只读 14 个 + 动作 5 个（启动/关闭画像、跑检测、跑养号、跑进化）；`launch_profile` 只能 `manual` 模式 |
 | `automation` | `full` 的全部，再加浏览器工具 12 个（`open_browser`、`get_cdp_endpoint` 和 10 个页面工具），`launch_profile` 可用 `debug` 模式——这一档会把页面控制和 CDP 端点交给 agent |
 
-查看 / 修改（面板 UI 暂未提供，用命令行或 API）：
+查看 / 修改：面板左侧「AI 接入」页可以直接切换（切到「可操作页面」会先弹出 Cookie 风险确认）；也可以用命令行或 API：
 
 ```bash
 ./bin/cloak mode                # 查看

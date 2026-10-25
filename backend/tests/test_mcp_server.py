@@ -771,6 +771,10 @@ async def test_get_cdp_endpoint_auth_hint_never_echoes_the_token():
     result = await mcp_server.dispatch(client, "get_cdp_endpoint", {"profile_id": PID})
     assert result["auth_required"] is True
     assert "Bearer" in result["auth_hint"]
+    # The with-auth snippets carry a placeholder, never the real token.
+    assert "--cdp-header" in result["usage"]["playwright_mcp"]
+    assert "--wsHeaders" in result["usage"]["chrome_devtools_mcp"]
+    assert "<TOKEN>" in result["usage"]["chrome_devtools_mcp"]
     assert "SECRET_AUTH_TOKEN_XYZ" not in json.dumps(result)
 
 
