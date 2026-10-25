@@ -32,7 +32,9 @@ def export() -> str:
 def main() -> int:
     text = export()
     if len(sys.argv) > 1:
-        Path(sys.argv[1]).write_text(text, encoding="utf-8")
+        target = Path(sys.argv[1])
+        target.parent.mkdir(parents=True, exist_ok=True)  # a fresh checkout has no build/
+        target.write_text(text, encoding="utf-8")
     else:
         sys.stdout.write(text)
     return 0
