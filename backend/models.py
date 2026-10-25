@@ -277,6 +277,8 @@ class ProfileResponse(BaseModel):
     cdp_url: str | None = None
     launch_mode: LaunchMode | None = None
     proxy_geo: dict | None = None
+    # Who is driving this running profile (an AI agent, or the user after a takeover).
+    agent_lease: dict | None = None
 
 
 class LaunchResponse(BaseModel):
@@ -591,6 +593,7 @@ class ProfileStatusResponse(BaseModel):
     browser_engine: str | None = None
     launch_mode: LaunchMode | None = None
     proxy_geo: dict | None = None
+    agent_lease: dict | None = None
 
 
 class ClipboardRequest(BaseModel):

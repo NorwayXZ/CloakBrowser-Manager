@@ -21,7 +21,7 @@ import shutil
 import time
 import uuid
 from datetime import datetime
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from http.cookies import SimpleCookie
 from pathlib import Path
 from urllib.parse import quote, urlparse
@@ -33,12 +33,14 @@ from fastapi.staticfiles import StaticFiles
 import starlette.requests
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from . import agent_api, agent_auth, agent_lease
 from . import auto_backup
 from . import backup as backups
 from . import database as db
 from . import device_templates
 from .fingerprint_options import RECOMMENDED_NEW_PROFILE_OPTIONS, parse_fingerprint_options
 from .host_display import primary_screen_size
+from .page_control import PageController
 from .cookie_formats import (
     CookieFormatError,
     merge_cookies,
@@ -254,20 +256,33 @@ def _verify_session_cookie(value: str) -> bool:
         return False
 
 
+# Random per process, never sent anywhere: lets the Manager's own agent tool
+# runner (in-process ASGI client) call its API whatever authentication is on.
+AGENT_INTERNAL_TOKEN = secrets.token_urlsafe(32)
+
+
+def _bearer_token(scope: Scope) -> str:
+    for key, val in scope.get("headers", []):
+        if key == b"authorization":
+            auth_value = val.decode("latin-1")
+            if auth_value.startswith("Bearer "):
+                return auth_value[7:]
+            break
+    return ""
+
+
 def _check_auth(scope: Scope) -> bool:
     """Check if the request has a valid auth token (header or cookie)."""
     if not _auth_required():
         return True
 
     # Check Authorization: Bearer <token> header
-    for key, val in scope.get("headers", []):
-        if key == b"authorization":
-            auth_value = val.decode()
-            if auth_value.startswith("Bearer "):
-                token = auth_value[7:]
-                if AUTH_TOKEN and token and hmac.compare_digest(token, AUTH_TOKEN):
-                    return True
-            break
+    token = _bearer_token(scope)
+    if token:
+        if AUTH_TOKEN and hmac.compare_digest(token, AUTH_TOKEN):
+            return True
+        if hmac.compare_digest(token, AGENT_INTERNAL_TOKEN):
+            return True
 
     # Check signed session cookie, or legacy AUTH_TOKEN cookie
     for key, val in scope.get("headers", []):
@@ -392,6 +407,30 @@ class AuthMiddleware:
             await self.app(scope, receive, send)
             return
 
+        # A scoped agent token: allowed on the agent API (and CDP for the cdp
+        # scope) only; the scope rides along so the tools can cap their mode.
+        record = agent_token_store.verify(_bearer_token(scope))
+        if record is not None:
+            method = "WS" if scope["type"] == "websocket" else scope.get("method", "GET")
+            if agent_auth.path_allowed(record["scope"], method, path):
+                scope["state"] = {
+                    **(scope.get("state") or {}),
+                    "agent_scope": record["scope"],
+                    "agent_name": record["name"],
+                }
+                await self.app(scope, receive, send)
+                return
+            if scope["type"] == "websocket":
+                await receive()
+                await send({"type": "websocket.close", "code": 4403, "reason": "Token scope"})
+            else:
+                response = JSONResponse(
+                    {"detail": "这个 agent token 不能访问该接口（只开放 /api/agent/*，cdp 档另开 CDP）。"},
+                    status_code=403,
+                )
+                await response(scope, receive, send)
+            return
+
         # Reject — unauthenticated
         if scope["type"] == "websocket":
             # ASGI requires receiving websocket.connect before sending close
@@ -404,6 +443,14 @@ class AuthMiddleware:
 
 # Singleton browser manager
 browser_mgr = BrowserManager()
+
+# Agent surface: control leases, page control, scoped tokens (see agent_api.py).
+agent_leases = agent_lease.LeaseRegistry()
+agent_pages = PageController()
+agent_cdp = agent_api.CdpConnections()
+agent_token_store = agent_auth.TokenStore(
+    lambda key: db.get_setting(key), lambda key, value: db.set_setting(key, value)
+)
 
 # Frontend build directory (React production build)
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend" / "dist"
@@ -428,7 +475,10 @@ async def lifespan(app: FastAPI):
     warmup_task = asyncio.create_task(_warmup_loop())
     evolution_task = asyncio.create_task(_evolution_loop())
     logger.info("CloakBrowser Manager started")
-    yield
+    async with AsyncExitStack() as stack:
+        if agent_http_mcp is not None:
+            await stack.enter_async_context(agent_http_mcp.run())
+        yield
     logger.info("Shutting down — stopping all browsers...")
     auto_backup_task.cancel()
     warmup_task.cancel()
@@ -439,6 +489,8 @@ async def lifespan(app: FastAPI):
         await asyncio.gather(browser_mgr._auto_launch_task, return_exceptions=True)
     await browser_mgr.cleanup_all()
 
+
+agent_http_mcp: agent_api.HttpMcp | None = None  # set by agent_api.install below
 
 app = FastAPI(title="CloakBrowser Manager", lifespan=lifespan)
 app.add_middleware(AuthMiddleware)
@@ -556,6 +608,9 @@ def _profile_response(profile: dict) -> ProfileResponse:
     ):
         status["proxy_geo"] = stored_geo
     payload = {**profile, **status}
+    payload["agent_lease"] = (
+        agent_leases.describe(profile["id"]) if status.get("status") == "running" else None
+    )
     payload["tags"] = [TagResponse(**tag) for tag in profile.get("tags", [])]
     payload["fingerprint_options"] = parse_fingerprint_options(profile)
     return ProfileResponse(**payload)
@@ -2237,6 +2292,8 @@ async def stop_profile(profile_id: str):
     if profile_id not in browser_mgr.running:
         raise HTTPException(status_code=404, detail="Profile is not running")
     await browser_mgr.stop(profile_id)
+    agent_leases.clear_profile(profile_id)
+    agent_pages.forget(profile_id)
     return {"ok": True}
 
 
@@ -2246,6 +2303,8 @@ async def get_profile_status(profile_id: str):
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
     status = browser_mgr.get_status(profile_id, profile)
+    if status.get("status") == "running":
+        status["agent_lease"] = agent_leases.describe(profile_id)
     return ProfileStatusResponse(**status)
 
 
@@ -3139,14 +3198,17 @@ async def cdp_json_list(profile_id: str, request: Request):
 
 
 async def _proxy_cdp_websocket(
-    websocket: WebSocket, target_url: str, label: str,
+    websocket: WebSocket, target_url: str, label: str, profile_id: str | None = None,
 ) -> None:
     """Bidirectional WebSocket proxy between a FastAPI client and a CDP target.
 
-    Used by both browser-level and page-level CDP proxy endpoints.
+    Used by both browser-level and page-level CDP proxy endpoints. With a
+    ``profile_id`` the socket is tracked so a takeover can cut it off.
     """
     import websockets
 
+    if profile_id is not None:
+        agent_cdp.add(profile_id, websocket)
     try:
         async with websockets.connect(
             target_url, max_size=None, ping_interval=None, ping_timeout=None
@@ -3192,6 +3254,8 @@ async def _proxy_cdp_websocket(
     except Exception as exc:
         logger.error("%s error: %s", label, exc)
     finally:
+        if profile_id is not None:
+            agent_cdp.remove(profile_id, websocket)
         try:
             await websocket.close()
         except Exception as exc:
@@ -3226,7 +3290,7 @@ async def cdp_proxy(websocket: WebSocket, profile_id: str):
         await websocket.close(code=4005, reason="CDP not available")
         return
 
-    await _proxy_cdp_websocket(websocket, ws_url, f"CDP proxy [{profile_id}]")
+    await _proxy_cdp_websocket(websocket, ws_url, f"CDP proxy [{profile_id}]", profile_id)
 
 
 @app.websocket("/api/profiles/{profile_id}/cdp/devtools/{path:path}")
@@ -3246,7 +3310,26 @@ async def cdp_page_proxy(websocket: WebSocket, profile_id: str, path: str):
     await websocket.accept()
 
     target_url = f"ws://127.0.0.1:{running.cdp_port}/devtools/{path}"
-    await _proxy_cdp_websocket(websocket, target_url, f"CDP page proxy [{profile_id}]")
+    await _proxy_cdp_websocket(websocket, target_url, f"CDP page proxy [{profile_id}]", profile_id)
+
+
+# ── Agent surface (tool API, HTTP MCP, leases, page control, tokens) ──────────
+
+agent_http_mcp = agent_api.install(
+    app,
+    agent_api.AgentDeps(
+        app=app,
+        browser_mgr=browser_mgr,
+        get_profile=lambda profile_id: db.get_profile(profile_id),
+        get_mode=_mcp_mode,
+        token_store=agent_token_store,
+        leases=agent_leases,
+        pages=agent_pages,
+        cdp=agent_cdp,
+        internal_token=AGENT_INTERNAL_TOKEN,
+        auth_required=_auth_required,
+    ),
+)
 
 
 # ── Static Frontend ───────────────────────────────────────────────────────────

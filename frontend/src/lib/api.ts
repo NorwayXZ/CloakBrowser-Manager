@@ -87,6 +87,16 @@ export interface Profile {
   cdp_url: string | null;
   launch_mode: LaunchMode | null;
   proxy_geo: ProxyTestResult | null;
+  agent_lease?: AgentLease | null;
+}
+
+/** Who is driving a running profile: an AI agent, or the user after a takeover. */
+export interface AgentLease {
+  holder: string;
+  kind: "agent" | "human";
+  acquired_at: string;
+  expires_at: string;
+  seconds_left: number;
 }
 
 export interface ProfileCreateData {
@@ -970,6 +980,17 @@ export const api = {
 
   stopProfile: (id: string) =>
     request<{ ok: boolean }>(`/api/profiles/${id}/stop`, { method: "POST" }),
+
+  /** The person takes over from an AI agent: parks the lease on "human" and cuts its CDP sockets. */
+  takeoverProfile: (id: string) =>
+    request<{ lease: AgentLease | null; cdp_connections_closed: number }>(
+      `/api/profiles/${id}/lease/takeover`,
+      { method: "POST", body: JSON.stringify({}) },
+    ),
+
+  /** The person hands the profile back to agents. */
+  releaseProfileLease: (id: string) =>
+    request<{ released: boolean }>(`/api/profiles/${id}/lease`, { method: "DELETE" }),
 
   getStatus: () => request<SystemStatus>("/api/status"),
 

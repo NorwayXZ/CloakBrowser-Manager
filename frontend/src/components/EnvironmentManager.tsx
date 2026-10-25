@@ -34,6 +34,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type BrowserUpdateResult, type DeviceTemplateSummary, type LaunchMode, type ManagerUpdateResult, type Profile, type ProfileGroup, type ProxyPreset, type SentenceAssembled, type SentenceDraftResult, type SentenceOptions } from "../lib/api";
 import { AppUpdateStatus } from "./AppUpdateStatus";
+import { AgentLeaseBadge } from "./AgentLeaseBadge";
 import { AutomationIndicator } from "./AutomationIndicator";
 import { BackupPanel } from "./BackupPanel";
 import { GroupsPanel } from "./GroupsPanel";
@@ -1070,6 +1071,14 @@ export function EnvironmentManager({
                             <MoreVertical className="h-3.5 w-3.5" />
                           </button>
                         </div>
+
+                        {profile.status === "running" && profile.agent_lease && (
+                          <AgentLeaseBadge
+                            profileId={profile.id}
+                            lease={profile.agent_lease}
+                            onChanged={onRefresh}
+                          />
+                        )}
 
                         {menuOpenId === profile.id && (
                           <div className="absolute right-3 top-12 z-20 w-44 rounded-md border border-blue-200 bg-white p-1 shadow-xl" data-row-menu-panel="true">
