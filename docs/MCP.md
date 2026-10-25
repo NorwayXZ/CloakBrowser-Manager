@@ -25,7 +25,7 @@ Manager 本体是唯一的执行者。
 | `off` | 桥拒绝服务，工具列表为空 |
 | `read-only`（默认） | 只读 14 个工具；动作工具不在列表里出现，直调也会被拒绝并记审计 |
 | `full` | 只读 14 个 + 动作 5 个（启动/关闭画像、跑检测、跑养号、跑进化）；`launch_profile` 只能 `manual` 模式 |
-| `automation` | `full` 的全部，再加浏览器工具 12 个（`open_browser`、`get_cdp_endpoint` 和 10 个页面工具），`launch_profile` 可用 `debug` 模式——这一档会把页面控制和 CDP 端点交给 agent |
+| `automation` | `full` 的全部，再加浏览器工具 13 个（`open_browser`、`get_cdp_endpoint` 和 11 个页面工具），`launch_profile` 可用 `debug` 模式——这一档会把页面控制和 CDP 端点交给 agent |
 
 查看 / 修改：面板左侧「AI 接入」页可以直接切换（切到「可操作页面」会先弹出 Cookie 风险确认）；也可以用命令行或 API：
 
@@ -91,10 +91,10 @@ Codex 的配置见 [AGENT.md](AGENT.md#在-codex-里配置)（stdio 和 HTTP 两
 
 动作（5，需 `full` 或 `automation`）：`launch_profile`、`stop_profile`、`run_site_check`、`run_warmup`、`run_evolution`。
 
-浏览器（12，需 `automation`）：
+浏览器（13，需 `automation`）：
 - `open_browser(profile)`：画像 id 或名称。确保以 `debug` 模式在跑并返回 CDP 连接信息；已经以 `debug` 在跑就直接返回（`started=false`），以 `manual` 在跑则回 `already_running`，不会替你重启。
 - `get_cdp_endpoint(profile_id)`：对已在 `debug` 模式运行的画像返回 CDP 连接信息（HTTP/WebSocket 端点、页面标签、接入写法）。
-- 页面工具 10 个（都以 `profile`=id 或名称为第一个参数）：`browser_navigate`、`browser_snapshot`、`browser_click`、`browser_type`、`browser_press_key`、`browser_scroll`、`browser_screenshot`、`browser_wait_for`、`browser_back`、`browser_tabs`。它们跑在 Manager 里，复用 Manager 已有的浏览器连接；用法见 [AGENT.md](AGENT.md#操作页面内置页面工具)。
+- 页面工具 11 个（都以 `profile`=id 或名称为第一个参数）：`browser_navigate`、`browser_snapshot`、`browser_get_text`、`browser_click`、`browser_type`、`browser_press_key`、`browser_scroll`、`browser_screenshot`、`browser_wait_for`、`browser_back`、`browser_tabs`。它们跑在 Manager 里，复用 Manager 已有的浏览器连接；用法见 [AGENT.md](AGENT.md#操作页面内置页面工具)。
 
 端点指向 Manager 自己的 CDP 代理 `/api/profiles/{id}/cdp`，不是 Chrome 的原始调试端口；开了鉴权时返回里只有 `auth_required` 和提示，不回显 token。
 
@@ -104,7 +104,7 @@ Codex 的配置见 [AGENT.md](AGENT.md#在-codex-里配置)（stdio 和 HTTP 两
 
 `launch_profile` 另有可选参数 `launch_mode`（`manual` 默认 / `debug`）。`debug` 需要 `automation` 档，成功时一并返回 CDP 连接信息。
 
-结构化错误（工具失败时回 `{ok: false, reason, detail, next_step}`，agent 能据此决定下一步）：`manager_unreachable`（Manager 没开）、`unauthorized`、`not_found`、`already_running` / `not_running`、`cdp_unavailable`（画像是 `manual` 模式启动的，没有 CDP）、`profile_leased`（被用户或别的 agent 控制，带 `lease`）、`automation_busy`（带 `owner`，另一个自动化在跑）、`seat_busy`（撞授权单座位，等几分钟座位释放，不要立刻重试）、`mode_read_only` / `mode_not_automation` / `scope_denied` / `mcp_disabled`、`unknown_ref` / `stale_ref` / `no_page` / `navigation_failed` / `timeout`（页面工具）、`conflict`、`invalid_argument`。完整对照表见 [AGENT.md](AGENT.md#错误码怎么处理)。
+结构化错误（工具失败时回 `{ok: false, reason, detail, next_step}`，agent 能据此决定下一步）：`manager_unreachable`（Manager 没开）、`unauthorized`、`not_found`、`already_running` / `not_running`、`cdp_unavailable`（画像是 `manual` 模式启动的，没有 CDP）、`profile_leased`（被用户或别的 agent 控制，带 `lease`）、`automation_busy`（带 `owner`，另一个自动化在跑）、`seat_busy`（撞授权单座位，等几分钟座位释放，不要立刻重试）、`mode_read_only` / `mode_not_automation` / `scope_denied` / `mcp_disabled`、`unknown_ref` / `stale_ref` / `page_navigating` / `no_page` / `navigation_failed` / `timeout`（页面工具）、`conflict`、`invalid_argument`。完整对照表见 [AGENT.md](AGENT.md#错误码怎么处理)。
 
 **永远不会有的工具**（设计如此，不是没做完）：删除/焚毁画像、批准或驳回进化提案与养号剧本（批准权只留面板人工）、Cookie 读取/导出、license 写入、备份恢复与应用更新、执行任意 JS。页面控制和 CDP 只在 `automation` 档开放；页面工具只允许打开 http/https 网址。
 

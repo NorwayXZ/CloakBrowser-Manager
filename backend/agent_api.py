@@ -53,6 +53,7 @@ _REASON_STATUS = {
     "unknown_ref": 409,
     "stale_ref": 409,
     "no_page": 409,
+    "page_navigating": 409,
     "timeout": 504,
     "navigation_failed": 502,
     "action_failed": 502,
@@ -210,7 +211,13 @@ def create_router(deps: AgentDeps) -> APIRouter:
             if action == "navigate":
                 result = await pages.navigate(context, profile_id, str(body.get("url") or ""))
             elif action == "snapshot":
-                result = await pages.snapshot(context, profile_id)
+                result = await pages.snapshot(context, profile_id, viewport_only=bool(body.get("viewport_only")))
+            elif action == "get_text":
+                result = await pages.get_text(
+                    context, profile_id, ref=body.get("ref") or None,
+                    offset=int(body.get("offset") or 0), max_chars=int(body.get("max_chars") or 6000),
+                    whole_page=bool(body.get("whole_page")),
+                )
             elif action == "click":
                 result = await pages.click(context, profile_id, str(body.get("ref") or ""))
             elif action == "type":

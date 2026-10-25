@@ -168,7 +168,7 @@ EXPECTED_BROWSER_TOOLS = {
 }
 # Page tools: pinned by name; their schemas all take a `profile` and are checked below.
 PAGE_TOOLS = (
-    "browser_navigate", "browser_snapshot", "browser_click", "browser_type",
+    "browser_navigate", "browser_snapshot", "browser_get_text", "browser_click", "browser_type",
     "browser_press_key", "browser_scroll", "browser_screenshot", "browser_wait_for",
     "browser_back", "browser_tabs",
 )
@@ -928,7 +928,7 @@ async def test_page_tools_resolve_the_profile_hold_the_lease_and_call_the_page_e
 
 async def test_page_tool_bodies():
     fake = automation_fake()
-    for action in ("click", "type", "press_key", "scroll", "screenshot", "wait_for", "back", "tabs", "snapshot"):
+    for action in ("click", "type", "press_key", "scroll", "screenshot", "wait_for", "back", "tabs", "snapshot", "get_text"):
         fake.routes[("POST", f"/api/profiles/{PID}/page/{action}")] = (200, {"url": "u"})
     client = fake.client()
     calls = [
@@ -940,7 +940,12 @@ async def test_page_tool_bodies():
         ("browser_wait_for", {"text": "Done"}, "wait_for", {"text": "Done", "ms": None}),
         ("browser_back", {}, "back", {}),
         ("browser_tabs", {"action": "select", "index": 1}, "tabs", {"action": "select", "index": 1, "url": None}),
-        ("browser_snapshot", {}, "snapshot", {}),
+        ("browser_snapshot", {}, "snapshot", {"viewport_only": False}),
+        ("browser_snapshot", {"viewport_only": True}, "snapshot", {"viewport_only": True}),
+        ("browser_get_text", {"offset": 6000}, "get_text",
+         {"ref": None, "offset": 6000, "max_chars": 6000, "whole_page": False}),
+        ("browser_get_text", {"whole_page": True}, "get_text",
+         {"ref": None, "offset": 0, "max_chars": 6000, "whole_page": True}),
     ]
     for name, args, action, body in calls:
         result = await mcp_server.dispatch(client, name, {"profile": PID, **args})

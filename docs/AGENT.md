@@ -70,7 +70,7 @@ curl -X POST http://127.0.0.1:8080/api/agent/tools/open_browser \
 | `off` | 全部拒绝 |
 | `read-only`（默认） | 14 个只读工具：看画像、预检、检测报告、养号/进化状态、内核信息 |
 | `full` | 再加启停画像、跑检测/养号/进化（`launch_profile` 只能 `manual`） |
-| `automation` | 再加 `open_browser`、`get_cdp_endpoint` 和 10 个页面工具，`launch_profile` 可用 `debug` |
+| `automation` | 再加 `open_browser`、`get_cdp_endpoint` 和 11 个页面工具，`launch_profile` 可用 `debug` |
 
 **为什么页面控制单独成档**：CDP 能读取页面的全部 Cookie，而桥在其他档位刻意不提供任何 Cookie 读取。开 `automation` 等于允许 agent 接触该画像的登录态，请只在需要操作页面时开，用完改回 `full` 或 `read-only`。
 
@@ -92,7 +92,8 @@ curl -X POST http://127.0.0.1:8080/api/agent/tools/open_browser \
 | 工具 | 作用 |
 | --- | --- |
 | `browser_navigate(profile, url)` | 当前标签页打开网址。**只允许 http/https**，`file:` `chrome:` `javascript:` `data:` 一律拒绝 |
-| `browser_snapshot(profile)` | 读页面：文字轮廓，可交互元素带 `ref`，如 `[e3] button "登录"` |
+| `browser_snapshot(profile, viewport_only?)` | 读页面：文字轮廓，可交互元素带 `ref`，如 `[e3] button "登录"`；iframe 里的内容会列在 `--- iframe ... ---` 段，ref 全局连续编号，可以直接点；`viewport_only=true` 只列当前屏 |
+| `browser_get_text(profile, ref?, offset?, max_chars?, whole_page?)` | 读纯文字，分页返回（`next_offset` 接着读）；默认只读页面主体内容，跳过菜单页脚 |
 | `browser_click(profile, ref)` | 点击；若打开了新标签页会自动切过去 |
 | `browser_type(profile, ref, text, submit?)` | 填输入框（下拉框按选项文字选）；`submit` 填完按回车 |
 | `browser_press_key(profile, key)` | 按键或组合键，如 `Enter`、`Control+A` |
@@ -104,11 +105,16 @@ curl -X POST http://127.0.0.1:8080/api/agent/tools/open_browser \
 
 典型循环：`browser_navigate` → `browser_snapshot` → 用 snapshot 里的 `ref` 做 `browser_click` / `browser_type` → 页面变了就**重新** `browser_snapshot`。
 
+读长页面：快照最多列约 2 万字符（`truncated=true` 时最后一行会告诉你）。要看后面的内容，`browser_scroll` 往下，再用 `viewport_only=true` 快照，只看当前一屏（在 Wikipedia 长文章上约 2 千字符，是整页快照的八分之一）；只想读文章正文，直接 `browser_get_text` 分页读。
+
+点击或回车提交表单之后，工具会等页面跳转完成才返回，所以紧接着 `browser_snapshot` 是安全的。
+
 要点：
 
 - `ref` 只在最近一次快照内有效。页面变化后点旧 `ref` 会得到 `stale_ref`，重新快照即可。
 - 快照不改页面：元素引用保存在 Manager 里，不会在页面 DOM 里写任何属性。密码框的值不显示。
-- 快照读不到 iframe 里的内容（会在 `frames` 里报数量），也不展开关闭的 shadow DOM。
+- 快照最多读 6 个 iframe（含跨域的）；不展开关闭的 shadow DOM；没有可访问名称的图标链接会显示成空名称 `""`。
+- 页面一跳转到新文档，旧的 `ref` 立刻失效（`stale_ref`，不会卡到超时），重新快照即可。
 - 没有执行任意 JS 的工具，这是有意的。
 
 ### 或者把 CDP 交给别的工具
@@ -230,7 +236,8 @@ MCP 客户端除了工具，还能读到：
 | `not_running` | 画像没在跑 | `open_browser` |
 | `cdp_unavailable` | 画像是 `manual` 模式启动的，没有 CDP | `stop_profile` 后 `open_browser` |
 | `profile_leased` | 画像被别人（常是用户）控制，带 `lease` | 等租约过期或用户归还 |
-| `unknown_ref` / `stale_ref` | 元素引用无效 / 页面变了 | 重新 `browser_snapshot` |
+| `unknown_ref` / `stale_ref` | 元素引用无效 / 页面已跳转 | 重新 `browser_snapshot` |
+| `page_navigating` | 页面还在跳转中 | 等一两秒再 `browser_snapshot` |
 | `no_page` | 没有打开的标签页 | `browser_tabs(action=new)` 或 `browser_navigate` |
 | `navigation_failed` / `timeout` | 网址打不开 / 操作超时 | `browser_snapshot` 看现状，检查代理出口 |
 | `seat_busy` | 授权单座位被占 | 等几分钟，**不要立刻重试**；或先关掉别的画像 |

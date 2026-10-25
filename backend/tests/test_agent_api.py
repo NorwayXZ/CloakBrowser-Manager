@@ -3,6 +3,7 @@ the tool API and the HTTP MCP endpoint."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock
 
@@ -174,6 +175,11 @@ class FakeElement:
     async def evaluate(self, js):
         return self.tag
 
+    async def inner_text(self, **kw):
+        return self.text
+
+    text = "element text"
+
 
 class FakeValueHandle:
     def __init__(self, value) -> None:
@@ -187,12 +193,16 @@ class FakeValueHandle:
 
 
 class FakeSnapshotHandle:
-    def __init__(self, lines, elements, frames=0, truncated=False) -> None:
+    def __init__(self, lines, elements, frames=0, truncated=False, frame_elements=()) -> None:
+        # Real snapshot lines for controls always start with their ref.
+        if len(lines) == len(elements):
+            lines = [l if l.startswith("[e") else f'[e{i}] button "{l}"' for i, l in enumerate(lines)]
         self.props = {
             "lines": FakeValueHandle(lines),
             "els": FakeValueHandle(elements),
             "frames": FakeValueHandle(frames),
             "truncated": FakeValueHandle(truncated),
+            "frameEls": FakeValueHandle(list(frame_elements)),
         }
         self.disposed = False
 
@@ -214,6 +224,22 @@ class FakePage:
         self.mouse.wheel = AsyncMock()
         self.snapshot_handle = FakeSnapshotHandle([], [])
         self.goto_calls: list[str] = []
+        self.handlers: dict[str, list] = {}
+        self.main_frame = object()
+        self.snapshot_args: list = []
+        self.snapshot_errors: list[Exception] = []  # raised by evaluate_handle, one per call
+        self.body_text = "body text"
+
+    def on(self, event, callback):
+        self.handlers.setdefault(event, []).append(callback)
+
+    def emit(self, event, *args):
+        for callback in self.handlers.get(event, []):
+            callback(*args)
+
+    async def evaluate(self, js, arg=None):
+        self.text_args = getattr(self, "text_args", []) + [arg]
+        return self.body_text
 
     def is_closed(self):
         return self._closed
@@ -230,6 +256,9 @@ class FakePage:
         return MagicMock(status=200)
 
     async def evaluate_handle(self, js, arg=None):
+        self.snapshot_args.append(arg)
+        if self.snapshot_errors:
+            raise self.snapshot_errors.pop(0)
         return self.snapshot_handle
 
     async def wait_for_load_state(self, *a, **kw):
@@ -744,3 +773,206 @@ def test_revoked_cdp_token_is_refused_on_the_websocket(auth_client):
     assert _ws_close_code(auth_client, f"/api/profiles/{pid}/cdp", headers) == 4004
     auth_client.delete(f"/api/agent/tokens/{made['record']['id']}", headers=ADMIN)
     assert _ws_close_code(auth_client, f"/api/profiles/{pid}/cdp", headers) == 4401
+
+
+# ── navigation settling, snapshot retry/clipping, get_text ───────────────────
+
+
+class FakeNavRequest:
+    def __init__(self, page: "FakePage", navigation: bool = True) -> None:
+        self.frame = page.main_frame
+        self._navigation = navigation
+
+    def is_navigation_request(self) -> bool:
+        return self._navigation
+
+
+async def test_click_waits_for_the_navigation_it_started():
+    pages, ctx = run_controller()
+    page = await ctx.new_page()
+    link = FakeElement()
+    page.snapshot_handle = FakeSnapshotHandle(["x"], [link])
+    await pages.snapshot(ctx, "p1")
+
+    async def click_starts_navigation(**kw):
+        page.emit("request", FakeNavRequest(page))  # the click begins a page load...
+
+        async def finish_later():
+            await asyncio.sleep(0.6)
+            page.url, page._title = "https://example.com/next", "Next"
+            page.emit("domcontentloaded")  # ...which finishes after the 0.3 s grace period
+
+        asyncio.create_task(finish_later())
+
+    link.click = click_starts_navigation
+    result = await pages.click(ctx, "p1", "e0")
+    assert result["url"] == "https://example.com/next" and result["title"] == "Next"
+
+
+async def test_non_navigation_requests_do_not_hold_up_actions():
+    pages, ctx = run_controller()
+    page = await ctx.new_page()
+    box = FakeElement("input")
+    page.snapshot_handle = FakeSnapshotHandle(["x"], [box])
+    await pages.snapshot(ctx, "p1")
+    page.emit("request", FakeNavRequest(page, navigation=False))
+    await pages.type_text(ctx, "p1", "e0", "hi")
+    assert pages._state("p1").nav_pending is False
+
+
+async def test_snapshot_waits_for_a_pending_navigation_and_retries_a_destroyed_context():
+    from playwright.async_api import Error as PlaywrightError
+
+    pages, ctx = run_controller()
+    page = await ctx.new_page()
+    page.snapshot_handle = FakeSnapshotHandle(['[e0] button "Go"'], [FakeElement()])
+    page.snapshot_errors = [PlaywrightError("Page.evaluate_handle: Execution context was destroyed, most likely because of a navigation")]
+    snap = await pages.snapshot(ctx, "p1")
+    assert snap["elements"] == 1 and len(page.snapshot_args) == 2  # failed once, retried
+
+    page.emit("request", FakeNavRequest(page))
+
+    async def loaded():
+        await asyncio.sleep(0.3)
+        page.emit("domcontentloaded")
+
+    asyncio.create_task(loaded())
+    started = asyncio.get_running_loop().time()
+    await pages.snapshot(ctx, "p1")
+    assert asyncio.get_running_loop().time() - started >= 0.25  # it waited for the load
+
+
+async def test_a_page_that_keeps_navigating_reports_page_navigating_not_stale_ref():
+    from playwright.async_api import Error as PlaywrightError
+
+    pages, ctx = run_controller()
+    page = await ctx.new_page()
+    page.snapshot_errors = [PlaywrightError("Execution context was destroyed, most likely because of a navigation")] * 3
+    with pytest.raises(PageControlError) as err:
+        await pages.snapshot(ctx, "p1")
+    assert err.value.reason == "page_navigating"
+
+
+async def test_snapshot_clips_on_a_line_boundary_and_says_what_is_missing():
+    from backend import page_control
+
+    pages, ctx = run_controller()
+    page = await ctx.new_page()
+    lines = [f'[e{i}] link "item {i}" href=/p/{i}' + "x" * 200 for i in range(200)]
+    page.snapshot_handle = FakeSnapshotHandle(lines, [FakeElement() for _ in range(200)])
+    snap = await pages.snapshot(ctx, "p1")
+    body = snap["snapshot"].split("\n")
+    assert snap["truncated"] is True
+    assert body[-1].startswith("…") and "viewport_only" in body[-1] and "browser_get_text" in body[-1]
+    shown = body[:-1]
+    assert all(line.startswith("[e") and line.endswith("x") for line in shown)  # no cut-off lines
+    assert len("\n".join(shown)) <= page_control.MAX_TEXT_LEN
+    # Only the refs that were actually shown can be clicked.
+    assert snap["elements"] == len(shown) and f"e{len(shown)}" not in pages._state("p1").refs
+
+
+async def test_snapshot_viewport_only_is_passed_to_the_page():
+    pages, ctx = run_controller()
+    page = await ctx.new_page()
+    await pages.snapshot(ctx, "p1", viewport_only=True)
+    assert page.snapshot_args[-1][2] is True
+    snap = await pages.snapshot(ctx, "p1")
+    assert page.snapshot_args[-1][2] is False and snap["viewport_only"] is False
+
+
+async def test_get_text_pages_through_long_text_and_reads_elements():
+    pages, ctx = run_controller()
+    page = await ctx.new_page()
+    page.body_text = "abcdefghij" * 300  # 3000 chars
+    first = await pages.get_text(ctx, "p1", max_chars=1000)
+    assert first["total_chars"] == 3000 and len(first["text"]) == 1000 and first["next_offset"] == 1000
+    last = await pages.get_text(ctx, "p1", offset=2000, max_chars=5000)
+    assert len(last["text"]) == 1000 and last["next_offset"] is None
+    page.snapshot_handle = FakeSnapshotHandle(["x"], [FakeElement()])
+    await pages.snapshot(ctx, "p1")
+    assert (await pages.get_text(ctx, "p1", ref="e0"))["text"] == "element text"
+    with pytest.raises(PageControlError):
+        await pages.get_text(ctx, "p1", ref="e9")
+
+
+async def test_get_text_reads_main_content_unless_the_whole_page_is_asked_for():
+    pages, ctx = run_controller()
+    page = await ctx.new_page()
+    await pages.get_text(ctx, "p1")
+    await pages.get_text(ctx, "p1", whole_page=True)
+    assert page.text_args == [False, True]
+
+
+class FakeFrame:
+    def __init__(self, handle, url="https://auth.example.net/login") -> None:
+        self._handle = handle
+        self.url = url
+        self.args: list = []
+
+    async def evaluate_handle(self, js, arg=None):
+        self.args.append(arg)
+        return self._handle
+
+
+class FakeFrameElement(FakeElement):
+    def __init__(self, frame: FakeFrame | None) -> None:
+        super().__init__("iframe")
+        self.frame = frame
+
+    async def content_frame(self):
+        return self.frame
+
+
+async def test_snapshot_reads_visible_iframes_and_numbers_refs_across_frames():
+    pages, ctx = run_controller()
+    page = await ctx.new_page()
+    outer_button = FakeElement()
+    inner_box, inner_button = FakeElement("input"), FakeElement()
+    frame = FakeFrame(
+        FakeSnapshotHandle(['[e1] textbox "Email"', '[e2] button "Sign in"'], [inner_box, inner_button])
+    )
+    page.snapshot_handle = FakeSnapshotHandle(
+        ['[e0] button "Open"', 'iframe "login" src=https://auth.example.net/login (内容见下方 iframe 段)'],
+        [outer_button],
+        frame_elements=[FakeFrameElement(frame)],
+    )
+    snap = await pages.snapshot(ctx, "p1")
+    assert "--- iframe https://auth.example.net/login ---" in snap["snapshot"]
+    assert '[e2] button "Sign in"' in snap["snapshot"] and snap["elements"] == 3
+    assert frame.args == [[400 - 1, 250, False, 1]]  # the frame continues numbering at e1
+    await pages.type_text(ctx, "p1", "e1", "me@example.com")
+    assert inner_box.filled == "me@example.com"
+    await pages.click(ctx, "p1", "e2")
+    assert inner_button.clicked
+
+
+async def test_an_iframe_that_cannot_be_read_is_reported_not_fatal():
+    from playwright.async_api import Error as PlaywrightError
+
+    pages, ctx = run_controller()
+    page = await ctx.new_page()
+
+    class BrokenFrameElement(FakeFrameElement):
+        async def content_frame(self):
+            raise PlaywrightError("frame detached")
+
+    page.snapshot_handle = FakeSnapshotHandle(
+        ['[e0] button "Open"'], [FakeElement()], frame_elements=[BrokenFrameElement(None)]
+    )
+    snap = await pages.snapshot(ctx, "p1")
+    assert snap["ok"] if "ok" in snap else True
+    assert "iframe 内容读取失败" in snap["snapshot"] and snap["elements"] == 1
+
+
+async def test_refs_go_stale_the_moment_a_new_document_loads():
+    """No 10 s click timeout on an element of the previous page: it fails fast and says why."""
+    pages, ctx = run_controller()
+    page = await ctx.new_page()
+    page.snapshot_handle = FakeSnapshotHandle(["x"], [FakeElement()])
+    await pages.snapshot(ctx, "p1")
+    page.emit("domcontentloaded")  # the page navigated to a new document
+    with pytest.raises(PageControlError) as err:
+        await pages.click(ctx, "p1", "e0")
+    assert err.value.reason == "stale_ref" and "上一个页面" in err.value.detail
+    await pages.snapshot(ctx, "p1")  # a fresh snapshot makes refs usable again
+    await pages.click(ctx, "p1", "e0")

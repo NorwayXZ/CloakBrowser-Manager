@@ -406,6 +406,7 @@ NEXT_STEPS: dict[str, str] = {
     "invalid_argument": "按 detail 修正参数后再调用。",
     "unknown_ref": "元素引用无效：先调 browser_snapshot 取最新引用。",
     "stale_ref": "页面变了，引用失效：重新调 browser_snapshot。",
+    "page_navigating": "页面还在跳转：等一两秒再调 browser_snapshot。",
     "no_page": "没有打开的标签页：用 browser_tabs(action=new) 或 browser_navigate。",
     "navigation_failed": "网址打不开：检查网址和代理出口，必要时 get_fingerprint_report。",
     "timeout": "操作超时：页面可能还在加载，browser_snapshot 看看现状再决定是否重试。",
@@ -1131,12 +1132,41 @@ async def _browser_navigate(client: RestClient, args: dict[str, Any]) -> dict[st
 
 @register(
     "browser_snapshot",
-    "读当前页面：返回文字轮廓，可交互元素带 ref（如 [e3] button \"登录\"）。点击/输入都要用最近一次快照里的 ref。页面变化后要重新快照。",
-    _page_schema(),
+    "读当前页面：返回文字轮廓，可交互元素带 ref（如 [e3] button \"登录\"）。点击/输入都要用最近一次快照里的 ref。页面变化后要重新快照。"
+    "长页面会被截断（truncated=true）：往下 browser_scroll 后用 viewport_only=true 只看当前屏；要读正文用 browser_get_text。",
+    _page_schema(
+        {"viewport_only": {"type": "boolean", "default": False, "description": "只列出当前视口内的内容（滚动后翻页用）"}}
+    ),
     "browser",
 )
 async def _browser_snapshot(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
-    return await _page_call(client, args, "snapshot")
+    return await _page_call(client, args, "snapshot", {"viewport_only": bool(args.get("viewport_only"))})
+
+
+@register(
+    "browser_get_text",
+    "读当前页面（或某个 ref 元素）的纯文字，分页返回：用返回的 next_offset 作为下次的 offset 接着读。读文章、结果列表正文用它，比快照省。"
+    "默认只读页面的主体内容（跳过菜单和页脚），要整页文字设 whole_page=true。",
+    _page_schema(
+        {
+            "ref": {"type": "string", "description": "可选：只读这个元素（来自最近一次快照）"},
+            "offset": {"type": "integer", "default": 0, "description": "从第几个字符开始"},
+            "max_chars": {"type": "integer", "default": 6000, "description": "本次最多返回多少字符，100~20000"},
+            "whole_page": {"type": "boolean", "default": False, "description": "读整页文字（含菜单页脚），默认只读主体内容"},
+        }
+    ),
+    "browser",
+)
+async def _browser_get_text(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    return await _page_call(
+        client, args, "get_text",
+        {
+            "ref": args.get("ref"),
+            "offset": args.get("offset") or 0,
+            "max_chars": args.get("max_chars") or 6000,
+            "whole_page": bool(args.get("whole_page")),
+        },
+    )
 
 
 @register(
@@ -1279,7 +1309,8 @@ TOOL_EN: dict[str, str] = {
     "get_cdp_endpoint": "CDP connection info for a running debug profile (HTTP/WS endpoints, tabs, client snippets). Automation mode.",
     "open_browser": "Ensure a profile runs in debug mode and return CDP info. Idempotent; never restarts a manual session. Automation mode.",
     "browser_navigate": "Open an http(s) URL in the profile's current tab.",
-    "browser_snapshot": "Read the page: text outline with refs (e.g. [e3]) for interactive elements. Re-snapshot after the page changes.",
+    "browser_snapshot": "Read the page: text outline with refs (e.g. [e3]) for interactive elements. Re-snapshot after the page changes. Long pages truncate: scroll, then viewport_only=true.",
+    "browser_get_text": "Read the page's (or an element's) plain text in pages; pass next_offset back as offset to continue.",
     "browser_click": "Click an element by its ref from the latest snapshot.",
     "browser_type": "Fill an input (or pick a select option by text); submit=true presses Enter.",
     "browser_press_key": "Press a key or combo (Enter, Tab, Control+A) on the focused element.",
@@ -1440,6 +1471,7 @@ CloakBrowser Manager runs isolated fingerprint-browser profiles on this machine.
 4. open_browser(profile) — 以 debug 模式启动（automation 档）。已在跑则直接返回，不会重启。
    只想打开给人看：launch_profile（manual 模式，无页面控制）。
 5. 循环：browser_navigate → browser_snapshot → 用快照里的 ref 做 browser_click / browser_type；页面变了就重新 browser_snapshot。
+   长页面：browser_scroll 后用 browser_snapshot(viewport_only=true) 看当前一屏，或用 browser_get_text 分页读正文。
    也可以把 open_browser 返回的 cdp_http_endpoint 交给 Playwright / playwright-mcp / chrome-devtools-mcp。
 6. 用完 stop_profile。
 
