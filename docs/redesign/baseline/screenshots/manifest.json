@@ -1,0 +1,230 @@
+{
+  "sizes": [
+    "1024x680",
+    "1280x800",
+    "1600x1000"
+  ],
+  "screens": {
+    "01-environments": {
+      "1024": {
+        "horizontal_overflow": false
+      },
+      "1280": {
+        "horizontal_overflow": false
+      },
+      "1600": {
+        "horizontal_overflow": false
+      }
+    },
+    "02-environments-batch-menu": {
+      "1024": {
+        "horizontal_overflow": false
+      },
+      "1280": {
+        "horizontal_overflow": false
+      },
+      "1600": {
+        "horizontal_overflow": false
+      }
+    },
+    "03-environments-row-menu": {
+      "1024": {
+        "horizontal_overflow": false
+      },
+      "1280": {
+        "horizontal_overflow": false
+      },
+      "1600": {
+        "horizontal_overflow": false
+      }
+    },
+    "04-preflight-dialog": {
+      "1024": {
+        "horizontal_overflow": false
+      },
+      "1280": {
+        "horizontal_overflow": false
+      },
+      "1600": {
+        "horizontal_overflow": false
+      }
+    },
+    "05-sentence-preview": {
+      "1024": {
+        "horizontal_overflow": false
+      },
+      "1280": {
+        "horizontal_overflow": false
+      },
+      "1600": {
+        "horizontal_overflow": false
+      }
+    },
+    "06-new-basic": {
+      "1024": {
+        "horizontal_overflow": false
+      },
+      "1280": {
+        "horizontal_overflow": false
+      },
+      "1600": {
+        "horizontal_overflow": false
+      }
+    },
+    "07-new-proxy": {
+      "1024": {
+        "horizontal_overflow": false
+      },
+      "1280": {
+        "horizontal_overflow": false
+      },
+      "1600": {
+        "horizontal_overflow": false
+      }
+    },
+    "08-new-fingerprint": {
+      "1024": {
+        "horizontal_overflow": false
+      },
+      "1280": {
+        "horizontal_overflow": false
+      },
+      "1600": {
+        "horizontal_overflow": false
+      }
+    },
+    "09-new-more-fingerprint": {
+      "1024": {
+        "horizontal_overflow": false
+      },
+      "1280": {
+        "horizontal_overflow": false
+      },
+      "1600": {
+        "horizontal_overflow": false
+      }
+    },
+    "10-new-advanced": {
+      "1024": {
+        "horizontal_overflow": false
+      },
+      "1280": {
+        "horizontal_overflow": false
+      },
+      "1600": {
+        "horizontal_overflow": false
+      }
+    },
+    "11-edit-basic": {
+      "1024": {
+        "horizontal_overflow": false
+      },
+      "1280": {
+        "horizontal_overflow": false
+      },
+      "1600": {
+        "horizontal_overflow": false
+      }
+    },
+    "12-groups": {
+      "1024": {
+        "horizontal_overflow": false
+      },
+      "1280": {
+        "horizontal_overflow": false
+      },
+      "1600": {
+        "horizontal_overflow": false
+      }
+    },
+    "13-proxies-single": {
+      "1024": {
+        "horizontal_overflow": false
+      },
+      "1280": {
+        "horizontal_overflow": false
+      },
+      "1600": {
+        "horizontal_overflow": false
+      }
+    },
+    "14-proxies-batch": {
+      "1024": {
+        "horizontal_overflow": false
+      },
+      "1280": {
+        "horizontal_overflow": false
+      },
+      "1600": {
+        "horizontal_overflow": false
+      }
+    },
+    "15-kernel": {
+      "1024": {
+        "horizontal_overflow": false
+      },
+      "1280": {
+        "horizontal_overflow": false
+      },
+      "1600": {
+        "horizontal_overflow": false
+      }
+    },
+    "16-ai-settings": {
+      "1024": {
+        "horizontal_overflow": false
+      },
+      "1280": {
+        "horizontal_overflow": false
+      },
+      "1600": {
+        "horizontal_overflow": false
+      }
+    },
+    "17-fingerprint-checks": {
+      "1024": {
+        "horizontal_overflow": false
+      },
+      "1280": {
+        "horizontal_overflow": false
+      },
+      "1600": {
+        "horizontal_overflow": false
+      }
+    },
+    "18-linkability": {
+      "1024": {
+        "horizontal_overflow": false
+      },
+      "1280": {
+        "horizontal_overflow": false
+      },
+      "1600": {
+        "horizontal_overflow": false
+      }
+    },
+    "19-backup": {
+      "1024": {
+        "horizontal_overflow": false
+      },
+      "1280": {
+        "horizontal_overflow": false
+      },
+      "1600": {
+        "horizontal_overflow": false
+      }
+    },
+    "20-trash": {
+      "1024": {
+        "horizontal_overflow": false
+      },
+      "1280": {
+        "horizontal_overflow": false
+      },
+      "1600": {
+        "horizontal_overflow": false
+      }
+    }
+  },
+  "failures": []
+}

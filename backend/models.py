@@ -305,6 +305,8 @@ class StatusResponse(BaseModel):
     viewer_mode: ViewerMode
     # This computer's screen, which profiles following it launch with.
     host_screen: list[int] | None = None
+    # The data was last written by a newer release than this one (a downgrade).
+    data_newer_than_app: bool = False
 
 
 class ManagerUpdateResponse(BaseModel):
@@ -638,6 +640,35 @@ class McpSettingsModel(BaseModel):
     # off = bridge refuses to serve; read-only = the 14 read tools only;
     # full = read tools + the 5 action tools. Stored as settings["mcp.mode"].
     mode: Literal["off", "read-only", "full"] = "read-only"
+
+
+class UiPreferencesModel(BaseModel):
+    """Panel display preferences, kept in the settings table (not the browser)
+    so they survive a port change, a reinstall and a backup restore."""
+
+    theme: Literal["system", "light", "dark"] = "system"
+    sidebar_collapsed: bool = False
+    # Which panel the window opens at "/": the redesigned one, or the previous
+    # one kept at /legacy/ for a release as a way back.
+    interface: Literal["new", "legacy"] = "new"
+
+
+class ClientLogEntry(BaseModel):
+    level: Literal["info", "warn", "error"] = "error"
+    message: str = Field(max_length=2000)
+    route: str | None = Field(default=None, max_length=300)
+    action: str | None = Field(default=None, max_length=200)
+    detail: str | None = Field(default=None, max_length=4000)
+    at: str | None = Field(default=None, max_length=40)
+
+
+class ClientLogBatch(BaseModel):
+    entries: list[ClientLogEntry] = Field(min_length=1, max_length=50)
+
+
+class ClientLogResult(BaseModel):
+    accepted: int
+    dropped: int
 
 
 class McpAuditIn(BaseModel):

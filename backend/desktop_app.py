@@ -204,6 +204,32 @@ def panel_url(environ: Mapping[str, str] | None = None) -> str:
     return f"http://127.0.0.1:{server_port(environ)}"
 
 
+# The panel's page background in each theme (design/tokens.css, --c-canvas).
+PANEL_CANVAS = {"light": (246, 247, 250), "dark": (14, 17, 24)}
+
+
+def panel_look(theme: str | None) -> tuple[tuple[int, int, int] | None, str | None]:
+    """(window background RGB, native appearance) matching the panel's theme.
+
+    An explicit "light" or "dark" fixes both, so the window and its title bar do
+    not flash the other colour before the page paints. "system" returns None
+    for both: the window then follows the operating system, as the panel does.
+    """
+    if theme in PANEL_CANVAS:
+        return PANEL_CANVAS[theme], theme
+    return None, None
+
+
+def saved_panel_theme(url: str, timeout: float = 0.5) -> str:
+    """The theme saved in the panel's preferences; "system" when it cannot be read."""
+    try:
+        with urllib.request.urlopen(f"{url}/api/settings/ui", timeout=timeout) as response:
+            theme = json.loads(response.read().decode("utf-8")).get("theme")
+    except (OSError, ValueError, AttributeError):
+        return "system"
+    return theme if theme in ("light", "dark") else "system"
+
+
 def log_dir(home: Path | None = None, system: str | None = None) -> Path:
     if (system or sys.platform) == "win32":
         local = os.environ.get("LOCALAPPDATA")

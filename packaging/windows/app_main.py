@@ -45,6 +45,7 @@ from backend.desktop_app import (  # noqa: E402
     set_windows_login_item,
     windows_login_item_enabled,
 )
+from backend.log_rotation import rotate_log, start_rotation  # noqa: E402
 from backend.runtime import resolve_runtime, server_port  # noqa: E402
 
 APP_NAME = "CloakBrowser Manager"
@@ -71,7 +72,9 @@ def _configure_logging() -> None:
     """A windowed app has no console: send all output to a log file."""
     directory = log_dir()
     directory.mkdir(parents=True, exist_ok=True)
-    log_file = open(directory / "manager.log", "a", buffering=1, encoding="utf-8")
+    log_path = directory / "manager.log"
+    rotate_log(log_path)  # a log that grew past the limit while the app was off
+    log_file = open(log_path, "a", buffering=1, encoding="utf-8")
     sys.stdout = log_file
     sys.stderr = log_file
     logging.basicConfig(
@@ -79,6 +82,7 @@ def _configure_logging() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         stream=log_file,
     )
+    start_rotation(log_path)
     logger.info("---- %s starting (pid %s) ----", APP_NAME, os.getpid())
 
 

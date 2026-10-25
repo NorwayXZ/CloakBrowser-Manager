@@ -25,9 +25,11 @@ from backend.desktop_app import (
     manager_is_running,
     open_panel,
     open_panel_command,
+    panel_look,
     panel_url,
     port_is_free,
     set_login_item,
+    saved_panel_theme,
     stop_existing_manager,
     windows_chrome_candidates,
     windows_login_command,
@@ -286,3 +288,32 @@ def test_handle_existing_manager_outcomes():
     busy, message = handle_existing_manager(url, 8080, "0.4.3", status_reader=lambda _u: busy_status,
                                             stopper=lambda _p: pytest.fail("must not stop a Manager with open browsers"))
     assert busy == "busy" and "0.4.2" in message and "关闭这些浏览器" in message
+
+
+def test_panel_look_fixes_the_window_to_an_explicit_theme_and_follows_the_system_otherwise():
+    assert panel_look("dark") == ((14, 17, 24), "dark")
+    assert panel_look("light") == ((246, 247, 250), "light")
+    assert panel_look("system") == (None, None)
+    assert panel_look(None) == (None, None)
+    assert panel_look("sepia") == (None, None)
+
+
+def test_saved_panel_theme_reads_the_preference_from_the_running_manager():
+    server, url = _serve_status({"theme": "dark", "sidebar_collapsed": False, "interface": "new"})
+    try:
+        assert saved_panel_theme(url) == "dark"
+    finally:
+        server.shutdown()
+
+
+def test_saved_panel_theme_is_system_when_unreadable_or_unknown():
+    server, url = _serve_status({"theme": "sepia"})
+    try:
+        assert saved_panel_theme(url) == "system"
+    finally:
+        server.shutdown()
+    unused = socket.socket()
+    unused.bind(("127.0.0.1", 0))
+    port = unused.getsockname()[1]
+    unused.close()
+    assert saved_panel_theme(f"http://127.0.0.1:{port}", timeout=0.2) == "system"
