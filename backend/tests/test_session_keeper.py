@@ -143,6 +143,110 @@ async def test_window_watch_stops_only_after_two_empty_checks(monkeypatch, tmp_p
         stop.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_window_watch_never_stops_a_browser_whose_profile_never_opened(monkeypatch, tmp_path: Path):
+    # A Pro kernel still verifying its license holds no profile files yet:
+    # that is not "the last window closed".
+    manager = BrowserManager(RuntimeConfig("macos", "native", "native-window", tmp_path))
+    monkeypatch.setattr(module, "MAC_WINDOW_WATCH_START_SECONDS", 0)
+    monkeypatch.setattr(module, "MAC_WINDOW_WATCH_INTERVAL_SECONDS", 0)
+    remaining = [False] * 6
+    process = MagicMock(pid=42)
+    process.poll.side_effect = lambda: None if remaining else 78
+    monkeypatch.setattr(module, "profile_files_open", lambda *_a: remaining.pop(0))
+    stop = AsyncMock()
+    monkeypatch.setattr(manager, "stop", stop)
+
+    await manager._watch_macos_windows("p1", process, tmp_path)
+
+    stop.assert_not_awaited()
+
+
+# ── Startup: wait for the profile to open ────────────────────────────────────
+
+
+def _starting_process(exit_after: int | None, code: int = 78) -> MagicMock:
+    polls = {"n": 0}
+
+    def poll():
+        polls["n"] += 1
+        return code if exit_after is not None and polls["n"] > exit_after else None
+
+    return MagicMock(pid=42, poll=poll)
+
+
+@pytest.mark.asyncio
+async def test_start_wait_reports_the_license_failure(monkeypatch, tmp_path: Path):
+    manager = BrowserManager(RuntimeConfig("macos", "native", "native-window", tmp_path))
+    monkeypatch.setattr(module, "MAC_STARTUP_POLL_SECONDS", 0)
+    monkeypatch.setattr(module, "profile_files_open", lambda *_a: False)
+
+    with pytest.raises(module.BrowserLaunchError, match="授权服务器"):
+        await manager._wait_for_manual_start(_starting_process(exit_after=3), tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_start_wait_returns_once_the_profile_is_open(monkeypatch, tmp_path: Path):
+    manager = BrowserManager(RuntimeConfig("macos", "native", "native-window", tmp_path))
+    monkeypatch.setattr(module, "MAC_STARTUP_POLL_SECONDS", 0)
+    readings = [False, False, True]
+    monkeypatch.setattr(module, "profile_files_open", lambda *_a: readings.pop(0))
+
+    await manager._wait_for_manual_start(_starting_process(exit_after=None), tmp_path)
+
+    assert readings == []
+
+
+@pytest.mark.asyncio
+async def test_start_wait_ends_a_browser_that_never_opens(monkeypatch, tmp_path: Path):
+    manager = BrowserManager(RuntimeConfig("macos", "native", "native-window", tmp_path))
+    monkeypatch.setattr(module, "MAC_STARTUP_POLL_SECONDS", 0)
+    monkeypatch.setattr(module, "MAC_STARTUP_OPEN_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(module, "profile_files_open", lambda *_a: False)
+    terminate = AsyncMock()
+    monkeypatch.setattr(module, "_terminate_process_async", terminate)
+    process = _starting_process(exit_after=None)
+
+    with pytest.raises(module.BrowserLaunchError, match="没有打开窗口"):
+        await manager._wait_for_manual_start(process, tmp_path)
+
+    terminate.assert_awaited_once_with(process)
+
+
+# ── License route ─────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("proxy", "version", "reachable", "expected"), [
+    ("socks5://127.0.0.1:1080", "155.0.8059.39.1", False, ["--license-through-proxy"]),
+    ("socks5://127.0.0.1:1080", "155.0.8059.39.1", True, []),
+    (None, "155.0.8059.39.1", False, []),                  # no proxy to route through
+    ("socks5://127.0.0.1:1080", "145.0.7632.109.2", False, []),  # kernel too old
+])
+async def test_license_check_goes_through_the_proxy_only_when_direct_fails(
+    monkeypatch, tmp_path: Path, proxy, version, reachable, expected,
+):
+    import sys
+    import types
+
+    manager = BrowserManager(RuntimeConfig("macos", "native", "native-window", tmp_path))
+    monkeypatch.setattr(module, "get_effective_chromium_version", lambda: version)
+    monkeypatch.setattr(module, "license_host_reachable", lambda *_a, **_k: reachable)
+    license_module = types.ModuleType("cloakbrowser.license")
+    license_module.resolve_license_key = lambda: "cb_test"
+    monkeypatch.setitem(sys.modules, "cloakbrowser.license", license_module)
+
+    assert await manager._license_route_args(proxy, []) == expected
+
+
+def test_license_host_bypasses_the_proxy_only_on_the_direct_route():
+    direct = module._chrome_proxy_args("socks5://127.0.0.1:1080", bypass_license_host=True)
+    through = module._chrome_proxy_args("socks5://127.0.0.1:1080", bypass_license_host=False)
+
+    assert any("cloakbrowser.dev" in arg for arg in direct)
+    assert not any("cloakbrowser.dev" in arg for arg in through)
+
+
 # ── Launch wiring ────────────────────────────────────────────────────────────
 
 

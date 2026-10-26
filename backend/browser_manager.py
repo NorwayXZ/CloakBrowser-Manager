@@ -85,6 +85,17 @@ COOKIE_IMPORTER_DIRNAME = "manager-cookie-importer"
 MACOS_CHROMIUM_DEFAULTS_DOMAIN = "org.chromium.Chromium"
 CLOAKBROWSER_LICENSE_HOST = "cloakbrowser.dev"
 CLOAKBROWSER_LICENSE_STARTUP_GRACE = 0.5
+# A Pro kernel verifies its license online before it opens the profile; when
+# cloakbrowser.dev cannot be reached it shows no window and exits with code
+# 78 after ~25 s. macOS manual launches therefore wait until the profile is
+# really open (or the process exits) before reporting success.
+MAC_STARTUP_OPEN_TIMEOUT_SECONDS = 45.0
+MAC_STARTUP_POLL_SECONDS = 0.5
+# Route the license check through the profile's proxy when the direct path to
+# cloakbrowser.dev is down (kernel switch, Chromium 148+).
+LICENSE_THROUGH_PROXY_ARG = "--license-through-proxy"
+LICENSE_THROUGH_PROXY_MIN_MAJOR = 148
+LICENSE_PROBE_TIMEOUT_SECONDS = 4.0
 _MACOS_LOCALE_LAUNCH_LOCK = threading.Lock()
 
 LICENSE_EXIT_REASONS = {
@@ -97,6 +108,37 @@ LICENSE_EXIT_REASONS = {
 
 class BrowserLaunchError(RuntimeError):
     """Browser process exited during its startup handshake."""
+
+
+def license_host_reachable(timeout: float = LICENSE_PROBE_TIMEOUT_SECONDS) -> bool:
+    """Whether cloakbrowser.dev answers on 443 over the direct network path."""
+    try:
+        infos = socket.getaddrinfo(CLOAKBROWSER_LICENSE_HOST, 443, type=socket.SOCK_STREAM)
+    except OSError:
+        return False
+    for family, socktype, proto, _canonname, address in infos[:4]:
+        try:
+            with socket.socket(family, socktype, proto) as sock:
+                sock.settimeout(timeout)
+                sock.connect(address)
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def _raise_if_exited(process: subprocess.Popen[Any]) -> None:
+    returncode = process.poll()
+    if isinstance(returncode, int):
+        reason = _browser_exit_reason(returncode)
+        if returncode == 0:
+            reason = "启动失败：浏览器在启动阶段已关闭"
+        raise BrowserLaunchError(reason)
+
+
+def _kernel_major(version: str | None) -> int | None:
+    match = re.match(r"(\d+)", version or "")
+    return int(match.group(1)) if match else None
 
 
 class CookiePullError(RuntimeError):
@@ -1024,7 +1066,13 @@ def _launch_cloakbrowser_manual_process(
 
     extra_args = list(args or [])
     if proxy and not _has_chrome_arg(extra_args, "--proxy-server"):
-        extra_args.extend(_chrome_proxy_args(proxy, bypass_license_host=True))
+        # By default the license check goes direct, so cloakbrowser.dev must
+        # bypass the proxy and its resolver lockdown; with the license routed
+        # through the proxy it must not.
+        extra_args.extend(_chrome_proxy_args(
+            proxy,
+            bypass_license_host=not _has_chrome_arg(extra_args, LICENSE_THROUGH_PROXY_ARG),
+        ))
     if user_agent:
         _append_chrome_arg_once(extra_args, "--user-agent", user_agent)
     _append_chrome_arg_once(extra_args, "--user-data-dir", os.fspath(user_data_dir))
@@ -2738,6 +2786,7 @@ class BrowserManager:
                     extra_args.append(webrtc_arg)
                 if SESSION_RESTORE_ARG not in extra_args:
                     extra_args.append(SESSION_RESTORE_ARG)
+                extra_args += await self._license_route_args(browser_proxy, user_launch_args)
             extra_args += user_launch_args
 
             launch_env = _build_locale_timezone_env(
@@ -2829,13 +2878,7 @@ class BrowserManager:
                     start_urls=manual_start_urls,
                 )
                 if use_manual_cloakbrowser:
-                    await asyncio.sleep(CLOAKBROWSER_LICENSE_STARTUP_GRACE)
-                    returncode = browser_process.poll()
-                    if isinstance(returncode, int):
-                        reason = _browser_exit_reason(returncode)
-                        if returncode == 0:
-                            reason = "启动失败：浏览器在启动阶段已关闭"
-                        raise BrowserLaunchError(reason)
+                    await self._wait_for_manual_start(browser_process, user_data_dir)
             else:
                 debug_args = [*extra_args, "--remote-debugging-address=127.0.0.1"]
                 last_cdp_error: Exception | None = None
@@ -3050,6 +3093,69 @@ class BrowserManager:
             exit_reason=_browser_exit_reason(process.returncode),
         )
 
+    async def _license_route_args(
+        self,
+        browser_proxy: str | None,
+        user_launch_args: list[str],
+    ) -> list[str]:
+        """``--license-through-proxy`` when a proxied Pro launch cannot reach
+        cloakbrowser.dev directly; the proxy was just checked by the geo
+        lookup, so the license check goes the way that works."""
+        if not browser_proxy or _has_chrome_arg(user_launch_args, LICENSE_THROUGH_PROXY_ARG):
+            return []
+        major = _kernel_major(get_effective_chromium_version())
+        if major is None or major < LICENSE_THROUGH_PROXY_MIN_MAJOR:
+            return []
+        try:
+            from cloakbrowser.license import resolve_license_key
+
+            if not resolve_license_key():
+                return []  # free kernel: no license check at all
+        except Exception:
+            return []
+        try:
+            reachable = await asyncio.wait_for(
+                asyncio.to_thread(license_host_reachable),
+                timeout=LICENSE_PROBE_TIMEOUT_SECONDS + 2,
+            )
+        except (asyncio.TimeoutError, TimeoutError):
+            reachable = False
+        if reachable:
+            return []
+        logger.warning(
+            "cloakbrowser.dev is unreachable directly; routing the license check through the profile proxy"
+        )
+        return [LICENSE_THROUGH_PROXY_ARG]
+
+    async def _wait_for_manual_start(
+        self,
+        process: subprocess.Popen[Any],
+        user_data_dir: Path,
+    ) -> None:
+        """Return once the browser has opened its profile; raise if it exits first.
+
+        Without this a launch reported success at once, and a Pro kernel that
+        could not verify its license showed no window and quietly exited.
+        Outside macOS (no lsof check) only a quick early-exit check is made.
+        """
+        if not (self.runtime.host_os == "macos" and self.runtime.runtime_mode == "native"):
+            await asyncio.sleep(CLOAKBROWSER_LICENSE_STARTUP_GRACE)
+            _raise_if_exited(process)
+            return
+        deadline = time.monotonic() + MAC_STARTUP_OPEN_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            _raise_if_exited(process)
+            opened = await asyncio.to_thread(profile_files_open, process.pid, user_data_dir)
+            if opened is None or opened:
+                return  # open, or lsof cannot tell: never hold a launch on a guess
+            await asyncio.sleep(MAC_STARTUP_POLL_SECONDS)
+        _raise_if_exited(process)
+        await _terminate_process_async(process)
+        raise BrowserLaunchError(
+            f"启动失败：浏览器 {int(MAC_STARTUP_OPEN_TIMEOUT_SECONDS)} 秒内没有打开窗口"
+            "（可能在等授权校验或网络），已结束这个进程，请检查网络后重试"
+        )
+
     async def _watch_macos_windows(
         self,
         profile_id: str,
@@ -3064,11 +3170,16 @@ class BrowserManager:
         """
         await asyncio.sleep(MAC_WINDOW_WATCH_START_SECONDS)
         misses = 0
+        # A browser that has not opened its profile yet (a Pro kernel still
+        # verifying its license, a slow start) holds no profile files either:
+        # only a profile seen open and then released means the windows closed.
+        seen_open = False
         while process.poll() is None:
             files_open = await asyncio.to_thread(profile_files_open, process.pid, user_data_dir)
-            if files_open is None:
+            if files_open is None or not seen_open and not files_open:
                 misses = 0
             elif files_open:
+                seen_open = True
                 misses = 0
             else:
                 misses += 1

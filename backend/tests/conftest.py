@@ -57,6 +57,16 @@ def isolated_secret_key(tmp_path_factory: pytest.TempPathFactory, monkeypatch: p
 
 
 @pytest.fixture(autouse=True)
+def lsof_cannot_tell(monkeypatch: pytest.MonkeyPatch):
+    """Launch tests use mock processes, which lsof knows nothing about: answer
+    "unknown" so no launch waits for a window; tests of the window logic set
+    their own answers."""
+    from backend import browser_manager
+
+    monkeypatch.setattr(browser_manager, "profile_files_open", lambda *_a, **_k: None)
+
+
+@pytest.fixture(autouse=True)
 def unknown_host_screen(monkeypatch: pytest.MonkeyPatch):
     """Tests see no real display, so results never depend on the machine's
     screen; tests of the follow-the-display behaviour set one explicitly."""
