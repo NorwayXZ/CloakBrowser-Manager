@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -17,6 +18,7 @@ from backend.runtime import RuntimeConfig
 from backend.session_keeper import (
     SESSION_KEEPER_DIRNAME,
     profile_files_open,
+    request_app_quit,
     sync_session_keeper_extension,
     window_name_arg,
 )
@@ -136,7 +138,7 @@ async def test_window_watch_stops_only_after_two_empty_checks(monkeypatch, tmp_p
     await manager._watch_macos_windows("p1", process, tmp_path)
 
     if stopped:
-        stop.assert_awaited_once_with("p1", reason="关闭了浏览器窗口")
+        stop.assert_awaited_once_with("p1", reason="关闭了浏览器窗口", profile_closed=True)
     else:
         stop.assert_not_awaited()
 
@@ -197,3 +199,142 @@ async def test_windows_launch_has_no_session_keeper(monkeypatch, tmp_path: Path)
     assert any(
         a.startswith("--load-extension=") and str(cookie_extension) in a for a in args
     )
+
+
+async def _debug_launch(monkeypatch, tmp_path: Path, *, headless: bool):
+    manager = BrowserManager(RuntimeConfig("macos", "native", "native-window", tmp_path))
+    manager._wait_for_cdp = AsyncMock()
+    context = MagicMock(pages=[], _cloak_browser_process=MagicMock(pid=4242, poll=MagicMock(return_value=None)))
+    context.add_init_script = AsyncMock()
+    monkeypatch.setattr(module, "_launch_cloakbrowser_persistent_context_async", AsyncMock(return_value=context))
+    monkeypatch.setattr(manager, "_watch_macos_windows", AsyncMock())
+    running = await manager.launch(_profile(tmp_path, "cloakbrowser", "macos"), launch_mode="debug", headless=headless)
+    return manager, running
+
+
+@pytest.mark.asyncio
+async def test_macos_debug_launch_is_watched_too(monkeypatch, tmp_path: Path):
+    # Debug mode had no watch: its window closed, the browser stayed running.
+    manager, running = await _debug_launch(monkeypatch, tmp_path, headless=False)
+
+    assert running.window_watch_task is not None
+    await running.window_watch_task
+    manager._watch_macos_windows.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_headless_debug_launch_has_no_window_to_watch(monkeypatch, tmp_path: Path):
+    _manager, running = await _debug_launch(monkeypatch, tmp_path, headless=True)
+
+    assert running.window_watch_task is None
+
+
+# ── Ending a browser ─────────────────────────────────────────────────────────
+
+
+class _Browser:
+    """A running browser process that exits when asked to quit, unless stubborn."""
+
+    def __init__(self, *, quits: bool):
+        self.pid = 4242
+        self.quits = quits
+        self.quit_asked = False
+        self.signals: list[str] = []
+        self.returncode: int | None = None
+
+    def poll(self):
+        return self.returncode
+
+    def wait(self, timeout=None):
+        if self.returncode is None and not (self.quit_asked and self.quits) and not self.signals:
+            raise subprocess.TimeoutExpired("chromium", timeout)
+        self.returncode = 0
+        return 0
+
+    def terminate(self):
+        self.signals.append("TERM")
+
+    def kill(self):
+        self.signals.append("KILL")
+
+
+@pytest.mark.asyncio
+async def test_ending_a_browser_asks_that_app_to_quit_first(monkeypatch):
+    browser = _Browser(quits=True)
+    asked: list[int] = []
+
+    def quit_app(pid):
+        asked.append(pid)
+        browser.quit_asked = True
+        return True
+
+    monkeypatch.setattr(module, "request_app_quit", quit_app)
+    await module._terminate_process_async(browser)
+
+    assert asked == [4242]
+    assert browser.signals == []
+
+
+@pytest.mark.asyncio
+async def test_a_browser_that_does_not_quit_still_gets_sigterm(monkeypatch):
+    browser = _Browser(quits=False)
+    monkeypatch.setattr(module, "MAC_GRACEFUL_QUIT_SECONDS", 0)
+    monkeypatch.setattr(module, "request_app_quit", lambda _pid: True)
+    await module._terminate_process_async(browser)
+
+    assert browser.signals == ["TERM"]
+
+
+@pytest.mark.asyncio
+async def test_without_an_app_to_ask_sigterm_is_sent_at_once(monkeypatch):
+    browser = _Browser(quits=True)
+    monkeypatch.setattr(module, "request_app_quit", lambda _pid: False)
+    await module._terminate_process_async(browser)
+
+    assert browser.signals == ["TERM"]
+
+
+def test_request_app_quit_is_macos_only(monkeypatch):
+    monkeypatch.setattr("backend.session_keeper.sys.platform", "win32")
+    assert request_app_quit(os.getpid()) is False
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
+def test_request_app_quit_ignores_a_pid_that_is_no_app():
+    # This test process is not an app, so there is nothing to ask (and nothing quits).
+    assert request_app_quit(os.getpid()) is False
+
+
+@pytest.mark.asyncio
+async def test_a_browser_whose_window_closed_gets_sigterm_not_a_quit_request(monkeypatch):
+    # Its profile is saved already; a quit request now would leave the
+    # kernel's license seat taken for minutes.
+    browser = _Browser(quits=True)
+    asked: list[int] = []
+    monkeypatch.setattr(module, "request_app_quit", lambda pid: asked.append(pid) or True)
+    await module._terminate_process_async(browser, ask_to_quit=False)
+
+    assert asked == []
+    assert browser.signals == ["TERM"]
+
+
+@pytest.mark.asyncio
+async def test_stopping_after_the_last_window_closed_sigterms_before_the_context_closes(monkeypatch, tmp_path: Path):
+    manager = BrowserManager(RuntimeConfig("macos", "native", "native-window", tmp_path))
+    order: list[str] = []
+    process = MagicMock(pid=4242)
+
+    async def terminate(proc, *, ask_to_quit=True):
+        order.append(f"terminate ask_to_quit={ask_to_quit}")
+
+    async def close_context(*_a):
+        order.append("close context")
+
+    monkeypatch.setattr(module, "_terminate_process_async", terminate)
+    monkeypatch.setattr(manager, "_close_context", close_context)
+    manager.running["p1"] = module.RunningProfile(profile_id="p1", context=MagicMock(), cdp_port=None, browser_process=process)
+    monkeypatch.setattr("backend.database.mark_profile_exit", lambda *_a: None)
+
+    await manager.stop("p1", reason="关闭了浏览器窗口", profile_closed=True)
+
+    assert order == ["terminate ask_to_quit=False", "close context", "terminate ask_to_quit=True"]

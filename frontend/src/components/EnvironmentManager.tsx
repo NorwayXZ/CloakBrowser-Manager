@@ -588,6 +588,18 @@ export function EnvironmentManager({
               </div>
             )}
           </div>
+          <button
+            className="btn-secondary mt-3 w-full px-2 text-xs"
+            title="回到重新设计的新界面"
+            onClick={() => {
+              void api
+                .switchToNewInterface()
+                .then(() => window.location.assign("/"))
+                .catch((err) => setActionError(err instanceof Error ? err.message : "切换失败"));
+            }}
+          >
+            试用新界面
+          </button>
           {versions && (
             <div className="mt-3 space-y-0.5 px-1 text-xs text-slate-400" aria-label="版本信息">
               <div>Manager {versions.app ? `v${versions.app}` : "源码版"}</div>

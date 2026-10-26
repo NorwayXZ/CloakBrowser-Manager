@@ -11,6 +11,11 @@ unless the host implements them, so this module does:
 * <input type=file> opens an NSOpenPanel;
 * downloads (backup zips, the configuration export blob) ask where to save;
 * links to other sites and target=_blank open in the default browser.
+
+The window's own background and appearance follow the panel's theme, so a dark
+panel does not flash a white window while the page loads, and the title bar and
+sheets match it. The panel reports its theme choice through the "cbmTheme"
+script message whenever it changes.
 """
 
 from __future__ import annotations
@@ -22,8 +27,12 @@ import objc
 from AppKit import (
     NSAlert,
     NSAlertFirstButtonReturn,
+    NSAppearance,
+    NSAppearanceNameAqua,
+    NSAppearanceNameDarkAqua,
     NSApplication,
     NSBackingStoreBuffered,
+    NSColor,
     NSMakeRect,
     NSModalResponseOK,
     NSOpenPanel,
@@ -38,12 +47,15 @@ from AppKit import (
 from Foundation import NSURL, NSURLRequest, NSObject, NSFileManager, NSHomeDirectory
 from WebKit import WKWebView, WKWebViewConfiguration
 
+from backend.desktop_app import panel_look, saved_panel_theme
+
 logger = logging.getLogger("cloakbrowser.desktop.window")
 
 WINDOW_TITLE = "CloakBrowser Manager"
 FRAME_AUTOSAVE_NAME = "CloakBrowserManagerPanel"
 DEFAULT_SIZE = (1320, 860)
 MIN_SIZE = (1024, 680)
+THEME_MESSAGE = "cbmTheme"
 
 # WebKit enum values (WKNavigationActionPolicy / WKNavigationResponsePolicy).
 POLICY_CANCEL = 0
@@ -124,6 +136,7 @@ class PanelWindowController(NSObject):
         window.setDelegate_(self)
 
         config = WKWebViewConfiguration.alloc().init()
+        config.userContentController().addScriptMessageHandler_name_(self, THEME_MESSAGE)
         webview = WKWebView.alloc().initWithFrame_configuration_(window.contentView().bounds(), config)
         webview.setAutoresizingMask_(18)  # width + height sizable
         webview.setUIDelegate_(self)
@@ -131,6 +144,30 @@ class PanelWindowController(NSObject):
         window.setContentView_(webview)
         self.window = window
         self.webview = webview
+        self._apply_look(saved_panel_theme(self.url))
+
+    @objc.python_method
+    def _apply_look(self, theme):
+        """Window background and appearance matching the panel's theme preference."""
+        rgb, appearance = panel_look(theme)
+        if appearance is None:
+            self.window.setAppearance_(None)  # follow the system, as the panel does
+        else:
+            name = NSAppearanceNameDarkAqua if appearance == "dark" else NSAppearanceNameAqua
+            self.window.setAppearance_(NSAppearance.appearanceNamed_(name))
+        if rgb is None:
+            color = NSColor.windowBackgroundColor()
+        else:
+            color = NSColor.colorWithSRGBRed_green_blue_alpha_(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, 1.0)
+        self.window.setBackgroundColor_(color)
+        if hasattr(self.webview, "setUnderPageBackgroundColor_"):  # macOS 12+
+            self.webview.setUnderPageBackgroundColor_(color)
+
+    def userContentController_didReceiveScriptMessage_(self, _controller, message):
+        body = message.body()
+        theme = body.get("theme") if hasattr(body, "get") else None
+        if theme is not None:
+            self._apply_look(str(theme))
 
     @objc.python_method
     def show(self):

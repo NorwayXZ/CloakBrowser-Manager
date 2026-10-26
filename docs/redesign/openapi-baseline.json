@@ -1,0 +1,7384 @@
+{
+  "components": {
+    "schemas": {
+      "ApplyDeviceTemplateRequest": {
+        "properties": {
+          "template_id": {
+            "minLength": 1,
+            "title": "Template Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "template_id"
+        ],
+        "title": "ApplyDeviceTemplateRequest",
+        "type": "object"
+      },
+      "AuthAccountUpdate": {
+        "properties": {
+          "current_password": {
+            "title": "Current Password",
+            "type": "string"
+          },
+          "new_password": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 8,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Password"
+          },
+          "username": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 3,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Username"
+          }
+        },
+        "required": [
+          "current_password"
+        ],
+        "title": "AuthAccountUpdate",
+        "type": "object"
+      },
+      "AutoBackupSettingsModel": {
+        "properties": {
+          "copy_dir": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Copy Dir"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "interval_days": {
+            "default": 7,
+            "maximum": 90.0,
+            "minimum": 1.0,
+            "title": "Interval Days",
+            "type": "integer"
+          },
+          "keep": {
+            "default": 4,
+            "maximum": 52.0,
+            "minimum": 1.0,
+            "title": "Keep",
+            "type": "integer"
+          }
+        },
+        "title": "AutoBackupSettingsModel",
+        "type": "object"
+      },
+      "AutoBackupStatusResponse": {
+        "properties": {
+          "copy_dir": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Copy Dir"
+          },
+          "default_copy_dir": {
+            "title": "Default Copy Dir",
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "interval_days": {
+            "default": 7,
+            "maximum": 90.0,
+            "minimum": 1.0,
+            "title": "Interval Days",
+            "type": "integer"
+          },
+          "keep": {
+            "default": 4,
+            "maximum": 52.0,
+            "minimum": 1.0,
+            "title": "Keep",
+            "type": "integer"
+          },
+          "last_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last At"
+          },
+          "last_copy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Copy"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "next_due_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Due At"
+          },
+          "waiting_for_browsers": {
+            "default": false,
+            "title": "Waiting For Browsers",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "default_copy_dir"
+        ],
+        "title": "AutoBackupStatusResponse",
+        "type": "object"
+      },
+      "AutomationHoursRequest": {
+        "properties": {
+          "hours": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hours"
+          }
+        },
+        "title": "AutomationHoursRequest",
+        "type": "object"
+      },
+      "AutomationHoursResponse": {
+        "properties": {
+          "hours": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hours"
+          },
+          "open_now": {
+            "default": true,
+            "title": "Open Now",
+            "type": "boolean"
+          }
+        },
+        "title": "AutomationHoursResponse",
+        "type": "object"
+      },
+      "AutomationStatusResponse": {
+        "properties": {
+          "active": {
+            "default": false,
+            "title": "Active",
+            "type": "boolean"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Id"
+          },
+          "profile_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Name"
+          }
+        },
+        "title": "AutomationStatusResponse",
+        "type": "object"
+      },
+      "BrowserUpdateResponse": {
+        "properties": {
+          "available_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Available Version"
+          },
+          "binary_verified": {
+            "default": false,
+            "title": "Binary Verified",
+            "type": "boolean"
+          },
+          "current_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Version"
+          },
+          "installed_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installed Version"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "platform": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform"
+          },
+          "restart_required": {
+            "default": false,
+            "title": "Restart Required",
+            "type": "boolean"
+          },
+          "updated": {
+            "default": false,
+            "title": "Updated",
+            "type": "boolean"
+          },
+          "wrapper_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wrapper Version"
+          }
+        },
+        "required": [
+          "ok",
+          "message"
+        ],
+        "title": "BrowserUpdateResponse",
+        "type": "object"
+      },
+      "BurnRequest": {
+        "properties": {
+          "confirm": {
+            "default": false,
+            "title": "Confirm",
+            "type": "boolean"
+          }
+        },
+        "title": "BurnRequest",
+        "type": "object"
+      },
+      "BurnResponse": {
+        "properties": {
+          "files_removed": {
+            "title": "Files Removed",
+            "type": "integer"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "profile_id": {
+            "title": "Profile Id",
+            "type": "string"
+          },
+          "user_data_dir": {
+            "title": "User Data Dir",
+            "type": "string"
+          },
+          "was_running": {
+            "title": "Was Running",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "profile_id",
+          "user_data_dir",
+          "files_removed",
+          "was_running"
+        ],
+        "title": "BurnResponse",
+        "type": "object"
+      },
+      "ClipboardRequest": {
+        "properties": {
+          "text": {
+            "maxLength": 1048576,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "ClipboardRequest",
+        "type": "object"
+      },
+      "CookieMergeRequest": {
+        "properties": {
+          "domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain"
+          },
+          "existing": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Existing"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "CookieMergeRequest",
+        "type": "object"
+      },
+      "CookieMergeResponse": {
+        "properties": {
+          "added": {
+            "title": "Added",
+            "type": "integer"
+          },
+          "cookies_json": {
+            "title": "Cookies Json",
+            "type": "string"
+          },
+          "format": {
+            "enum": [
+              "json",
+              "netscape",
+              "header"
+            ],
+            "title": "Format",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cookies_json",
+          "format",
+          "added",
+          "total"
+        ],
+        "title": "CookieMergeResponse",
+        "type": "object"
+      },
+      "CookiePullResponse": {
+        "description": "Cookies read back from a running browser, ready to save as config.",
+        "properties": {
+          "cookies": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Cookies",
+            "type": "array"
+          },
+          "cookies_json": {
+            "title": "Cookies Json",
+            "type": "string"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cookies",
+          "cookies_json",
+          "count"
+        ],
+        "title": "CookiePullResponse",
+        "type": "object"
+      },
+      "DeviceTemplateResponse": {
+        "description": "One entry from the Windows device template library (backend/device_templates.py).",
+        "properties": {
+          "cpu": {
+            "title": "Cpu",
+            "type": "string"
+          },
+          "device_memory": {
+            "title": "Device Memory",
+            "type": "integer"
+          },
+          "device_scale_factor": {
+            "title": "Device Scale Factor",
+            "type": "number"
+          },
+          "family": {
+            "title": "Family",
+            "type": "string"
+          },
+          "gpu_renderer": {
+            "title": "Gpu Renderer",
+            "type": "string"
+          },
+          "gpu_vendor": {
+            "title": "Gpu Vendor",
+            "type": "string"
+          },
+          "hardware_concurrency": {
+            "title": "Hardware Concurrency",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "screen_height": {
+            "title": "Screen Height",
+            "type": "integer"
+          },
+          "screen_width": {
+            "title": "Screen Width",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "family",
+          "cpu",
+          "gpu_vendor",
+          "gpu_renderer",
+          "screen_width",
+          "screen_height",
+          "hardware_concurrency",
+          "device_memory",
+          "device_scale_factor"
+        ],
+        "title": "DeviceTemplateResponse",
+        "type": "object"
+      },
+      "DisposableCreateRequest": {
+        "description": "One-click throwaway identity. Everything is optional: the persona\ndefaults to US (en-US / America/New_York), region selects a coherent\nlocale + timezone pair, and explicit timezone/locale win over region.",
+        "properties": {
+          "locale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locale"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
+          }
+        },
+        "title": "DisposableCreateRequest",
+        "type": "object"
+      },
+      "EvolutionLogResponse": {
+        "properties": {
+          "detail": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Detail",
+            "type": "object"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
+          },
+          "profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Id"
+          },
+          "profile_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Name"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "trigger": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trigger"
+          }
+        },
+        "required": [
+          "id",
+          "started_at"
+        ],
+        "title": "EvolutionLogResponse",
+        "type": "object"
+      },
+      "EvolutionProposalResponse": {
+        "description": "A verified config fix waiting for the user's approval.\n\nExperiments only ever run on disposable clones; a proposal is the sole\nbridge back to the real profile, and it moves only when approved.",
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "evidence": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Evidence",
+            "type": "object"
+          },
+          "from_value": {
+            "title": "From Value"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "knob": {
+            "title": "Knob",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "profile_id": {
+            "title": "Profile Id",
+            "type": "string"
+          },
+          "profile_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Name"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "targets": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Targets",
+            "type": "array"
+          },
+          "to_value": {
+            "title": "To Value"
+          }
+        },
+        "required": [
+          "id",
+          "profile_id",
+          "knob",
+          "status",
+          "created_at"
+        ],
+        "title": "EvolutionProposalResponse",
+        "type": "object"
+      },
+      "EvolutionStatusResponse": {
+        "properties": {
+          "busy": {
+            "title": "Busy",
+            "type": "boolean"
+          },
+          "lock_owner": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lock Owner"
+          },
+          "pending_proposals": {
+            "default": 0,
+            "title": "Pending Proposals",
+            "type": "integer"
+          },
+          "profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Id"
+          },
+          "profile_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Name"
+          }
+        },
+        "required": [
+          "busy"
+        ],
+        "title": "EvolutionStatusResponse",
+        "type": "object"
+      },
+      "FingerprintOptions": {
+        "description": "CloakBrowser binary switches beyond the core device persona.\n\nEvery field defaults to \"let the binary decide\", so an empty object keeps\nthe kernel's own seed-derived values.",
+        "properties": {
+          "allow_3p_cookies": {
+            "default": false,
+            "title": "Allow 3P Cookies",
+            "type": "boolean"
+          },
+          "brand": {
+            "anyOf": [
+              {
+                "enum": [
+                  "Chrome",
+                  "Edge",
+                  "Opera",
+                  "Vivaldi"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand"
+          },
+          "brand_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Version"
+          },
+          "geolocation": {
+            "default": "ip",
+            "enum": [
+              "ip",
+              "block",
+              "real"
+            ],
+            "title": "Geolocation",
+            "type": "string"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "noise": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Noise"
+          },
+          "platform_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform Version"
+          },
+          "portable_cookies": {
+            "default": false,
+            "title": "Portable Cookies",
+            "type": "boolean"
+          },
+          "screen": {
+            "default": "real",
+            "enum": [
+              "real",
+              "custom"
+            ],
+            "title": "Screen",
+            "type": "string"
+          },
+          "speech_voices": {
+            "default": true,
+            "title": "Speech Voices",
+            "type": "boolean"
+          },
+          "storage_quota_mb": {
+            "anyOf": [
+              {
+                "maximum": 10000000.0,
+                "minimum": 100.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Quota Mb"
+          },
+          "taskbar_height": {
+            "anyOf": [
+              {
+                "maximum": 300.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Taskbar Height"
+          },
+          "transparent_proxy": {
+            "default": false,
+            "title": "Transparent Proxy",
+            "type": "boolean"
+          },
+          "webrtc": {
+            "default": "proxy",
+            "enum": [
+              "proxy",
+              "custom"
+            ],
+            "title": "Webrtc",
+            "type": "string"
+          },
+          "webrtc_ip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Webrtc Ip"
+          },
+          "windows_font_metrics": {
+            "default": false,
+            "title": "Windows Font Metrics",
+            "type": "boolean"
+          }
+        },
+        "title": "FingerprintOptions",
+        "type": "object"
+      },
+      "GroupCreate": {
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "GroupCreate",
+        "type": "object"
+      },
+      "GroupResponse": {
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "GroupResponse",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "InstalledKernelResponse": {
+        "properties": {
+          "in_use": {
+            "title": "In Use",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "pro": {
+            "title": "Pro",
+            "type": "boolean"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "version",
+          "pro",
+          "size_bytes",
+          "in_use"
+        ],
+        "title": "InstalledKernelResponse",
+        "type": "object"
+      },
+      "IpQuality": {
+        "properties": {
+          "links": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/IpQualityLink"
+            },
+            "title": "Links",
+            "type": "array"
+          },
+          "signals": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/IpQualitySignal"
+            },
+            "title": "Signals",
+            "type": "array"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "flagged",
+              "suspicious",
+              "clean",
+              "unknown"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "verdict",
+          "summary"
+        ],
+        "title": "IpQuality",
+        "type": "object"
+      },
+      "IpQualityLink": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "url"
+        ],
+        "title": "IpQualityLink",
+        "type": "object"
+      },
+      "IpQualitySignal": {
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "flagged",
+              "suspicious",
+              "clean",
+              "unknown"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "status",
+          "detail"
+        ],
+        "title": "IpQualitySignal",
+        "type": "object"
+      },
+      "KernelCheckResponse": {
+        "properties": {
+          "current_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Version"
+          },
+          "latest_version": {
+            "title": "Latest Version",
+            "type": "string"
+          },
+          "pinned": {
+            "default": false,
+            "title": "Pinned",
+            "type": "boolean"
+          },
+          "update_available": {
+            "title": "Update Available",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "latest_version",
+          "update_available"
+        ],
+        "title": "KernelCheckResponse",
+        "type": "object"
+      },
+      "KernelLicenseKeyRequest": {
+        "properties": {
+          "license_key": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "License Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "license_key"
+        ],
+        "title": "KernelLicenseKeyRequest",
+        "type": "object"
+      },
+      "KernelLicenseResponse": {
+        "properties": {
+          "can_pin": {
+            "default": false,
+            "title": "Can Pin",
+            "type": "boolean"
+          },
+          "expires": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires"
+          },
+          "key_stored": {
+            "default": false,
+            "title": "Key Stored",
+            "type": "boolean"
+          },
+          "plan": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan"
+          },
+          "tier": {
+            "enum": [
+              "none",
+              "free",
+              "paid",
+              "invalid",
+              "unknown"
+            ],
+            "title": "Tier",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tier"
+        ],
+        "title": "KernelLicenseResponse",
+        "type": "object"
+      },
+      "KernelOverviewResponse": {
+        "properties": {
+          "bundled_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bundled Version"
+          },
+          "cache_dir": {
+            "title": "Cache Dir",
+            "type": "string"
+          },
+          "installed": {
+            "default": false,
+            "title": "Installed",
+            "type": "boolean"
+          },
+          "installed_kernels": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/InstalledKernelResponse"
+            },
+            "title": "Installed Kernels",
+            "type": "array"
+          },
+          "license": {
+            "$ref": "#/components/schemas/KernelLicenseResponse"
+          },
+          "pinned": {
+            "default": false,
+            "title": "Pinned",
+            "type": "boolean"
+          },
+          "platform": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform"
+          },
+          "running_count": {
+            "default": 0,
+            "title": "Running Count",
+            "type": "integer"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/KernelSettingsModel"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "wrapper_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wrapper Version"
+          }
+        },
+        "required": [
+          "cache_dir",
+          "license",
+          "settings"
+        ],
+        "title": "KernelOverviewResponse",
+        "type": "object"
+      },
+      "KernelSettingsModel": {
+        "properties": {
+          "auto_update": {
+            "default": true,
+            "title": "Auto Update",
+            "type": "boolean"
+          },
+          "pinned_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pinned Version"
+          },
+          "release_channel": {
+            "default": "stable",
+            "enum": [
+              "stable",
+              "preview"
+            ],
+            "title": "Release Channel",
+            "type": "string"
+          }
+        },
+        "title": "KernelSettingsModel",
+        "type": "object"
+      },
+      "LaunchRequest": {
+        "properties": {
+          "launch_mode": {
+            "default": "manual",
+            "enum": [
+              "manual",
+              "debug"
+            ],
+            "title": "Launch Mode",
+            "type": "string"
+          }
+        },
+        "title": "LaunchRequest",
+        "type": "object"
+      },
+      "LaunchResponse": {
+        "properties": {
+          "browser_engine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Browser Engine"
+          },
+          "cdp_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cdp Url"
+          },
+          "display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display"
+          },
+          "launch_mode": {
+            "default": "debug",
+            "enum": [
+              "manual",
+              "debug"
+            ],
+            "title": "Launch Mode",
+            "type": "string"
+          },
+          "profile_id": {
+            "title": "Profile Id",
+            "type": "string"
+          },
+          "runtime_mode": {
+            "enum": [
+              "native",
+              "docker"
+            ],
+            "title": "Runtime Mode",
+            "type": "string"
+          },
+          "status": {
+            "default": "running",
+            "title": "Status",
+            "type": "string"
+          },
+          "viewer_mode": {
+            "enum": [
+              "native-window",
+              "vnc"
+            ],
+            "title": "Viewer Mode",
+            "type": "string"
+          },
+          "vnc_ws_port": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vnc Ws Port"
+          }
+        },
+        "required": [
+          "profile_id",
+          "runtime_mode",
+          "viewer_mode"
+        ],
+        "title": "LaunchResponse",
+        "type": "object"
+      },
+      "LinkabilityCluster": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "links": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/LinkabilityLink"
+            },
+            "title": "Links",
+            "type": "array"
+          },
+          "profiles": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/LinkabilityProfileRef"
+            },
+            "title": "Profiles",
+            "type": "array"
+          },
+          "risk": {
+            "title": "Risk",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "risk"
+        ],
+        "title": "LinkabilityCluster",
+        "type": "object"
+      },
+      "LinkabilityLink": {
+        "properties": {
+          "a_id": {
+            "title": "A Id",
+            "type": "string"
+          },
+          "a_name": {
+            "title": "A Name",
+            "type": "string"
+          },
+          "b_id": {
+            "title": "B Id",
+            "type": "string"
+          },
+          "b_name": {
+            "title": "B Name",
+            "type": "string"
+          },
+          "level": {
+            "title": "Level",
+            "type": "string"
+          },
+          "reasons": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "score": {
+            "title": "Score",
+            "type": "integer"
+          },
+          "suggestions": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Suggestions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "a_id",
+          "b_id",
+          "a_name",
+          "b_name",
+          "score",
+          "level"
+        ],
+        "title": "LinkabilityLink",
+        "type": "object"
+      },
+      "LinkabilityProfileRef": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "LinkabilityProfileRef",
+        "type": "object"
+      },
+      "LinkabilityResponse": {
+        "properties": {
+          "clusters": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/LinkabilityCluster"
+            },
+            "title": "Clusters",
+            "type": "array"
+          },
+          "profile_count": {
+            "title": "Profile Count",
+            "type": "integer"
+          },
+          "unclustered_count": {
+            "title": "Unclustered Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "profile_count",
+          "unclustered_count"
+        ],
+        "title": "LinkabilityResponse",
+        "type": "object"
+      },
+      "LlmSettingsModel": {
+        "properties": {
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "base_url": {
+            "default": "",
+            "title": "Base Url",
+            "type": "string"
+          },
+          "executor_effort": {
+            "default": "",
+            "title": "Executor Effort",
+            "type": "string"
+          },
+          "executor_model": {
+            "default": "",
+            "title": "Executor Model",
+            "type": "string"
+          },
+          "model": {
+            "default": "",
+            "title": "Model",
+            "type": "string"
+          }
+        },
+        "title": "LlmSettingsModel",
+        "type": "object"
+      },
+      "LoginRequest": {
+        "properties": {
+          "password": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
+          },
+          "token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token"
+          },
+          "username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Username"
+          }
+        },
+        "title": "LoginRequest",
+        "type": "object"
+      },
+      "ManagerUpdateResponse": {
+        "properties": {
+          "after": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After"
+          },
+          "before": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before"
+          },
+          "branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Branch"
+          },
+          "download_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Download Url"
+          },
+          "log": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Log",
+            "type": "array"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "restart_required": {
+            "default": false,
+            "title": "Restart Required",
+            "type": "boolean"
+          },
+          "updated": {
+            "title": "Updated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "updated",
+          "message"
+        ],
+        "title": "ManagerUpdateResponse",
+        "type": "object"
+      },
+      "McpAuditIn": {
+        "description": "One tool call reported by the stdio MCP bridge after dispatch.",
+        "properties": {
+          "args_summary": {
+            "additionalProperties": true,
+            "title": "Args Summary",
+            "type": "object"
+          },
+          "client_name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Name"
+          },
+          "client_version": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Version"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "ok": {
+            "default": false,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "tool": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Tool",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool"
+        ],
+        "title": "McpAuditIn",
+        "type": "object"
+      },
+      "McpAuditResponse": {
+        "properties": {
+          "args_summary": {
+            "additionalProperties": true,
+            "title": "Args Summary",
+            "type": "object"
+          },
+          "client_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Name"
+          },
+          "client_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Version"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "ok": {
+            "default": false,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "tool": {
+            "title": "Tool",
+            "type": "string"
+          },
+          "ts": {
+            "title": "Ts",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "ts",
+          "tool"
+        ],
+        "title": "McpAuditResponse",
+        "type": "object"
+      },
+      "McpSettingsModel": {
+        "properties": {
+          "mode": {
+            "default": "read-only",
+            "enum": [
+              "off",
+              "read-only",
+              "full"
+            ],
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "title": "McpSettingsModel",
+        "type": "object"
+      },
+      "PreflightIssue": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "error",
+              "warning",
+              "info"
+            ],
+            "title": "Severity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "severity",
+          "code",
+          "message"
+        ],
+        "title": "PreflightIssue",
+        "type": "object"
+      },
+      "PreflightResponse": {
+        "properties": {
+          "browser_engine": {
+            "title": "Browser Engine",
+            "type": "string"
+          },
+          "can_launch": {
+            "title": "Can Launch",
+            "type": "boolean"
+          },
+          "capabilities": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Capabilities",
+            "type": "object"
+          },
+          "issues": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PreflightIssue"
+            },
+            "title": "Issues",
+            "type": "array"
+          },
+          "launch_mode": {
+            "enum": [
+              "manual",
+              "debug"
+            ],
+            "title": "Launch Mode",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pass",
+              "warning",
+              "fail"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "browser_engine",
+          "launch_mode",
+          "can_launch"
+        ],
+        "title": "PreflightResponse",
+        "type": "object"
+      },
+      "ProfileCreate": {
+        "properties": {
+          "account_platform": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Platform"
+          },
+          "auto_launch": {
+            "default": false,
+            "title": "Auto Launch",
+            "type": "boolean"
+          },
+          "browser_engine": {
+            "default": "auto",
+            "enum": [
+              "auto",
+              "system_chrome",
+              "cloakbrowser"
+            ],
+            "title": "Browser Engine",
+            "type": "string"
+          },
+          "clipboard_sync": {
+            "default": true,
+            "title": "Clipboard Sync",
+            "type": "boolean"
+          },
+          "color_scheme": {
+            "anyOf": [
+              {
+                "enum": [
+                  "light",
+                  "dark",
+                  "no-preference"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color Scheme"
+          },
+          "cookies_json": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cookies Json"
+          },
+          "device_memory": {
+            "anyOf": [
+              {
+                "maximum": 8.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Memory"
+          },
+          "device_profile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Profile"
+          },
+          "evolution_enabled": {
+            "default": false,
+            "title": "Evolution Enabled",
+            "type": "boolean"
+          },
+          "evolution_interval_hours": {
+            "default": 24,
+            "maximum": 720.0,
+            "minimum": 1.0,
+            "title": "Evolution Interval Hours",
+            "type": "integer"
+          },
+          "fingerprint_options": {
+            "$ref": "#/components/schemas/FingerprintOptions"
+          },
+          "fingerprint_seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fingerprint Seed"
+          },
+          "geoip": {
+            "default": true,
+            "title": "Geoip",
+            "type": "boolean"
+          },
+          "gpu_renderer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gpu Renderer"
+          },
+          "gpu_vendor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gpu Vendor"
+          },
+          "group_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "未分组",
+            "title": "Group Name"
+          },
+          "hardware_concurrency": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hardware Concurrency"
+          },
+          "headless": {
+            "default": false,
+            "title": "Headless",
+            "type": "boolean"
+          },
+          "human_preset": {
+            "default": "default",
+            "enum": [
+              "default",
+              "careful"
+            ],
+            "title": "Human Preset",
+            "type": "string"
+          },
+          "humanize": {
+            "default": true,
+            "title": "Humanize",
+            "type": "boolean"
+          },
+          "launch_args": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Launch Args",
+            "type": "array"
+          },
+          "locale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locale"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "platform": {
+            "default": "windows",
+            "enum": [
+              "windows",
+              "macos",
+              "linux"
+            ],
+            "title": "Platform",
+            "type": "string"
+          },
+          "proxy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proxy"
+          },
+          "screen_height": {
+            "default": 1080,
+            "title": "Screen Height",
+            "type": "integer"
+          },
+          "screen_width": {
+            "default": 1920,
+            "title": "Screen Width",
+            "type": "integer"
+          },
+          "startup_urls": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Startup Urls",
+            "type": "array"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/TagCreate"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
+          },
+          "user_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Agent"
+          },
+          "warmup_daily_max": {
+            "default": 1,
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Warmup Daily Max",
+            "type": "integer"
+          },
+          "warmup_enabled": {
+            "default": false,
+            "title": "Warmup Enabled",
+            "type": "boolean"
+          },
+          "warmup_persona": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warmup Persona"
+          },
+          "warmup_targets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warmup Targets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ProfileCreate",
+        "type": "object"
+      },
+      "ProfileResponse": {
+        "properties": {
+          "account_platform": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Platform"
+          },
+          "auto_launch": {
+            "default": false,
+            "title": "Auto Launch",
+            "type": "boolean"
+          },
+          "browser_engine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Browser Engine"
+          },
+          "cdp_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cdp Url"
+          },
+          "clipboard_sync": {
+            "default": true,
+            "title": "Clipboard Sync",
+            "type": "boolean"
+          },
+          "color_scheme": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color Scheme"
+          },
+          "cookies_json": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cookies Json"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "deleted_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deleted At"
+          },
+          "device_memory": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Memory"
+          },
+          "device_profile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Profile"
+          },
+          "disposable": {
+            "default": false,
+            "title": "Disposable",
+            "type": "boolean"
+          },
+          "evolution_enabled": {
+            "default": false,
+            "title": "Evolution Enabled",
+            "type": "boolean"
+          },
+          "evolution_interval_hours": {
+            "default": 24,
+            "title": "Evolution Interval Hours",
+            "type": "integer"
+          },
+          "fingerprint_options": {
+            "$ref": "#/components/schemas/FingerprintOptions"
+          },
+          "fingerprint_seed": {
+            "title": "Fingerprint Seed",
+            "type": "integer"
+          },
+          "geoip": {
+            "default": true,
+            "title": "Geoip",
+            "type": "boolean"
+          },
+          "gpu_renderer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gpu Renderer"
+          },
+          "gpu_vendor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gpu Vendor"
+          },
+          "group_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "未分组",
+            "title": "Group Name"
+          },
+          "hardware_concurrency": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hardware Concurrency"
+          },
+          "headless": {
+            "default": false,
+            "title": "Headless",
+            "type": "boolean"
+          },
+          "human_preset": {
+            "default": "default",
+            "title": "Human Preset",
+            "type": "string"
+          },
+          "humanize": {
+            "default": true,
+            "title": "Humanize",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "last_exit_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Exit At"
+          },
+          "last_exit_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Exit Reason"
+          },
+          "last_opened_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Opened At"
+          },
+          "launch_args": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Launch Args",
+            "type": "array"
+          },
+          "launch_mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "manual",
+                  "debug"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Launch Mode"
+          },
+          "locale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locale"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "platform": {
+            "default": "windows",
+            "title": "Platform",
+            "type": "string"
+          },
+          "proxy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proxy"
+          },
+          "proxy_geo": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proxy Geo"
+          },
+          "runtime_mode": {
+            "default": "docker",
+            "enum": [
+              "native",
+              "docker"
+            ],
+            "title": "Runtime Mode",
+            "type": "string"
+          },
+          "screen_height": {
+            "default": 1080,
+            "title": "Screen Height",
+            "type": "integer"
+          },
+          "screen_width": {
+            "default": 1920,
+            "title": "Screen Width",
+            "type": "integer"
+          },
+          "startup_urls": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Startup Urls",
+            "type": "array"
+          },
+          "status": {
+            "default": "stopped",
+            "title": "Status",
+            "type": "string"
+          },
+          "tags": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/TagResponse"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "user_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Agent"
+          },
+          "user_data_dir": {
+            "title": "User Data Dir",
+            "type": "string"
+          },
+          "viewer_mode": {
+            "default": "vnc",
+            "enum": [
+              "native-window",
+              "vnc"
+            ],
+            "title": "Viewer Mode",
+            "type": "string"
+          },
+          "vnc_ws_port": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vnc Ws Port"
+          },
+          "warmup_daily_max": {
+            "default": 1,
+            "title": "Warmup Daily Max",
+            "type": "integer"
+          },
+          "warmup_enabled": {
+            "default": false,
+            "title": "Warmup Enabled",
+            "type": "boolean"
+          },
+          "warmup_persona": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warmup Persona"
+          },
+          "warmup_targets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warmup Targets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "fingerprint_seed",
+          "user_data_dir",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ProfileResponse",
+        "type": "object"
+      },
+      "ProfileStatusResponse": {
+        "properties": {
+          "browser_engine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Browser Engine"
+          },
+          "cdp_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cdp Url"
+          },
+          "display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display"
+          },
+          "launch_mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "manual",
+                  "debug"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Launch Mode"
+          },
+          "proxy_geo": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proxy Geo"
+          },
+          "runtime_mode": {
+            "enum": [
+              "native",
+              "docker"
+            ],
+            "title": "Runtime Mode",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "viewer_mode": {
+            "enum": [
+              "native-window",
+              "vnc"
+            ],
+            "title": "Viewer Mode",
+            "type": "string"
+          },
+          "vnc_ws_port": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vnc Ws Port"
+          }
+        },
+        "required": [
+          "status",
+          "runtime_mode",
+          "viewer_mode"
+        ],
+        "title": "ProfileStatusResponse",
+        "type": "object"
+      },
+      "ProfileUpdate": {
+        "properties": {
+          "account_platform": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Platform"
+          },
+          "auto_launch": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Launch"
+          },
+          "browser_engine": {
+            "anyOf": [
+              {
+                "enum": [
+                  "auto",
+                  "system_chrome",
+                  "cloakbrowser"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Browser Engine"
+          },
+          "clipboard_sync": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clipboard Sync"
+          },
+          "color_scheme": {
+            "anyOf": [
+              {
+                "enum": [
+                  "light",
+                  "dark",
+                  "no-preference"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color Scheme"
+          },
+          "cookies_json": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cookies Json"
+          },
+          "device_memory": {
+            "anyOf": [
+              {
+                "maximum": 8.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Memory"
+          },
+          "device_profile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Profile"
+          },
+          "evolution_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evolution Enabled"
+          },
+          "evolution_interval_hours": {
+            "anyOf": [
+              {
+                "maximum": 720.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evolution Interval Hours"
+          },
+          "fingerprint_options": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FingerprintOptions"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fingerprint_seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fingerprint Seed"
+          },
+          "geoip": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geoip"
+          },
+          "gpu_renderer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gpu Renderer"
+          },
+          "gpu_vendor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gpu Vendor"
+          },
+          "group_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Name"
+          },
+          "hardware_concurrency": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hardware Concurrency"
+          },
+          "headless": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headless"
+          },
+          "human_preset": {
+            "anyOf": [
+              {
+                "enum": [
+                  "default",
+                  "careful"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Human Preset"
+          },
+          "humanize": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Humanize"
+          },
+          "launch_args": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Launch Args"
+          },
+          "locale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locale"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "platform": {
+            "anyOf": [
+              {
+                "enum": [
+                  "windows",
+                  "macos",
+                  "linux"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform"
+          },
+          "proxy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proxy"
+          },
+          "screen_height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Screen Height"
+          },
+          "screen_width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Screen Width"
+          },
+          "startup_urls": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startup Urls"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/TagCreate"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
+          },
+          "user_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Agent"
+          },
+          "warmup_daily_max": {
+            "anyOf": [
+              {
+                "maximum": 5.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warmup Daily Max"
+          },
+          "warmup_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warmup Enabled"
+          },
+          "warmup_persona": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warmup Persona"
+          },
+          "warmup_targets": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warmup Targets"
+          }
+        },
+        "title": "ProfileUpdate",
+        "type": "object"
+      },
+      "ProxyPresetBulkCreate": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProxyPresetCreate"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ProxyPresetBulkCreate",
+        "type": "object"
+      },
+      "ProxyPresetCreate": {
+        "properties": {
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "proxy": {
+            "title": "Proxy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "proxy",
+          "mode"
+        ],
+        "title": "ProxyPresetCreate",
+        "type": "object"
+      },
+      "ProxyPresetResponse": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "proxy": {
+            "title": "Proxy",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "proxy",
+          "mode",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ProxyPresetResponse",
+        "type": "object"
+      },
+      "ProxyTestRequest": {
+        "properties": {
+          "proxy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proxy"
+          }
+        },
+        "title": "ProxyTestRequest",
+        "type": "object"
+      },
+      "ProxyTestResponse": {
+        "properties": {
+          "asn": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asn"
+          },
+          "city": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          },
+          "connection_mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "direct",
+                  "proxy"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Mode"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "country_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country Code"
+          },
+          "ip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip"
+          },
+          "ip_quality": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IpQuality"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "org": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Org"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region"
+          },
+          "source": {
+            "default": "ipapi.co",
+            "title": "Source",
+            "type": "string"
+          },
+          "suggested_locale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggested Locale"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
+          }
+        },
+        "title": "ProxyTestResponse",
+        "type": "object"
+      },
+      "SentenceAssembledPayload": {
+        "description": "Preview-dialog assembly returned by the client for confirm-create.\n\nNever trusted: the confirm endpoint re-validates every field\nserver-side (hardware is rewritten from the template library,\nfingerprint options are forced to the recommended preset).",
+        "properties": {
+          "device_profile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Profile"
+          },
+          "disposable": {
+            "default": false,
+            "title": "Disposable",
+            "type": "boolean"
+          },
+          "locale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locale"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
+          },
+          "warmup_enabled": {
+            "default": false,
+            "title": "Warmup Enabled",
+            "type": "boolean"
+          },
+          "warmup_persona": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warmup Persona"
+          },
+          "warmup_targets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warmup Targets",
+            "type": "array"
+          }
+        },
+        "title": "SentenceAssembledPayload",
+        "type": "object"
+      },
+      "SentenceCreateRequest": {
+        "properties": {
+          "assembled": {
+            "$ref": "#/components/schemas/SentenceAssembledPayload"
+          },
+          "sentence": {
+            "default": "",
+            "title": "Sentence",
+            "type": "string"
+          }
+        },
+        "required": [
+          "assembled"
+        ],
+        "title": "SentenceCreateRequest",
+        "type": "object"
+      },
+      "SentenceDraftRequest": {
+        "description": "一句话建号草案请求：只有原句，长度在端点里校验（中文 422 文案）。",
+        "properties": {
+          "sentence": {
+            "default": "",
+            "title": "Sentence",
+            "type": "string"
+          }
+        },
+        "title": "SentenceDraftRequest",
+        "type": "object"
+      },
+      "StatusResponse": {
+        "properties": {
+          "app_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Version"
+          },
+          "binary_version": {
+            "title": "Binary Version",
+            "type": "string"
+          },
+          "host_os": {
+            "enum": [
+              "windows",
+              "macos",
+              "linux"
+            ],
+            "title": "Host Os",
+            "type": "string"
+          },
+          "host_screen": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Host Screen"
+          },
+          "profiles_total": {
+            "title": "Profiles Total",
+            "type": "integer"
+          },
+          "running_count": {
+            "title": "Running Count",
+            "type": "integer"
+          },
+          "runtime_mode": {
+            "enum": [
+              "native",
+              "docker"
+            ],
+            "title": "Runtime Mode",
+            "type": "string"
+          },
+          "viewer_mode": {
+            "enum": [
+              "native-window",
+              "vnc"
+            ],
+            "title": "Viewer Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "running_count",
+          "binary_version",
+          "profiles_total",
+          "host_os",
+          "runtime_mode",
+          "viewer_mode"
+        ],
+        "title": "StatusResponse",
+        "type": "object"
+      },
+      "TagCreate": {
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "tag": {
+            "title": "Tag",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tag"
+        ],
+        "title": "TagCreate",
+        "type": "object"
+      },
+      "TagResponse": {
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "tag": {
+            "title": "Tag",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tag"
+        ],
+        "title": "TagResponse",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "CloakBrowser Manager",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/app/update": {
+      "get": {
+        "operationId": "get_app_update_api_app_update_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get App Update"
+      },
+      "post": {
+        "operationId": "start_app_update_api_app_update_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Start App Update"
+      }
+    },
+    "/api/app/update/result": {
+      "delete": {
+        "operationId": "dismiss_app_update_result_api_app_update_result_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Dismiss App Update Result"
+      }
+    },
+    "/api/auth/account": {
+      "get": {
+        "operationId": "auth_account_api_auth_account_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Auth Account"
+      },
+      "put": {
+        "operationId": "auth_account_update_api_auth_account_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthAccountUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Auth Account Update"
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "operationId": "auth_login_api_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Auth Login"
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "operationId": "auth_logout_api_auth_logout_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Auth Logout"
+      }
+    },
+    "/api/auth/status": {
+      "get": {
+        "description": "Check if auth is enabled and if the current request is authenticated.\n\nExempt from auth middleware so the frontend can always call it.",
+        "operationId": "auth_status_api_auth_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Auth Status"
+      }
+    },
+    "/api/automation/hours": {
+      "get": {
+        "operationId": "get_automation_hours_api_automation_hours_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomationHoursResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Automation Hours"
+      },
+      "put": {
+        "operationId": "update_automation_hours_api_automation_hours_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutomationHoursRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomationHoursResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Automation Hours"
+      }
+    },
+    "/api/automation/status": {
+      "get": {
+        "operationId": "get_automation_status_api_automation_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomationStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Automation Status"
+      }
+    },
+    "/api/backups": {
+      "get": {
+        "operationId": "list_backups_api_backups_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Backups"
+      },
+      "post": {
+        "operationId": "create_backup_api_backups_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Create Backup"
+      }
+    },
+    "/api/backups/auto": {
+      "get": {
+        "operationId": "get_auto_backup_api_backups_auto_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutoBackupStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Auto Backup"
+      },
+      "put": {
+        "operationId": "update_auto_backup_api_backups_auto_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutoBackupSettingsModel"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutoBackupStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Auto Backup"
+      }
+    },
+    "/api/backups/auto/run": {
+      "post": {
+        "operationId": "run_auto_backup_now_api_backups_auto_run_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Run Auto Backup Now"
+      }
+    },
+    "/api/backups/full/{name}/download": {
+      "get": {
+        "operationId": "download_backup_api_backups_full__name__download_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Backup"
+      }
+    },
+    "/api/backups/restore-upload": {
+      "post": {
+        "description": "Restore from a zip sent as the raw request body (no multipart needed).",
+        "operationId": "restore_uploaded_backup_api_backups_restore_upload_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Restore Uploaded Backup"
+      }
+    },
+    "/api/backups/reveal": {
+      "post": {
+        "operationId": "reveal_backups_api_backups_reveal_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Reveal Backups"
+      }
+    },
+    "/api/backups/{kind}/{name}": {
+      "delete": {
+        "operationId": "delete_backup_api_backups__kind___name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Backup"
+      }
+    },
+    "/api/backups/{kind}/{name}/restore": {
+      "post": {
+        "operationId": "restore_backup_api_backups__kind___name__restore_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Restore Backup"
+      }
+    },
+    "/api/browser/update": {
+      "post": {
+        "description": "Check/download the CloakBrowser binary this license launches.",
+        "operationId": "update_browser_binary_api_browser_update_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserUpdateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Update Browser Binary"
+      }
+    },
+    "/api/configuration/export": {
+      "get": {
+        "operationId": "export_configuration_api_configuration_export_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Export Configuration"
+      }
+    },
+    "/api/configuration/import": {
+      "post": {
+        "operationId": "import_configuration_api_configuration_import_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Configuration"
+      }
+    },
+    "/api/cookies/merge": {
+      "post": {
+        "description": "Convert pasted cookies to JSON and merge them into a profile's existing list.",
+        "operationId": "merge_profile_cookies_api_cookies_merge_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CookieMergeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CookieMergeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Merge Profile Cookies"
+      }
+    },
+    "/api/device-templates": {
+      "get": {
+        "description": "List the Windows device template library, with optional filters.",
+        "operationId": "list_device_templates_api_device_templates_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "family",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Family"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DeviceTemplateResponse"
+                  },
+                  "title": "Response List Device Templates Api Device Templates Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Device Templates"
+      }
+    },
+    "/api/device-templates/{template_id}": {
+      "get": {
+        "operationId": "get_device_template_api_device_templates__template_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_id",
+            "required": true,
+            "schema": {
+              "title": "Template Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceTemplateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Device Template"
+      }
+    },
+    "/api/evolution/logs": {
+      "get": {
+        "operationId": "list_evolution_logs_api_evolution_logs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "profile_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Profile Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EvolutionLogResponse"
+                  },
+                  "title": "Response List Evolution Logs Api Evolution Logs Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Evolution Logs"
+      }
+    },
+    "/api/evolution/proposals": {
+      "get": {
+        "operationId": "list_evolution_proposals_api_evolution_proposals_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "profile_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Profile Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EvolutionProposalResponse"
+                  },
+                  "title": "Response List Evolution Proposals Api Evolution Proposals Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Evolution Proposals"
+      }
+    },
+    "/api/evolution/proposals/{proposal_id}/approve": {
+      "post": {
+        "operationId": "approve_evolution_proposal_api_evolution_proposals__proposal_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvolutionProposalResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve Evolution Proposal"
+      }
+    },
+    "/api/evolution/proposals/{proposal_id}/dismiss": {
+      "post": {
+        "operationId": "dismiss_evolution_proposal_api_evolution_proposals__proposal_id__dismiss_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvolutionProposalResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dismiss Evolution Proposal"
+      }
+    },
+    "/api/evolution/status": {
+      "get": {
+        "operationId": "get_evolution_status_api_evolution_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvolutionStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Evolution Status"
+      }
+    },
+    "/api/groups": {
+      "get": {
+        "operationId": "list_groups_api_groups_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GroupResponse"
+                  },
+                  "title": "Response List Groups Api Groups Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Groups"
+      },
+      "post": {
+        "operationId": "create_group_api_groups_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Group"
+      }
+    },
+    "/api/groups/{group_id}": {
+      "delete": {
+        "operationId": "delete_group_api_groups__group_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "title": "Group Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Group"
+      }
+    },
+    "/api/kernel": {
+      "get": {
+        "operationId": "get_kernel_overview_api_kernel_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KernelOverviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Kernel Overview"
+      }
+    },
+    "/api/kernel/check": {
+      "post": {
+        "operationId": "check_kernel_update_api_kernel_check_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KernelCheckResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Check Kernel Update"
+      }
+    },
+    "/api/kernel/license": {
+      "delete": {
+        "operationId": "remove_kernel_license_key_api_kernel_license_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KernelOverviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Remove Kernel License Key"
+      },
+      "post": {
+        "description": "Save a CloakBrowser license key where the wrapper resolves it.\n\nThe key is only ever written to the wrapper's license.key file; it is\nnever logged or echoed back. An invalid key rolls back (see kernel.py).",
+        "operationId": "save_kernel_license_key_api_kernel_license_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KernelLicenseKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KernelOverviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Kernel License Key"
+      }
+    },
+    "/api/kernel/settings": {
+      "put": {
+        "operationId": "update_kernel_settings_api_kernel_settings_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KernelSettingsModel"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KernelOverviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Kernel Settings"
+      }
+    },
+    "/api/kernel/update": {
+      "post": {
+        "description": "Check/download the CloakBrowser binary this license launches.",
+        "operationId": "update_browser_binary_api_kernel_update_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserUpdateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Update Browser Binary"
+      }
+    },
+    "/api/kernel/versions/{name}": {
+      "delete": {
+        "operationId": "delete_kernel_version_api_kernel_versions__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Kernel Version"
+      }
+    },
+    "/api/linkability": {
+      "get": {
+        "description": "Which stored profiles look correlatable as the same person, and why.\n\nPure analysis over stored records — no browser is launched and no\nprofile is modified.",
+        "operationId": "get_linkability_api_linkability_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkabilityResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Linkability"
+      }
+    },
+    "/api/mcp/audit": {
+      "get": {
+        "operationId": "list_mcp_audit_api_mcp_audit_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/McpAuditResponse"
+                  },
+                  "title": "Response List Mcp Audit Api Mcp Audit Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Mcp Audit"
+      },
+      "post": {
+        "operationId": "create_mcp_audit_api_mcp_audit_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpAuditIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Mcp Audit"
+      }
+    },
+    "/api/profiles": {
+      "get": {
+        "operationId": "list_profiles_api_profiles_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProfileResponse"
+                  },
+                  "title": "Response List Profiles Api Profiles Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Profiles"
+      },
+      "post": {
+        "operationId": "create_profile_api_profiles_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Profile"
+      }
+    },
+    "/api/profiles/disposable": {
+      "post": {
+        "description": "One-click throwaway identity: an unused device template, the\nrecommended new-profile defaults, and a coherent timezone/locale pair\nfor the chosen region — flagged disposable so it can be burned.",
+        "operationId": "create_disposable_profile_api_profiles_disposable_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DisposableCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Disposable Profile"
+      }
+    },
+    "/api/profiles/from-sentence": {
+      "post": {
+        "description": "Confirm-create from a previewed assembly. The client payload is\nre-validated field by field (see sentence_profile.validate_assembled);\nthe response is the created profile plus any assembly warnings.",
+        "operationId": "create_profile_from_sentence_api_profiles_from_sentence_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SentenceCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Profile From Sentence"
+      }
+    },
+    "/api/profiles/from-sentence/draft": {
+      "post": {
+        "description": "Parse a sentence and assemble a profile draft — creates nothing,\nreserves no template; the original sentence is not stored anywhere.",
+        "operationId": "draft_profile_from_sentence_api_profiles_from_sentence_draft_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SentenceDraftRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Draft Profile From Sentence"
+      }
+    },
+    "/api/profiles/from-sentence/options": {
+      "get": {
+        "description": "Static choice lists the one-sentence preview dialog edits against.",
+        "operationId": "sentence_profile_options_api_profiles_from_sentence_options_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Sentence Profile Options"
+      }
+    },
+    "/api/profiles/trash": {
+      "get": {
+        "operationId": "list_deleted_profiles_api_profiles_trash_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProfileResponse"
+                  },
+                  "title": "Response List Deleted Profiles Api Profiles Trash Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Deleted Profiles"
+      }
+    },
+    "/api/profiles/{profile_id}": {
+      "delete": {
+        "operationId": "delete_profile_api_profiles__profile_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Profile"
+      },
+      "get": {
+        "operationId": "get_profile_api_profiles__profile_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Profile"
+      },
+      "put": {
+        "operationId": "update_profile_api_profiles__profile_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Profile"
+      }
+    },
+    "/api/profiles/{profile_id}/apply-device-template": {
+      "post": {
+        "description": "Pin a Windows device template onto a profile (screen/GPU/CPU/memory).\n\nThe template id is recorded in the profile's device_profile field so the\napplied persona stays traceable.",
+        "operationId": "apply_device_template_api_profiles__profile_id__apply_device_template_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyDeviceTemplateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Apply Device Template"
+      }
+    },
+    "/api/profiles/{profile_id}/behavior-traces": {
+      "get": {
+        "operationId": "list_behavior_traces_api_profiles__profile_id__behavior_traces_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Behavior Traces"
+      }
+    },
+    "/api/profiles/{profile_id}/behavior-traces/start": {
+      "post": {
+        "operationId": "start_behavior_trace_api_profiles__profile_id__behavior_traces_start_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Behavior Trace"
+      }
+    },
+    "/api/profiles/{profile_id}/behavior-traces/stop": {
+      "post": {
+        "operationId": "stop_behavior_trace_api_profiles__profile_id__behavior_traces_stop_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stop Behavior Trace"
+      }
+    },
+    "/api/profiles/{profile_id}/burn": {
+      "post": {
+        "description": "Physically destroy a disposable profile — no trash, no restore.\n\nUnlike the normal delete (soft, recoverable for 7 days), burn removes\nthe database row and the whole user data directory at once. Only\nprofiles flagged disposable can be burned, and only with an explicit\n{\"confirm\": true} in the request body.",
+        "operationId": "burn_profile_api_profiles__profile_id__burn_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BurnRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BurnResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Burn Profile"
+      }
+    },
+    "/api/profiles/{profile_id}/cdp": {
+      "get": {
+        "description": "Return CDP connection info. Prevents SPA catch-all from serving index.html.",
+        "operationId": "cdp_info_api_profiles__profile_id__cdp_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cdp Info"
+      }
+    },
+    "/api/profiles/{profile_id}/cdp/json": {
+      "get": {
+        "description": "Proxy Chrome's /json/list, rewriting WS URLs.",
+        "operationId": "cdp_json_list_api_profiles__profile_id__cdp_json_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cdp Json List"
+      }
+    },
+    "/api/profiles/{profile_id}/cdp/json/": {
+      "get": {
+        "description": "Proxy Chrome's /json/list, rewriting WS URLs.",
+        "operationId": "cdp_json_list_api_profiles__profile_id__cdp_json__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cdp Json List"
+      }
+    },
+    "/api/profiles/{profile_id}/cdp/json/list": {
+      "get": {
+        "description": "Proxy Chrome's /json/list, rewriting WS URLs.",
+        "operationId": "cdp_json_list_api_profiles__profile_id__cdp_json_list_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cdp Json List"
+      }
+    },
+    "/api/profiles/{profile_id}/cdp/json/list/": {
+      "get": {
+        "description": "Proxy Chrome's /json/list, rewriting WS URLs.",
+        "operationId": "cdp_json_list_api_profiles__profile_id__cdp_json_list__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cdp Json List"
+      }
+    },
+    "/api/profiles/{profile_id}/cdp/json/version": {
+      "get": {
+        "description": "Proxy Chrome's /json/version, rewriting WS URLs to go through our proxy.",
+        "operationId": "cdp_json_version_api_profiles__profile_id__cdp_json_version_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cdp Json Version"
+      }
+    },
+    "/api/profiles/{profile_id}/cdp/json/version/": {
+      "get": {
+        "description": "Proxy Chrome's /json/version, rewriting WS URLs to go through our proxy.",
+        "operationId": "cdp_json_version_api_profiles__profile_id__cdp_json_version__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cdp Json Version"
+      }
+    },
+    "/api/profiles/{profile_id}/clipboard": {
+      "get": {
+        "description": "Read the VNC session's clipboard.\n\nChrome doesn't write to X11 clipboard under KasmVNC, so xclip can't read it.\nInstead, read via Playwright's CDP connection to Chrome (navigator.clipboard.readText).\nFalls back to xclip for non-Chrome clipboard owners.",
+        "operationId": "get_clipboard_api_profiles__profile_id__clipboard_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Clipboard"
+      },
+      "post": {
+        "description": "Push text into the VNC session's X clipboard via xclip.",
+        "operationId": "set_clipboard_api_profiles__profile_id__clipboard_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClipboardRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Clipboard"
+      }
+    },
+    "/api/profiles/{profile_id}/cookies/export": {
+      "get": {
+        "description": "Download the running browser's cookies as JSON or a cookies.txt.",
+        "operationId": "export_profile_cookies_api_profiles__profile_id__cookies_export_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "title": "Format",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Profile Cookies"
+      }
+    },
+    "/api/profiles/{profile_id}/cookies/pull": {
+      "post": {
+        "description": "Read the running browser's current cookies back into the edit form.\n\nThe stored profile config is deliberately NOT updated here: the panel\nfills the form with the result, and saving stays an explicit user act.",
+        "operationId": "pull_profile_cookies_api_profiles__profile_id__cookies_pull_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CookiePullResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pull Profile Cookies"
+      }
+    },
+    "/api/profiles/{profile_id}/evolution/run": {
+      "post": {
+        "operationId": "run_profile_evolution_now_api_profiles__profile_id__evolution_run_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Profile Evolution Now"
+      }
+    },
+    "/api/profiles/{profile_id}/fingerprint-report": {
+      "get": {
+        "operationId": "get_fingerprint_report_api_profiles__profile_id__fingerprint_report_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Fingerprint Report"
+      }
+    },
+    "/api/profiles/{profile_id}/launch": {
+      "post": {
+        "operationId": "launch_profile_api_profiles__profile_id__launch_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/LaunchRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Req"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LaunchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Launch Profile"
+      }
+    },
+    "/api/profiles/{profile_id}/preflight": {
+      "get": {
+        "operationId": "profile_preflight_api_profiles__profile_id__preflight_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "launch_mode",
+            "required": false,
+            "schema": {
+              "default": "manual",
+              "title": "Launch Mode",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreflightResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Profile Preflight"
+      }
+    },
+    "/api/profiles/{profile_id}/purge": {
+      "delete": {
+        "operationId": "purge_profile_api_profiles__profile_id__purge_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Purge Profile"
+      }
+    },
+    "/api/profiles/{profile_id}/restore": {
+      "post": {
+        "operationId": "restore_profile_api_profiles__profile_id__restore_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Restore Profile"
+      }
+    },
+    "/api/profiles/{profile_id}/site-check": {
+      "post": {
+        "operationId": "start_site_check_api_profiles__profile_id__site_check_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Site Check"
+      }
+    },
+    "/api/profiles/{profile_id}/status": {
+      "get": {
+        "operationId": "get_profile_status_api_profiles__profile_id__status_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Profile Status"
+      }
+    },
+    "/api/profiles/{profile_id}/stop": {
+      "post": {
+        "operationId": "stop_profile_api_profiles__profile_id__stop_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stop Profile"
+      }
+    },
+    "/api/profiles/{profile_id}/warmup": {
+      "get": {
+        "operationId": "get_profile_warmup_api_profiles__profile_id__warmup_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Profile Warmup"
+      }
+    },
+    "/api/profiles/{profile_id}/warmup/run": {
+      "post": {
+        "operationId": "run_profile_warmup_now_api_profiles__profile_id__warmup_run_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Profile Warmup Now"
+      }
+    },
+    "/api/profiles/{profile_id}/warmup/scripts": {
+      "get": {
+        "operationId": "list_profile_warmup_scripts_api_profiles__profile_id__warmup_scripts_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Profile Warmup Scripts"
+      }
+    },
+    "/api/profiles/{profile_id}/warmup/scripts/batches/{batch_id}/approve": {
+      "post": {
+        "operationId": "approve_profile_warmup_script_batch_api_profiles__profile_id__warmup_scripts_batches__batch_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve Profile Warmup Script Batch"
+      }
+    },
+    "/api/profiles/{profile_id}/warmup/scripts/batches/{batch_id}/reject": {
+      "post": {
+        "operationId": "reject_profile_warmup_script_batch_api_profiles__profile_id__warmup_scripts_batches__batch_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reject Profile Warmup Script Batch"
+      }
+    },
+    "/api/profiles/{profile_id}/warmup/scripts/generate": {
+      "post": {
+        "operationId": "generate_profile_warmup_scripts_api_profiles__profile_id__warmup_scripts_generate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Profile Warmup Scripts"
+      }
+    },
+    "/api/proxy-presets": {
+      "get": {
+        "operationId": "list_proxy_presets_api_proxy_presets_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProxyPresetResponse"
+                  },
+                  "title": "Response List Proxy Presets Api Proxy Presets Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Proxy Presets"
+      },
+      "post": {
+        "operationId": "create_proxy_preset_api_proxy_presets_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProxyPresetCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProxyPresetResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Proxy Preset"
+      }
+    },
+    "/api/proxy-presets/bulk": {
+      "post": {
+        "operationId": "create_proxy_presets_bulk_api_proxy_presets_bulk_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProxyPresetBulkCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProxyPresetResponse"
+                  },
+                  "title": "Response Create Proxy Presets Bulk Api Proxy Presets Bulk Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Proxy Presets Bulk"
+      }
+    },
+    "/api/proxy-presets/{preset_id}": {
+      "delete": {
+        "operationId": "delete_proxy_preset_api_proxy_presets__preset_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "preset_id",
+            "required": true,
+            "schema": {
+              "title": "Preset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Proxy Preset"
+      }
+    },
+    "/api/proxy/test": {
+      "post": {
+        "operationId": "test_proxy_api_proxy_test_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProxyTestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProxyTestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Test Proxy"
+      }
+    },
+    "/api/settings/llm": {
+      "get": {
+        "operationId": "get_llm_settings_api_settings_llm_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Llm Settings"
+      },
+      "put": {
+        "operationId": "update_llm_settings_api_settings_llm_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LlmSettingsModel"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Llm Settings"
+      }
+    },
+    "/api/settings/mcp": {
+      "get": {
+        "operationId": "get_mcp_settings_api_settings_mcp_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpSettingsModel"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Mcp Settings"
+      },
+      "put": {
+        "operationId": "update_mcp_settings_api_settings_mcp_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpSettingsModel"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpSettingsModel"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Mcp Settings"
+      }
+    },
+    "/api/site-checks": {
+      "get": {
+        "operationId": "list_site_check_reports_api_site_checks_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Site Check Reports"
+      }
+    },
+    "/api/site-checks/current": {
+      "get": {
+        "operationId": "current_site_check_api_site_checks_current_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Current Site Check"
+      }
+    },
+    "/api/site-checks/sites": {
+      "get": {
+        "operationId": "list_site_check_sites_api_site_checks_sites_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Site Check Sites"
+      }
+    },
+    "/api/site-checks/{report_id}": {
+      "delete": {
+        "operationId": "delete_site_check_report_api_site_checks__report_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "report_id",
+            "required": true,
+            "schema": {
+              "title": "Report Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Site Check Report"
+      },
+      "get": {
+        "operationId": "get_site_check_report_api_site_checks__report_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "report_id",
+            "required": true,
+            "schema": {
+              "title": "Report Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Site Check Report"
+      }
+    },
+    "/api/site-checks/{report_id}/download": {
+      "get": {
+        "operationId": "download_site_check_report_api_site_checks__report_id__download_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "report_id",
+            "required": true,
+            "schema": {
+              "title": "Report Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Site Check Report"
+      }
+    },
+    "/api/site-checks/{report_id}/files/{name}": {
+      "get": {
+        "operationId": "get_site_check_file_api_site_checks__report_id__files__name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "report_id",
+            "required": true,
+            "schema": {
+              "title": "Report Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Site Check File"
+      }
+    },
+    "/api/status": {
+      "get": {
+        "operationId": "get_system_status_api_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get System Status"
+      }
+    },
+    "/api/update": {
+      "post": {
+        "operationId": "update_manager_api_update_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagerUpdateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Update Manager"
+      }
+    },
+    "/api/warmup/targets": {
+      "get": {
+        "operationId": "list_warmup_targets_api_warmup_targets_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Warmup Targets"
+      }
+    },
+    "/{full_path}": {
+      "get": {
+        "description": "Serve React SPA — all non-API routes return index.html.",
+        "operationId": "serve_spa__full_path__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "full_path",
+            "required": true,
+            "schema": {
+              "title": "Full Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Serve Spa"
+      }
+    }
+  }
+}

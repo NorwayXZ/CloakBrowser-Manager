@@ -46,6 +46,7 @@ from backend.desktop_app import (  # noqa: E402
     request_update_from_panel,
     set_login_item,
 )
+from backend.log_rotation import rotate_log, start_rotation  # noqa: E402
 from backend.runtime import resolve_runtime, server_port  # noqa: E402
 
 APP_NAME = "CloakBrowser Manager"
@@ -60,7 +61,9 @@ def _configure_logging() -> None:
     """A Finder-launched app has no terminal: send all output to a log file."""
     directory = log_dir()
     directory.mkdir(parents=True, exist_ok=True)
-    log_file = open(directory / "manager.log", "a", buffering=1, encoding="utf-8")
+    log_path = directory / "manager.log"
+    rotate_log(log_path)  # a log that grew past the limit while the app was off
+    log_file = open(log_path, "a", buffering=1, encoding="utf-8")
     # Point fds 1/2 at the log too, so child processes (Xray, Chromium) are captured.
     os.dup2(log_file.fileno(), 1)
     os.dup2(log_file.fileno(), 2)
@@ -71,6 +74,7 @@ def _configure_logging() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         stream=log_file,
     )
+    start_rotation(log_path)
     logger.info("---- %s starting (pid %s) ----", APP_NAME, os.getpid())
 
 

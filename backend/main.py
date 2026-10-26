@@ -28,13 +28,14 @@ from urllib.parse import quote, urlparse
 
 import httpx
 from fastapi import Body, FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 import starlette.requests
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from . import agent_api, agent_auth, agent_lease
 from . import auto_backup
+from . import client_logs
 from . import backup as backups
 from . import database as db
 from . import device_templates
@@ -108,6 +109,9 @@ from .models import (
     McpAuditIn,
     McpAuditResponse,
     McpSettingsModel,
+    UiPreferencesModel,
+    ClientLogBatch,
+    ClientLogResult,
     ProfileCreate,
     ProfileResponse,
     ProfileStatusResponse,
@@ -1808,6 +1812,32 @@ async def update_mcp_settings(body: McpSettingsModel):
     return McpSettingsModel(mode=body.mode)
 
 
+UI_PREFERENCES_SETTING_KEY = "ui.preferences"
+
+
+@app.get("/api/settings/ui", response_model=UiPreferencesModel)
+async def get_ui_preferences():
+    raw = db.get_setting(UI_PREFERENCES_SETTING_KEY)
+    if raw:
+        try:
+            return UiPreferencesModel.model_validate_json(raw)
+        except ValueError:
+            logger.warning("Ignoring unreadable UI preferences: %r", raw[:200])
+    return UiPreferencesModel()
+
+
+@app.put("/api/settings/ui", response_model=UiPreferencesModel)
+async def update_ui_preferences(body: UiPreferencesModel):
+    db.set_setting(UI_PREFERENCES_SETTING_KEY, body.model_dump_json())
+    return body
+
+
+@app.post("/api/client-logs", response_model=ClientLogResult)
+async def receive_client_logs(body: ClientLogBatch):
+    accepted, dropped = client_logs.write_entries([entry.model_dump() for entry in body.entries])
+    return ClientLogResult(accepted=accepted, dropped=dropped)
+
+
 @app.post("/api/mcp/audit", status_code=201)
 async def create_mcp_audit(body: McpAuditIn):
     audit_id = await asyncio.to_thread(
@@ -2674,6 +2704,7 @@ async def get_system_status():
         runtime_mode=browser_mgr.runtime.runtime_mode,
         viewer_mode=browser_mgr.runtime.viewer_mode,
         host_screen=list(primary_screen_size() or []) or None,
+        data_newer_than_app=db.data_is_newer_than_program(),
     )
 
 
@@ -3334,28 +3365,63 @@ agent_http_mcp = agent_api.install(
 
 # ── Static Frontend ───────────────────────────────────────────────────────────
 
+def _ui_interface() -> str:
+    """"new" or "legacy": which panel "/" opens, from the saved UI preferences."""
+    raw = db.get_setting(UI_PREFERENCES_SETTING_KEY)
+    if raw:
+        try:
+            return UiPreferencesModel.model_validate_json(raw).interface
+        except ValueError:
+            pass
+    return "new"
+
+
+def _spa_page(full_path: str, interface: str = "new") -> Path:
+    """The HTML page for a client-side route.
+
+    The redesigned panel is the root page. The previous panel is built as a
+    second page under /legacy/ and is also what "/" opens while the saved
+    preference says "legacy". When the legacy page was not built, the new one
+    is served instead so a stale preference can never leave a blank window.
+    """
+    legacy_page = FRONTEND_DIR / "legacy" / "index.html"
+    wants_legacy = full_path == "legacy" or full_path.startswith("legacy/") or (full_path == "" and interface == "legacy")
+    if wants_legacy and legacy_page.is_file():
+        return legacy_page
+    return FRONTEND_DIR / "index.html"
+
+
 # Serve React build. Must be AFTER API routes so /api/* isn't caught by the SPA.
 if FRONTEND_DIR.exists():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIR / "assets"), name="assets")
 
-    @app.get("/{full_path:path}")
-    async def serve_spa(full_path: str):
-        """Serve React SPA — all non-API routes return index.html."""
-        if full_path.startswith("api/"):
-            raise HTTPException(status_code=404, detail="Not found")
-        if full_path:
-            # Prevent path traversal: resolve and ensure the target stays inside
-            # FRONTEND_DIR. Without this, encoded `..` segments could escape the
-            # web root and read arbitrary local files (the route also bypasses
-            # the auth middleware because it is not under /api/).
-            try:
-                file_path = (FRONTEND_DIR / full_path).resolve()
-                if not file_path.is_relative_to(FRONTEND_DIR.resolve()):
-                    raise HTTPException(status_code=404, detail="Not found")
-            except (ValueError, HTTPException):
+
+# The page must be revalidated: a stale cached index.html keeps loading the
+# previous release's bundle after the app is upgraded.
+_NO_CACHE = {"Cache-Control": "no-cache"}
+
+
+@app.get("/{full_path:path}")
+async def serve_spa(full_path: str, request: Request):
+    """Serve the React panel: every route that is not an API call returns a page."""
+    if full_path.startswith("api/") or not FRONTEND_DIR.exists():
+        raise HTTPException(status_code=404, detail="Not found")
+    if full_path == "next" or full_path.startswith("next/"):
+        # The redesigned panel used to live here while it was in preview.
+        query = f"?{request.url.query}" if request.url.query else ""
+        return RedirectResponse("/" + full_path[len("next/"):] + query, status_code=307)
+    if full_path:
+        # Prevent path traversal: resolve and ensure the target stays inside
+        # FRONTEND_DIR. Without this, encoded `..` segments could escape the
+        # web root and read arbitrary local files (the route also bypasses
+        # the auth middleware because it is not under /api/).
+        try:
+            file_path = (FRONTEND_DIR / full_path).resolve()
+            if not file_path.is_relative_to(FRONTEND_DIR.resolve()):
                 raise HTTPException(status_code=404, detail="Not found")
-            if file_path.exists() and file_path.is_file():
-                return FileResponse(file_path)
-        # The page must be revalidated: a stale cached index.html keeps loading
-        # the previous release's bundle after the app is upgraded.
-        return FileResponse(FRONTEND_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+        except (ValueError, HTTPException):
+            raise HTTPException(status_code=404, detail="Not found")
+        if file_path.exists() and file_path.is_file():
+            return FileResponse(file_path, headers=_NO_CACHE if file_path.suffix == ".html" else None)
+    interface = _ui_interface() if full_path == "" else "new"
+    return FileResponse(_spa_page(full_path, interface), headers=_NO_CACHE)

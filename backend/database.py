@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import logging
 import random
 import shutil
 import sqlite3
@@ -15,10 +16,18 @@ from typing import Any
 from .runtime import resolve_runtime
 from .secrets_crypto import decrypt_value, encrypt_json, decrypt_json, encrypt_value
 
+logger = logging.getLogger(__name__)
+
 RUNTIME = resolve_runtime()
 DATA_DIR = RUNTIME.data_dir
 DB_PATH = DATA_DIR / "profiles.db"
 CONFIGURATION_SCHEMA_VERSION = 1
+# Version of the database layout this program writes. Migrations are still the
+# idempotent ALTER TABLEs in init_db; this number only lets a program notice
+# that the data was last written by a newer one (a downgrade), whose layout it
+# cannot be sure to read. Raise it whenever a migration is added.
+SCHEMA_VERSION = 1
+SETTING_SCHEMA_VERSION = "db.schema_version"
 CONFIGURATION_PROFILE_FIELDS = (
     "name", "browser_engine", "device_profile", "fingerprint_seed", "proxy", "timezone", "locale", "platform",
     "user_agent", "screen_width", "screen_height", "gpu_vendor", "gpu_renderer", "hardware_concurrency",
@@ -292,8 +301,37 @@ def init_db():
         ).fetchall()
         conn.execute("DELETE FROM profiles WHERE deleted_at IS NOT NULL AND deleted_at < ?", (cutoff,))
         conn.commit()
+    _stamp_schema_version()
     for row in expired:
         shutil.rmtree(Path(row["user_data_dir"]), ignore_errors=True)
+
+
+def stored_schema_version() -> int | None:
+    """The layout version last written to this database, or None for data from before versions."""
+    raw = get_setting(SETTING_SCHEMA_VERSION)
+    try:
+        return int(raw) if raw is not None else None
+    except ValueError:
+        return None
+
+
+def data_is_newer_than_program() -> bool:
+    stored = stored_schema_version()
+    return stored is not None and stored > SCHEMA_VERSION
+
+
+def _stamp_schema_version() -> None:
+    """Record this program's layout version, never lowering one a newer program wrote."""
+    stored = stored_schema_version()
+    if stored is not None and stored > SCHEMA_VERSION:
+        logger.warning(
+            "Database layout version %s is newer than this program supports (%s); "
+            "it was last used by a newer release. Update the app to avoid losing data.",
+            stored, SCHEMA_VERSION,
+        )
+        return
+    if stored != SCHEMA_VERSION:
+        set_setting(SETTING_SCHEMA_VERSION, str(SCHEMA_VERSION))
 
 
 def _now() -> str:

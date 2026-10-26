@@ -1159,6 +1159,15 @@ export const api = {
 
   getAutomationStatus: () => request<AutomationStatus>("/api/automation/status"),
 
+  /** Hand the window back to the redesigned panel, which "/" opens from now on. */
+  switchToNewInterface: async () => {
+    const prefs = await request<{ theme: string; sidebar_collapsed: boolean }>("/api/settings/ui");
+    await request("/api/settings/ui", {
+      method: "PUT",
+      body: JSON.stringify({ theme: prefs.theme, sidebar_collapsed: prefs.sidebar_collapsed, interface: "new" }),
+    });
+  },
+
   getAutomationHours: () => request<AutomationHours>("/api/automation/hours"),
 
   updateAutomationHours: (hours: string | null) =>
