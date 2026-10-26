@@ -1,0 +1,23 @@
+{
+  "name": "cloakbrowser-mail-worker",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Email Worker that receives mail for the domain mailbox used by AI agents (see docs/MAIL.md).",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "migrate": "wrangler d1 migrations apply cloakbrowser-mail --remote",
+    "migrate:local": "wrangler d1 migrations apply cloakbrowser-mail --local",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/core.test.mjs",
+    "test:integration": "node test/integration.mjs"
+  },
+  "dependencies": {
+    "postal-mime": "^4.1.4"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261026.1",
+    "typescript": "^5.6.0",
+    "wrangler": "^4.152.0"
+  }
+}

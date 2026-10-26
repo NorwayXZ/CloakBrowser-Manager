@@ -174,6 +174,12 @@ PAGE_TOOLS = (
 )
 
 
+MAIL_TOOLS = (
+    "account_prepare", "mail_new_address", "mail_wait", "mail_list", "mail_read",
+    "vault_create", "vault_list", "vault_mark",
+)
+
+
 def test_tool_snapshot_read_only_mode():
     tools = mcp_server.build_mcp_tools("read-only")
     assert [t.name for t in tools] == list(EXPECTED_READ_TOOLS)
@@ -190,10 +196,10 @@ def test_tool_snapshot_full_mode():
 def test_tool_snapshot_automation_mode():
     tools = mcp_server.build_mcp_tools("automation")
     expected = {**EXPECTED_READ_TOOLS, **EXPECTED_ACTION_TOOLS, **EXPECTED_BROWSER_TOOLS}
-    assert [t.name for t in tools] == [*expected, *PAGE_TOOLS]
+    assert [t.name for t in tools] == [*expected, *PAGE_TOOLS, *MAIL_TOOLS]
     by_name = {t.name: t.input_schema for t in tools}
     assert {name: by_name[name] for name in expected} == expected
-    for name in PAGE_TOOLS:
+    for name in (*PAGE_TOOLS, *MAIL_TOOLS):
         assert "profile" in by_name[name]["required"], name
         assert by_name[name]["properties"]["profile"]["type"] == "string"
 
@@ -886,7 +892,9 @@ async def test_token_scope_caps_the_mode():
     names = lambda scope: [t.name for t in agent_tools.visible_tools("automation", scope)]  # noqa: E731
     assert names("read") == list(EXPECTED_READ_TOOLS)
     assert names("control") == [*EXPECTED_READ_TOOLS, *EXPECTED_ACTION_TOOLS]
-    assert names("cdp") == [*EXPECTED_READ_TOOLS, *EXPECTED_ACTION_TOOLS, *EXPECTED_BROWSER_TOOLS, *PAGE_TOOLS]
+    assert names("cdp") == [
+        *EXPECTED_READ_TOOLS, *EXPECTED_ACTION_TOOLS, *EXPECTED_BROWSER_TOOLS, *PAGE_TOOLS, *MAIL_TOOLS,
+    ]
 
 
 async def test_open_browser_stops_when_the_profile_is_leased_to_someone_else():
@@ -1117,3 +1125,110 @@ async def test_remote_calls_carry_a_per_session_lease_holder():
     assert sent.startswith("codex#") and len(sent) > len("codex#")
     await agent_tools.RemoteBackend(fake.client(), holder="cloak-cli").call("manager_status", {}, "cloak-cli", None)
     assert fake.bodies[("POST", "/api/agent/tools/manager_status")]["holder"] == "cloak-cli"
+
+
+# ── sign-up helpers: account_prepare, mail_*, vault_* ────────────────────────
+
+
+def mail_fake() -> FakeManager:
+    fake = automation_fake()
+    fake.routes[("GET", f"/api/profiles/{PID}")] = (200, {"id": PID, "name": "店铺A"})
+    return fake
+
+
+async def test_account_prepare_returns_references_not_a_password():
+    fake = mail_fake()
+    fake.routes[("POST", f"/api/profiles/{PID}/account/prepare")] = (
+        200,
+        {"ok": True, "email": "nina.shaw42@mail.test", "entry": {
+            "id": "abc123def4567890", "site": "example.com", "username": "kcarter61", "status": "new",
+            "refs": {"password": "{{vault:abc123def4567890.password}}", "username": "{{vault:abc123def4567890.username}}",
+                     "email": "{{vault:abc123def4567890.email}}"},
+        }},
+    )
+    result = await mcp_server.dispatch(fake.client(), "account_prepare", {"profile": "店铺A", "site": "https://example.com/signup"})
+    assert result["ok"] is True and result["email"] == "nina.shaw42@mail.test"
+    assert result["entry"]["refs"]["password"] == "{{vault:abc123def4567890.password}}"
+    assert "mail_wait" in result["next_step"] and "验证码" in result["next_step"]
+    assert fake.bodies[("POST", f"/api/profiles/{PID}/account/prepare")] == {
+        "site": "https://example.com/signup", "username": None, "password_length": 20, "symbols": True,
+    }
+    # creating credentials needs no page lease: the page is not touched
+    assert not fake.hit("POST", f"/api/profiles/{PID}/lease")
+
+
+async def test_mail_wait_passes_filters_and_surfaces_a_timeout_with_a_hint():
+    fake = mail_fake()
+    fake.routes[("POST", f"/api/profiles/{PID}/mail/wait")] = (
+        200, {"ok": False, "reason": "mail_timeout", "detail": "45 秒内没有收到符合条件的新邮件。"},
+    )
+    result = await mcp_server.dispatch(
+        fake.client(), "mail_wait",
+        {"profile": PID, "address": "a@mail.test", "from_contains": "acme", "timeout_s": 30},
+    )
+    assert result["reason"] == "mail_timeout" and "mail_wait" in result["next_step"]
+    assert fake.bodies[("POST", f"/api/profiles/{PID}/mail/wait")] == {
+        "address": "a@mail.test", "from_contains": "acme", "subject_contains": None, "timeout_s": 30,
+    }
+    fake.routes[("POST", f"/api/profiles/{PID}/mail/wait")] = (
+        200, {"ok": True, "message": {"id": "m1", "codes": ["483920"], "links": [], "untrusted_content": True}},
+    )
+    ok = await mcp_server.dispatch(fake.client(), "mail_wait", {"profile": PID, "address": "a@mail.test"})
+    assert ok["ok"] is True and ok["message"]["codes"] == ["483920"] and ok["profile_id"] == PID
+
+
+async def test_mail_and_vault_tools_hit_their_endpoints():
+    fake = mail_fake()
+    pid_path = f"/api/profiles/{PID}"
+    fake.routes.update({
+        ("POST", f"{pid_path}/mail/address"): (200, {"ok": True, "address": "x@mail.test"}),
+        ("GET", f"{pid_path}/mail/messages"): (200, {"ok": True, "messages": []}),
+        ("GET", f"{pid_path}/mail/messages/m1"): (200, {"ok": True, "message": {"id": "m1"}}),
+        ("POST", f"{pid_path}/vault"): (200, {"ok": True, "entry": {"id": "e1"}}),
+        ("GET", f"{pid_path}/vault"): (200, {"ok": True, "entries": []}),
+        ("PATCH", f"{pid_path}/vault/e1"): (200, {"ok": True, "entry": {"id": "e1", "status": "verified"}}),
+    })
+    calls = [
+        ("mail_new_address", {"site": "example.com"}, "POST", f"{pid_path}/mail/address"),
+        ("mail_list", {"address": "x@mail.test", "limit": 5}, "GET", f"{pid_path}/mail/messages"),
+        ("mail_read", {"message_id": "m1"}, "GET", f"{pid_path}/mail/messages/m1"),
+        ("vault_create", {"site": "example.com", "symbols": False}, "POST", f"{pid_path}/vault"),
+        ("vault_list", {}, "GET", f"{pid_path}/vault"),
+        ("vault_mark", {"entry_id": "e1", "status": "verified"}, "PATCH", f"{pid_path}/vault/e1"),
+    ]
+    for name, args, method, path in calls:
+        result = await mcp_server.dispatch(fake.client(), name, {"profile": PID, **args})
+        assert result["ok"] is True, (name, result)
+        assert fake.hit(method, path), name
+    assert fake.bodies[("POST", f"{pid_path}/vault")]["symbols"] is False
+
+
+async def test_mail_tools_validate_and_map_errors():
+    fake = mail_fake()
+    for name, args in (("mail_wait", {}), ("account_prepare", {"site": "x.com"}), ("vault_list", {})):
+        result = await mcp_server.dispatch(fake.client(), name, args)
+        assert result["reason"] == "invalid_argument", name
+    assert (await mcp_server.dispatch(fake.client(), "mail_read", {"profile": PID}))["reason"] == "invalid_argument"
+    fake.routes[("POST", f"/api/profiles/{PID}/mail/address")] = (
+        409, {"ok": False, "reason": "mail_not_configured", "detail": "还没配置域名邮箱"},
+    )
+    result = await mcp_server.dispatch(fake.client(), "mail_new_address", {"profile": PID})
+    assert result["reason"] == "mail_not_configured" and "docs/MAIL.md" in result["next_step"]
+
+
+async def test_mail_and_vault_tools_need_the_automation_tier():
+    fake = mail_fake()
+    fake.mode = "full"
+    for name in MAIL_TOOLS:
+        result = await mcp_server.dispatch(fake.client(), name, {"profile": PID})
+        assert result["reason"] == "mode_not_automation", name
+    fake.mode = "automation"
+    for name in MAIL_TOOLS:
+        result = await mcp_server.dispatch(fake.client(), name, {"profile": PID}, token_scope="control")
+        assert result["reason"] == "scope_denied", name
+
+
+def test_typed_text_is_not_kept_in_the_audit_log():
+    summary = mcp_server.summarize_args({"profile": "p", "ref": "e1", "text": "hunter2-hunter2"})
+    assert summary["text"] == {"present": True, "length": 15}
+    assert "hunter2" not in json.dumps(summary)

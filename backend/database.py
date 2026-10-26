@@ -189,6 +189,53 @@ def init_db():
                 reason TEXT,
                 duration_ms INTEGER
             );
+
+            -- Domain mailbox for agent sign-ups (backend/mailbox.py). Message bodies,
+            -- codes and links are stored encrypted; headers stay queryable.
+            CREATE TABLE IF NOT EXISTS mail_addresses (
+                id TEXT PRIMARY KEY,
+                address TEXT NOT NULL UNIQUE,
+                profile_id TEXT NOT NULL,
+                site TEXT,
+                label TEXT,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_mail_addresses_profile ON mail_addresses(profile_id);
+
+            CREATE TABLE IF NOT EXISTS mail_messages (
+                id TEXT PRIMARY KEY,
+                address TEXT NOT NULL,
+                -- (epoch, remote_seq) is unique: the epoch advances when the mail Worker's own
+                -- database was recreated and its sequence started over.
+                epoch INTEGER NOT NULL DEFAULT 0,
+                remote_seq INTEGER NOT NULL,
+                sender TEXT,
+                sender_name TEXT,
+                subject TEXT,
+                body_enc TEXT,
+                received_at TEXT NOT NULL,
+                fetched_at TEXT NOT NULL,
+                is_read INTEGER NOT NULL DEFAULT 0,
+                UNIQUE (epoch, remote_seq)
+            );
+            CREATE INDEX IF NOT EXISTS idx_mail_messages_address ON mail_messages(address, received_at);
+
+            -- Credentials an agent created for a sign-up. The password is encrypted and
+            -- only ever leaves the Manager through the panel's explicit "reveal" or as a
+            -- {{vault:<id>.password}} reference resolved while typing.
+            CREATE TABLE IF NOT EXISTS vault_entries (
+                id TEXT PRIMARY KEY,
+                profile_id TEXT NOT NULL,
+                site TEXT NOT NULL,
+                username TEXT,
+                email TEXT,
+                password_enc TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'new',
+                notes TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_vault_profile ON vault_entries(profile_id);
         """)
         conn.commit()
 
@@ -443,6 +490,195 @@ def list_mcp_audit(limit: int = 100) -> list[dict[str, Any]]:
         entry["ok"] = bool(entry["ok"])
         entries.append(entry)
     return entries
+
+
+# ── Domain mailbox ───────────────────────────────────────────────────────────
+
+
+def create_mail_address(*, address: str, profile_id: str, site: str | None = None, label: str | None = None) -> dict[str, Any]:
+    entry = {
+        "id": uuid.uuid4().hex,
+        "address": address.lower(),
+        "profile_id": profile_id,
+        "site": site,
+        "label": label,
+        "created_at": _now(),
+    }
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO mail_addresses (id, address, profile_id, site, label, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (entry["id"], entry["address"], profile_id, site, label, entry["created_at"]),
+        )
+        conn.commit()
+    return entry
+
+
+def get_mail_address(address: str) -> dict[str, Any] | None:
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM mail_addresses WHERE address = ?", (address.lower(),)).fetchone()
+    return dict(row) if row else None
+
+
+def list_mail_addresses(profile_id: str | None = None) -> list[dict[str, Any]]:
+    with get_db() as conn:
+        if profile_id is None:
+            rows = conn.execute("SELECT * FROM mail_addresses ORDER BY created_at DESC, rowid DESC").fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM mail_addresses WHERE profile_id = ? ORDER BY created_at DESC, rowid DESC", (profile_id,)
+            ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def count_mail_addresses_since(since_iso: str) -> int:
+    with get_db() as conn:
+        row = conn.execute("SELECT COUNT(*) AS n FROM mail_addresses WHERE created_at >= ?", (since_iso,)).fetchone()
+    return int(row["n"])
+
+
+def delete_mail_address(address: str) -> bool:
+    with get_db() as conn:
+        conn.execute("DELETE FROM mail_messages WHERE address = ?", (address.lower(),))
+        cursor = conn.execute("DELETE FROM mail_addresses WHERE address = ?", (address.lower(),))
+        conn.commit()
+    return cursor.rowcount > 0
+
+
+def insert_mail_message(
+    *, address: str, remote_seq: int, sender: str | None, sender_name: str | None, subject: str | None,
+    body: dict[str, Any], received_at: str, epoch: int = 0,
+) -> dict[str, Any] | None:
+    """Store a fetched message once (``(epoch, remote_seq)`` is unique). ``None`` if it was already there."""
+    entry_id = uuid.uuid4().hex
+    with get_db() as conn:
+        try:
+            conn.execute(
+                """
+                INSERT INTO mail_messages
+                    (id, address, epoch, remote_seq, sender, sender_name, subject, body_enc, received_at, fetched_at, is_read)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                """,
+                (entry_id, address.lower(), epoch, remote_seq, sender, sender_name, subject,
+                 encrypt_json(body), received_at, _now()),
+            )
+            conn.commit()
+        except sqlite3.IntegrityError:
+            return None
+    return get_mail_message(entry_id)
+
+
+def _mail_message_row(row: sqlite3.Row) -> dict[str, Any]:
+    entry = dict(row)
+    body = decrypt_json(entry.pop("body_enc", None))
+    entry["body"] = body if isinstance(body, dict) else {}
+    entry["is_read"] = bool(entry["is_read"])
+    return entry
+
+
+def get_mail_message(message_id: str) -> dict[str, Any] | None:
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM mail_messages WHERE id = ?", (message_id,)).fetchone()
+    return _mail_message_row(row) if row else None
+
+
+def list_mail_messages(address: str, *, unread_only: bool = False, limit: int = 20) -> list[dict[str, Any]]:
+    query = "SELECT * FROM mail_messages WHERE address = ?"
+    if unread_only:
+        query += " AND is_read = 0"
+    query += " ORDER BY received_at DESC, remote_seq DESC LIMIT ?"
+    with get_db() as conn:
+        rows = conn.execute(query, (address.lower(), max(1, min(int(limit), 100)))).fetchall()
+    return [_mail_message_row(row) for row in rows]
+
+
+def mark_mail_read(message_id: str) -> None:
+    with get_db() as conn:
+        conn.execute("UPDATE mail_messages SET is_read = 1 WHERE id = ?", (message_id,))
+        conn.commit()
+
+
+def purge_mail_older_than(cutoff_iso: str) -> int:
+    with get_db() as conn:
+        cursor = conn.execute("DELETE FROM mail_messages WHERE received_at < ?", (cutoff_iso,))
+        conn.commit()
+    return cursor.rowcount
+
+
+# ── Credential vault ─────────────────────────────────────────────────────────
+
+
+def _vault_row(row: sqlite3.Row, *, with_password: bool = False) -> dict[str, Any]:
+    entry = dict(row)
+    password = decrypt_value(entry.pop("password_enc", None))
+    if with_password:
+        entry["password"] = password
+    return entry
+
+
+def create_vault_entry(
+    *, profile_id: str, site: str, username: str | None, email: str | None, password: str,
+    notes: str | None = None,
+) -> dict[str, Any]:
+    entry_id = uuid.uuid4().hex[:16]
+    now = _now()
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO vault_entries
+                (id, profile_id, site, username, email, password_enc, status, notes, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'new', ?, ?, ?)
+            """,
+            (entry_id, profile_id, site, username, email, encrypt_value(password), notes, now, now),
+        )
+        conn.commit()
+    return get_vault_entry(entry_id)  # type: ignore[return-value]
+
+
+def get_vault_entry(entry_id: str, *, with_password: bool = False) -> dict[str, Any] | None:
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM vault_entries WHERE id = ?", (entry_id,)).fetchone()
+    return _vault_row(row, with_password=with_password) if row else None
+
+
+def list_vault_entries(profile_id: str | None = None, *, with_password: bool = False) -> list[dict[str, Any]]:
+    with get_db() as conn:
+        if profile_id is None:
+            rows = conn.execute("SELECT * FROM vault_entries ORDER BY created_at DESC, rowid DESC").fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM vault_entries WHERE profile_id = ? ORDER BY created_at DESC, rowid DESC", (profile_id,)
+            ).fetchall()
+    return [_vault_row(row, with_password=with_password) for row in rows]
+
+
+def count_vault_entries_since(since_iso: str) -> int:
+    with get_db() as conn:
+        row = conn.execute("SELECT COUNT(*) AS n FROM vault_entries WHERE created_at >= ?", (since_iso,)).fetchone()
+    return int(row["n"])
+
+
+def update_vault_entry(entry_id: str, *, status: str | None = None, notes: str | None = None) -> dict[str, Any] | None:
+    fields, values = [], []
+    if status is not None:
+        fields.append("status = ?")
+        values.append(status)
+    if notes is not None:
+        fields.append("notes = ?")
+        values.append(notes)
+    if fields:
+        fields.append("updated_at = ?")
+        values.append(_now())
+        with get_db() as conn:
+            conn.execute(f"UPDATE vault_entries SET {', '.join(fields)} WHERE id = ?", (*values, entry_id))
+            conn.commit()
+    return get_vault_entry(entry_id)
+
+
+def delete_vault_entry(entry_id: str) -> bool:
+    with get_db() as conn:
+        cursor = conn.execute("DELETE FROM vault_entries WHERE id = ?", (entry_id,))
+        conn.commit()
+    return cursor.rowcount > 0
 
 
 def export_configuration() -> dict[str, Any]:

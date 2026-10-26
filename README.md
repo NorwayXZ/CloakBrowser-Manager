@@ -309,7 +309,7 @@ Ctrl + C
 
 ## 让 AI agent 使用
 
-Codex、Claude、DeepSeek harness 等 AI agent 可以通过 MCP（stdio 或 HTTP）、REST 工具接口或 `bin/cloak` 命令行使用指纹浏览器，包括打开画像、读取和点击页面、截图。页面控制默认关闭，在 `mcp.mode=automation` 下才开放；用户可以在面板里随时「接管」。接入方式、权限档位和规则见 [docs/AGENT.md](docs/AGENT.md)，MCP 接入细节见 [docs/MCP.md](docs/MCP.md)。
+Codex、Claude、DeepSeek harness 等 AI agent 可以通过 MCP（stdio 或 HTTP）、REST 工具接口或 `bin/cloak` 命令行使用指纹浏览器，包括打开画像、读取和点击页面、截图。页面控制默认关闭，在 `mcp.mode=automation` 下才开放；用户可以在面板里随时「接管」。AI 还能用你自己域名下的邮箱自动注册账号（域名邮箱 + 密码保险库，AI 看不到密码），见 [docs/MAIL.md](docs/MAIL.md)。接入方式、权限档位和规则见 [docs/AGENT.md](docs/AGENT.md)，MCP 接入细节见 [docs/MCP.md](docs/MCP.md)。
 
 ## 配置备份和扩展
 

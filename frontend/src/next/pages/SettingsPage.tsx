@@ -7,6 +7,7 @@ import { AboutSection } from "../features/settings/AboutSection";
 import { AccountSection } from "../features/settings/AccountSection";
 import { AgentAccessSection } from "../features/settings/AgentAccessSection";
 import { AiSection } from "../features/settings/AiSection";
+import { MailSection } from "../features/settings/MailSection";
 import { AutomationSection } from "../features/settings/AutomationSection";
 import { KernelSection } from "../features/settings/KernelSection";
 
@@ -15,6 +16,7 @@ const SECTIONS = [
   { id: "kernel", label: "浏览器内核" },
   { id: "ai", label: "AI 接口" },
   { id: "agent", label: "AI 接入" },
+  { id: "mail", label: "邮箱与保险库" },
   { id: "automation", label: "自动化" },
   { id: "account", label: "账号与安全" },
   { id: "about", label: "关于与更新" },
@@ -27,7 +29,7 @@ export function SettingsPage() {
 
   return (
     <div className="flex min-h-full flex-col gap-6 p-6">
-      <PageHeader title="设置" description="外观、内核、AI 接口、AI 接入、自动化、账号与更新。" />
+      <PageHeader title="设置" description="外观、内核、AI 接口、AI 接入、邮箱与保险库、自动化、账号与更新。" />
       <div className="flex min-w-0 flex-col gap-6 md:flex-row">
         <nav aria-label="设置分类" className="shrink-0 md:w-44">
           <ul className="flex gap-1 overflow-x-auto md:flex-col">
@@ -124,6 +126,8 @@ function CurrentSection({ id }: { id: (typeof SECTIONS)[number]["id"] }) {
       return <AiSection />;
     case "agent":
       return <AgentAccessSection />;
+    case "mail":
+      return <MailSection />;
     case "automation":
       return <AutomationSection />;
     case "account":

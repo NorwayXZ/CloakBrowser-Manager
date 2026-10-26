@@ -33,7 +33,7 @@ from fastapi.staticfiles import StaticFiles
 import starlette.requests
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from . import agent_api, agent_auth, agent_lease
+from . import agent_api, agent_auth, agent_lease, mail_api
 from . import auto_backup
 from . import client_logs
 from . import backup as backups
@@ -41,6 +41,7 @@ from . import database as db
 from . import device_templates
 from .fingerprint_options import RECOMMENDED_NEW_PROFILE_OPTIONS, parse_fingerprint_options
 from .host_display import primary_screen_size
+from .mailbox import MailService
 from .page_control import PageController
 from .cookie_formats import (
     CookieFormatError,
@@ -451,6 +452,7 @@ browser_mgr = BrowserManager()
 # Agent surface: control leases, page control, scoped tokens (see agent_api.py).
 agent_leases = agent_lease.LeaseRegistry()
 agent_pages = PageController(files_dir=db.DATA_DIR / "agent-files")
+agent_mail = MailService()
 agent_cdp = agent_api.CdpConnections()
 agent_token_store = agent_auth.TokenStore(
     lambda key: db.get_setting(key), lambda key, value: db.set_setting(key, value)
@@ -3360,6 +3362,13 @@ agent_http_mcp = agent_api.install(
         internal_token=AGENT_INTERNAL_TOKEN,
         auth_required=_auth_required,
     ),
+)
+
+
+mail_api.install(
+    app,
+    agent_mail,
+    lambda profile_id: bool((p := db.get_profile(profile_id)) and not p.get("deleted_at")),
 )
 
 

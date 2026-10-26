@@ -47,6 +47,25 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/native_runtime_smoke.py
 
+  mail-worker:
+    # The Cloudflare Email Worker behind the domain mailbox (docs/MAIL.md). Its end-to-end
+    # test needs `wrangler dev` (workerd) and runs locally: `npm run test:integration`.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mail-worker
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          # The unit tests import the .ts sources directly (Node's built-in type stripping).
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: mail-worker/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
   frontend:
     runs-on: ubuntu-latest
     defaults:

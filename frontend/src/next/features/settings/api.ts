@@ -25,6 +25,50 @@ export interface LlmSettings {
   executor_effort: string | null;
 }
 
+// The domain mailbox and the credential vault answer plain dicts (backend/mail_api.py).
+export interface MailSettings {
+  configured: boolean;
+  domain: string;
+  worker_url: string;
+  has_token: boolean;
+  max_new_per_day: number;
+  retention_days: number;
+}
+
+export interface MailSettingsUpdate {
+  domain?: string;
+  worker_url?: string;
+  /** Write-only: never sent back. */
+  token?: string;
+  clear_token?: boolean;
+  max_new_per_day?: number;
+  retention_days?: number;
+}
+
+export type VaultStatus = "new" | "registered" | "verified" | "failed";
+
+/** A sign-up an agent made. The password is only ever readable through `revealVault`. */
+export interface VaultEntry {
+  id: string;
+  profile_id: string;
+  site: string;
+  username: string | null;
+  email: string | null;
+  status: VaultStatus;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MailAddress {
+  id: string;
+  address: string;
+  profile_id: string;
+  site: string | null;
+  label: string | null;
+  created_at: string;
+}
+
 export type McpMode = Schemas["McpSettingsModel"]["mode"];
 export type McpAuditEntry = Schemas["McpAuditResponse"];
 export type AgentTokenScope = "read" | "control" | "cdp";
@@ -92,6 +136,9 @@ export const settingsKeys = {
   mcp: ["settings", "mcp"] as const,
   agentTokens: ["agent", "tokens"] as const,
   mcpAudit: ["mcp", "audit"] as const,
+  mail: ["mail", "settings"] as const,
+  vault: ["mail", "vault"] as const,
+  mailAddresses: ["mail", "addresses"] as const,
   hours: ["automation", "hours"] as const,
   appUpdate: ["app", "update"] as const,
   /** Last "检查更新" result, kept so the toolbar can mention a new version. */
@@ -121,6 +168,16 @@ export const settingsApi = {
     request<AgentTokenCreated>("/api/agent/tokens", { method: "POST", body: { name, scope } }),
   revokeAgentToken: (id: string) => request<{ ok: boolean }>(`/api/agent/tokens/${enc(id)}`, { method: "DELETE" }),
   mcpAudit: (limit: number) => request<McpAuditEntry[]>(`/api/mcp/audit?limit=${limit}`),
+
+  mailSettings: () => request<MailSettings>("/api/settings/mail"),
+  saveMailSettings: (body: MailSettingsUpdate) => request<MailSettings>("/api/settings/mail", { method: "PUT", body }),
+  testMail: () => request<{ ok: boolean; domain: string }>("/api/settings/mail/test", { method: "POST", timeoutMs: 30_000 }),
+  vault: () => request<{ entries: VaultEntry[] }>("/api/vault"),
+  revealVault: (id: string) =>
+    request<{ ok: boolean; password: string; username: string | null; email: string | null }>(`/api/vault/${enc(id)}/reveal`, { method: "POST", body: {} }),
+  deleteVault: (id: string) => request<{ ok: boolean }>(`/api/vault/${enc(id)}`, { method: "DELETE" }),
+  mailAddresses: () => request<{ addresses: MailAddress[] }>("/api/mail/addresses"),
+  deleteMailAddress: (address: string) => request<{ ok: boolean }>(`/api/mail/addresses/${enc(address)}`, { method: "DELETE", timeoutMs: 30_000 }),
 
   hours: () => request<AutomationHours>("/api/automation/hours"),
   saveHours: (hours: string | null) => request<AutomationHours>("/api/automation/hours", { method: "PUT", body: { hours } }),
@@ -153,6 +210,18 @@ export function useMcpMode() {
 
 export function useAgentTokens() {
   return useQuery({ queryKey: settingsKeys.agentTokens, queryFn: settingsApi.agentTokens });
+}
+
+export function useMailSettings() {
+  return useQuery({ queryKey: settingsKeys.mail, queryFn: settingsApi.mailSettings });
+}
+
+export function useVault() {
+  return useQuery({ queryKey: settingsKeys.vault, queryFn: settingsApi.vault });
+}
+
+export function useMailAddresses() {
+  return useQuery({ queryKey: settingsKeys.mailAddresses, queryFn: settingsApi.mailAddresses });
 }
 
 export const AUDIT_LIMIT = 30;

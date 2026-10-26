@@ -1,0 +1,21 @@
+{
+  "$schema": "https://developers.cloudflare.com/workers/wrangler/config-schema.json",
+  "name": "cloakbrowser-mail",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-17",
+  "vars": {
+    // Only addresses on this domain can be registered. Set it to your domain.
+    "MAIL_DOMAIN": "example.com",
+    "RETENTION_DAYS": "7"
+  },
+  // Wrangler creates the database on first deploy if it does not exist yet.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "cloakbrowser-mail",
+      "migrations_dir": "migrations"
+    }
+  ],
+  // Daily cleanup of mail older than RETENTION_DAYS.
+  "triggers": { "crons": ["17 3 * * *"] }
+}

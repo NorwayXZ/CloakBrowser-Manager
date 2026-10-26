@@ -429,6 +429,133 @@ describe("settings › AI 接入", () => {
   });
 });
 
+describe("settings › 邮箱与保险库", () => {
+  const CONFIGURED = { configured: true, domain: "mail.example.com", worker_url: "https://cloakbrowser-mail.me.workers.dev", has_token: true, max_new_per_day: 30, retention_days: 7 };
+  const EMPTY = { configured: false, domain: "", worker_url: "", has_token: false, max_new_per_day: 30, retention_days: 7 };
+  const ENTRY = { id: "abc123def4567890", profile_id: "p1", site: "acme.example", username: "kcarter61", email: "nina.shaw42@mail.example.com", status: "verified", notes: null, created_at: "2026-10-26T01:00:00+00:00", updated_at: "2026-10-26T01:05:00+00:00" };
+  const NO_TOKENS = { enforced: true, scopes: ["read", "control", "cdp"], tokens: [] };
+
+  function mailRoutes(extra: MockRoute[] = [], opts: { settings?: unknown; entries?: unknown[]; addresses?: unknown[]; tokens?: unknown } = {}): MockRoute[] {
+    return [
+      ...extra,
+      { path: "/api/settings/mail", respond: opts.settings ?? CONFIGURED },
+      { path: "/api/vault", respond: { entries: opts.entries ?? [] } },
+      { path: "/api/mail/addresses", respond: { addresses: opts.addresses ?? [] } },
+      { path: "/api/agent/tokens", respond: opts.tokens ?? NO_TOKENS },
+      { path: "/api/profiles", respond: [{ id: "p1", name: "店铺 A" }] },
+    ];
+  }
+
+  it("shows the saved settings without the token and says the token is write-only", async () => {
+    await open("/settings/mail", mailRoutes(), "域名邮箱");
+    expect(await screen.findByLabelText("域名")).toHaveValue("mail.example.com");
+    expect(screen.getByLabelText("Worker 地址")).toHaveValue("https://cloakbrowser-mail.me.workers.dev");
+    expect(screen.getByLabelText("令牌")).toHaveValue("");
+    expect(screen.getByText(/留空表示不修改/)).toBeInTheDocument();
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("saves edits, sends the token only when typed, and tests the connection", async () => {
+    const { fetchMock } = await open(
+      "/settings/mail",
+      mailRoutes([
+        { method: "PUT", path: "/api/settings/mail", respond: (body: object) => ({ ...CONFIGURED, ...body, token: undefined }) },
+        { method: "POST", path: "/api/settings/mail/test", respond: { ok: true, domain: "mail.example.com" } },
+      ]),
+      "域名邮箱",
+    );
+    fireEvent.change(await screen.findByLabelText("域名"), { target: { value: "example.org" } });
+    fireEvent.change(screen.getByLabelText("令牌"), { target: { value: "new-secret" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+    expect(await screen.findByText("邮箱设置已保存")).toBeInTheDocument();
+    expect(bodies(fetchMock, "PUT", "/api/settings/mail")).toEqual([
+      { domain: "example.org", worker_url: "https://cloakbrowser-mail.me.workers.dev", token: "new-secret", max_new_per_day: 30, retention_days: 7 },
+    ]);
+    expect(screen.getByLabelText("令牌")).toHaveValue("");  // never kept in the form
+
+    fireEvent.click(screen.getByRole("button", { name: "测试连接" }));
+    expect(await screen.findByText("连接正常")).toBeInTheDocument();
+  });
+
+  it("explains an unconfigured mailbox and cannot test it", async () => {
+    await open("/settings/mail", mailRoutes([], { settings: EMPTY }), "域名邮箱");
+    expect(await screen.findByText(/还没配置完整/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "测试连接" })).toBeDisabled();
+  });
+
+  it("shows why saving failed", async () => {
+    await open(
+      "/settings/mail",
+      mailRoutes([{ method: "PUT", path: "/api/settings/mail", status: 400, respond: { detail: "「nope」不是合法的域名。" } }]),
+      "域名邮箱",
+    );
+    fireEvent.change(await screen.findByLabelText("域名"), { target: { value: "nope" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+    expect(await screen.findByText("「nope」不是合法的域名。")).toBeInTheDocument();
+  });
+
+  it("lists vault entries with the environment name and no password", async () => {
+    await open("/settings/mail", mailRoutes([], { entries: [ENTRY] }), "保险库");
+    const table = await screen.findByRole("table", { name: "保险库" });
+    expect(within(table).getByText("acme.example")).toBeInTheDocument();
+    expect(within(table).getByText("kcarter61")).toBeInTheDocument();
+    expect(within(table).getByText("店铺 A")).toBeInTheDocument();
+    expect(within(table).getByText("已验证")).toBeInTheDocument();
+    expect(screen.queryByText(/Sup3r/)).not.toBeInTheDocument();
+  });
+
+  it("reveals a password only on request", async () => {
+    const { fetchMock } = await open(
+      "/settings/mail",
+      mailRoutes([{ method: "POST", path: "/api/vault/abc123def4567890/reveal", respond: { ok: true, password: "Sup3r-secret-pw!", username: "kcarter61", email: ENTRY.email } }], { entries: [ENTRY] }),
+      "保险库",
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "查看 acme.example 的密码" }));
+    expect(await screen.findByText("Sup3r-secret-pw!")).toBeInTheDocument();
+    expect(bodies(fetchMock, "POST", "/api/vault/abc123def4567890/reveal")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "隐藏" }));
+    expect(screen.queryByText("Sup3r-secret-pw!")).not.toBeInTheDocument();
+  });
+
+  it("deletes an entry after confirmation", async () => {
+    let entries: unknown[] = [ENTRY];
+    const { fetchMock } = await open(
+      "/settings/mail",
+      mailRoutes([{ method: "DELETE", path: "/api/vault/abc123def4567890", respond: () => ((entries = []), { ok: true }) }, { path: "/api/vault", respond: () => ({ entries }) }]),
+      "保险库",
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "删除 acme.example 的记录" }));
+    await cancelDialog();
+    expect(bodies(fetchMock, "DELETE", "/api/vault/abc123def4567890")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "删除 acme.example 的记录" }));
+    await confirmWith("删除");
+    expect(await screen.findByText("还没有记录。AI 用 account_prepare 注册网站后，会出现在这里。")).toBeInTheDocument();
+  });
+
+  it("warns when anyone on this computer could read the passwords", async () => {
+    await open("/settings/mail", mailRoutes([], { entries: [ENTRY], tokens: { ...NO_TOKENS, enforced: false } }), "保险库");
+    expect(await screen.findByText("没有设置管理员密码")).toBeInTheDocument();
+  });
+
+  it("lists allocated addresses and removes one", async () => {
+    const address = { id: "m1", address: "nina.shaw42@mail.example.com", profile_id: "p1", site: "acme.example", label: null, created_at: "2026-10-26T01:00:00+00:00" };
+    let addresses: unknown[] = [address];
+    const { fetchMock } = await open(
+      "/settings/mail",
+      mailRoutes([
+        { method: "DELETE", path: "/api/mail/addresses/nina.shaw42%40mail.example.com", respond: () => ((addresses = []), { ok: true }) },
+        { path: "/api/mail/addresses", respond: () => ({ addresses }) },
+      ]),
+      "已分配的邮箱地址",
+    );
+    expect(await screen.findByText("nina.shaw42@mail.example.com")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "删除 nina.shaw42@mail.example.com" }));
+    await confirmWith("删除");
+    expect(await screen.findByText("还没有分配过地址。")).toBeInTheDocument();
+    expect(bodies(fetchMock, "DELETE", "/api/mail/addresses/nina.shaw42%40mail.example.com")).toHaveLength(1);
+  });
+});
+
 describe("settings › automation", () => {
   it("loads the current window and saves edits", async () => {
     const { fetchMock } = await open(
