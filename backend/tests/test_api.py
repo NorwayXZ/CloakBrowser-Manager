@@ -182,6 +182,20 @@ def test_proxy_test_survives_a_failed_quality_check(app_client: TestClient):
     assert response.json()["ip_quality"] is None
 
 
+def test_proxy_test_that_gets_no_answer_says_so(app_client: TestClient):
+    import asyncio
+
+    async def never(_proxy):
+        await asyncio.sleep(3600)
+
+    with patch("backend.main.fetch_proxy_geo", never), patch.object(main, "PROXY_TEST_SECONDS", 0.2):
+        response = app_client.post("/api/proxy/test", json={"proxy": "socks5://192.0.2.1:1080"})
+
+    assert response.status_code == 400
+    assert "没有响应" in response.json()["detail"]
+    assert "不转发" in response.json()["detail"]
+
+
 def test_delete_profile(app_client: TestClient):
     create = app_client.post("/api/profiles", json={"name": "Delete Me"})
     pid = create.json()["id"]

@@ -2827,6 +2827,10 @@ async def update_browser_binary():
         raise HTTPException(status_code=502, detail=f"浏览器内核检查失败：{exc}") from exc
 
 
+# The whole "check proxy" lookup; each request in it has its own cap too.
+PROXY_TEST_SECONDS = 30.0
+
+
 @app.post("/api/proxy/test", response_model=ProxyTestResponse)
 async def test_proxy(req: ProxyTestRequest):
     raw_proxy = (req.proxy or "").strip()
@@ -2855,12 +2859,18 @@ async def test_proxy(req: ProxyTestRequest):
         ):
             proxy_bridge = HttpProxyBridge(proxy)
             effective_proxy = await proxy_bridge.start()
-        data = await fetch_proxy_geo(effective_proxy)
+        data = await asyncio.wait_for(fetch_proxy_geo(effective_proxy), PROXY_TEST_SECONDS)
         data["connection_mode"] = "proxy" if effective_proxy else "direct"
         try:
             data["ip_quality"] = await check_ip_quality(effective_proxy, data.get("ip"))
         except Exception as exc:  # the geo result stands without it
             logger.warning("IP quality check failed: %s", exc)
+    except asyncio.TimeoutError as exc:
+        label = "代理测试" if proxy else "直连出口检测"
+        detail = f"{label}失败：{PROXY_TEST_SECONDS:.0f} 秒内没有响应。"
+        if proxy:
+            detail += "代理端口能连上却不转发请求时就是这样，通常是代理那一端的出口断了。"
+        raise HTTPException(status_code=400, detail=detail) from exc
     except Exception as exc:
         label = "代理测试" if proxy else "直连出口检测"
         raise HTTPException(status_code=400, detail=f"{label}失败：{exc}") from exc

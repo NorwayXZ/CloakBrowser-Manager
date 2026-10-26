@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 from collections import Counter
 from typing import Any
@@ -75,6 +76,12 @@ def suggested_timezone(country_code: str | None) -> str | None:
 
 class ProxyGeoError(RuntimeError):
     pass
+
+
+# httpx bounds connecting and reading, but not the SOCKS5 handshake: a proxy
+# that accepts the connection and never answers its CONNECT request would
+# keep a lookup waiting forever. Every request through a proxy gets this cap.
+PROXY_REQUEST_SECONDS = 15.0
 
 
 def suggested_locale(country_code: str | None) -> str | None:
@@ -264,7 +271,9 @@ async def fetch_proxy_geo(proxy: str | None) -> dict[str, Any]:
         )
         for provider in providers:
             try:
-                results.append(await provider(client))
+                results.append(await asyncio.wait_for(provider(client), PROXY_REQUEST_SECONDS))
+            except asyncio.TimeoutError:
+                errors.append(f"{provider.__name__}: no answer in {PROXY_REQUEST_SECONDS:.0f} s")
             except (httpx.HTTPError, ValueError, ProxyGeoError) as exc:
                 errors.append(f"{provider.__name__}: {type(exc).__name__}")
 

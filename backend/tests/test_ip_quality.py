@@ -115,3 +115,20 @@ def test_proxy_test_response_carries_the_quality():
     response = ProxyTestResponse(ip=IP, ip_quality=quality)
 
     assert json.loads(response.model_dump_json())["ip_quality"]["verdict"] == "clean"
+
+
+@pytest.mark.asyncio
+async def test_a_source_that_never_answers_counts_as_unknown(monkeypatch):
+    import asyncio
+
+    from backend import ip_quality
+
+    async def silent(_client, _ip):
+        await asyncio.sleep(3600)
+
+    monkeypatch.setattr(ip_quality, "PROXY_REQUEST_SECONDS", 0.05)
+    monkeypatch.setattr(ip_quality, "SOURCES", (("silent.example", silent),))
+    result = await asyncio.wait_for(check_ip_quality(None, "203.0.113.20"), 5)
+
+    [signal] = result["signals"]
+    assert signal["status"] == "unknown" and "没有回答" in signal["detail"]

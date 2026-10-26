@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import httpx
 import pytest
 
@@ -46,3 +48,33 @@ async def test_out_of_range_coordinates_are_dropped():
         result = await proxy_geo._fetch_ipapi(client)
     assert "latitude" not in result
     assert "longitude" not in result
+
+
+# ── A proxy that accepts connections but never forwards ──────────────────────
+
+
+async def _socks5_that_never_connects():
+    """Answer the SOCKS5 greeting ("no auth"), then never answer CONNECT."""
+    held: list = []
+
+    async def handle(reader, writer):
+        await reader.readexactly(3)
+        writer.write(b"\x05\x00")
+        await writer.drain()
+        held.append(writer)
+        await reader.read()  # until the client gives up
+
+    server = await asyncio.start_server(handle, "127.0.0.1", 0)
+    return server, f"socks5://127.0.0.1:{server.sockets[0].getsockname()[1]}"
+
+
+@pytest.mark.asyncio
+async def test_lookup_through_a_proxy_that_never_forwards_gives_up(monkeypatch):
+    # httpx does not time out the SOCKS5 handshake; this hung "check proxy" forever.
+    monkeypatch.setattr(proxy_geo, "PROXY_REQUEST_SECONDS", 0.3)
+    server, proxy = await _socks5_that_never_connects()
+    async with server:
+        started = asyncio.get_running_loop().time()
+        with pytest.raises(proxy_geo.ProxyGeoError, match="no answer"):
+            await asyncio.wait_for(proxy_geo.fetch_proxy_geo(proxy), 10)
+    assert asyncio.get_running_loop().time() - started < 5

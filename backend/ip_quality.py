@@ -10,9 +10,12 @@ offered as links to open by hand.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Literal
 
 import httpx
+
+from .proxy_geo import PROXY_REQUEST_SECONDS
 
 Status = Literal["flagged", "suspicious", "clean", "unknown"]
 
@@ -106,7 +109,9 @@ async def check_ip_quality(
     ) as client:
         for name, source in SOURCES:
             try:
-                signals.append(await source(client, ip))
+                signals.append(await asyncio.wait_for(source(client, ip), PROXY_REQUEST_SECONDS))
+            except asyncio.TimeoutError:
+                signals.append(_signal(name, "unknown", f"{PROXY_REQUEST_SECONDS:.0f} 秒内没有回答"))
             except (httpx.HTTPError, ValueError) as exc:
                 signals.append(_signal(name, "unknown", f"查询失败（{type(exc).__name__}）"))
     verdict, summary = summarize(signals)
