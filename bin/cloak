@@ -79,8 +79,19 @@ case "${1:-start}" in
         stop_manager
         exec "$ROOT/run-macos.sh"
         ;;
+    info|profiles|open|cdp|close|tools|call|mode|token)
+        # Agent-facing commands live in backend/cli.py (see docs/AGENT.md).
+        if [ -x "$ROOT/.venv/bin/python" ]; then
+            PY="$ROOT/.venv/bin/python"
+        else
+            PY="python3"
+        fi
+        cd "$ROOT"
+        exec "$PY" -m backend.cli "$@"
+        ;;
     *)
         echo "Usage: cloak [start|stop|status|restart]" >&2
+        echo "       cloak [info|profiles|open|cdp|close|tools|call|mode|token] ...   (agent CLI, see docs/AGENT.md)" >&2
         exit 1
         ;;
 esac

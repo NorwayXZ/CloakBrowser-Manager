@@ -201,6 +201,47 @@ describe("ProfileForm proxy IP quality", () => {
   });
 });
 
+describe("ProfileForm review warnings", () => {
+  const geo = {
+    ok: true, ip: "150.31.13.127", country: "Japan", country_code: "JP", suggested_locale: "ja-JP",
+    region: null, city: null, timezone: "Asia/Tokyo", org: null, asn: null, source: "test",
+  };
+
+  it("warns that a rotating exit IP breaks the launch-time timezone", async () => {
+    vi.spyOn(api, "testProxy").mockResolvedValue({
+      ...geo, rotating_ip: true, exit_ips: ["150.31.13.127", "60.66.231.77"],
+    });
+    render(<ProfileForm profile={null} hostOS="macos" onSave={vi.fn()} onCancel={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "检查直连出口" }));
+
+    const warning = await screen.findByTestId("rotating-ip-warning");
+    expect(warning.textContent).toContain("150.31.13.127、60.66.231.77");
+    expect(warning.textContent).toContain("固定会话");
+  });
+
+  it("shows no rotation warning for a single, unchanged exit IP", async () => {
+    vi.spyOn(api, "testProxy").mockResolvedValue({ ...geo, rotating_ip: false, exit_ips: ["150.31.13.127"] });
+    render(<ProfileForm profile={null} hostOS="macos" onSave={vi.fn()} onCancel={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "检查直连出口" }));
+
+    await screen.findByText(/出口 IP：150.31.13.127/);
+    expect(screen.queryByTestId("rotating-ip-warning")).toBeNull();
+  });
+
+  it("explains the linkage risk while noise is off", () => {
+    render(<ProfileForm profile={null} hostOS="windows" onSave={vi.fn()} onCancel={vi.fn()} />);
+
+    const noise = within(screen.getByRole("radiogroup", { name: "指纹噪声" }));
+    fireEvent.click(noise.getByRole("radio", { name: "关闭" }));
+    expect(screen.getByTestId("noise-linkage-warning").textContent).toContain("Canvas 指纹完全相同");
+
+    fireEvent.click(noise.getByRole("radio", { name: "开启" }));
+    expect(screen.queryByTestId("noise-linkage-warning")).toBeNull();
+  });
+});
+
 describe("ProfileForm screen and browser language", () => {
   it("follows the computer's screen by default and can switch to a preset", async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);

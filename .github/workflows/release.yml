@@ -3,6 +3,7 @@ name: Release
 # Push a tag like v0.2.0 to build the macOS DMGs (Apple silicon + Intel) and the
 # Windows installer, then publish them as a GitHub Release. Running the
 # workflow by hand builds the same files as downloadable artifacts only.
+# The full CI suite runs on the tagged commit first: no tests, no release.
 on:
   push:
     tags: ["v*"]
@@ -12,7 +13,11 @@ permissions:
   contents: read
 
 jobs:
+  tests:
+    uses: ./.github/workflows/ci.yml
+
   macos:
+    needs: tests
     strategy:
       fail-fast: false
       matrix:
@@ -59,6 +64,7 @@ jobs:
           if-no-files-found: error
 
   windows:
+    needs: tests
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7

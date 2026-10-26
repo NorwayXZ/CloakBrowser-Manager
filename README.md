@@ -307,6 +307,10 @@ Ctrl + C
 - 外部网络探针会显示浏览器真实出口 IP、HTTP 协议、TLS 版本和加密套件；探针失败时会明确显示“未完成外部检查”。
 - DNS 只能确认浏览器启用了代理解析策略，当前 HTTP 探针不能证明操作系统实际使用了哪台 DNS 解析器，因此报告会保持“未经外部 DNS 解析器验证”。
 
+## 让 AI agent 使用
+
+Codex、Claude、DeepSeek harness 等 AI agent 可以通过 MCP（stdio 或 HTTP）、REST 工具接口或 `bin/cloak` 命令行使用指纹浏览器，包括打开画像、读取和点击页面、截图。页面控制默认关闭，在 `mcp.mode=automation` 下才开放；用户可以在面板里随时「接管」。接入方式、权限档位和规则见 [docs/AGENT.md](docs/AGENT.md)，MCP 接入细节见 [docs/MCP.md](docs/MCP.md)。
+
 ## 配置备份和扩展
 
 - 左侧 `数据备份` → `立即完整备份`：关闭所有浏览器后点一下，生成一个 `.zip`，包含所有浏览器的 Cookie、登录状态、历史记录、本地存储、标签页，以及画像列表、分组、代理和加密密钥（网页缓存不备份）。文件保存在数据目录的 `backups/full/`，同时会下载一份，建议再复制到移动硬盘或网盘。

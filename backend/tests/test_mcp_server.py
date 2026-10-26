@@ -13,8 +13,11 @@ import json
 import httpx
 import pytest
 
+from backend import agent_tools
 from backend import mcp_server
 from backend import database as db
+
+mcp_server.agent_tools = agent_tools
 
 
 # ── Fake Manager REST layer ──────────────────────────────────────────────────
@@ -27,14 +30,27 @@ class FakeManager:
         self.mode = mode
         self.requests: list[tuple[str, str]] = []
         self.audits: list[dict] = []
+        self.bodies: dict[tuple[str, str], dict] = {}
+        # Set to a lease dict to make every lease request answer "profile_leased".
+        self.lease_conflict: dict | None = None
         self.routes: dict[tuple[str, str], tuple[int, object]] = {}
         self.transport = httpx.MockTransport(self._handle)
 
     def _handle(self, request: httpx.Request) -> httpx.Response:
         method, path = request.method, request.url.path
         self.requests.append((method, path))
+        if method == "POST" and request.content:
+            self.bodies[(method, path)] = json.loads(request.content)
         if path == "/api/settings/mcp":
+            if method == "PUT":
+                self.mode = json.loads(request.content)["mode"]
             return httpx.Response(200, json={"mode": self.mode})
+        if method == "POST" and path.startswith("/api/profiles/") and path.endswith("/lease"):
+            if self.lease_conflict is not None:
+                return httpx.Response(
+                    409, json={"detail": "[profile_leased] 画像正被用户控制", "lease": self.lease_conflict}
+                )
+            return httpx.Response(200, json={"ok": True, "lease": {"holder": "x"}})
         if path == "/api/mcp/audit" and method == "POST":
             self.audits.append(json.loads(request.content or b"{}"))
             return httpx.Response(201, json={"id": "audit-1", "ok": True})
@@ -114,13 +130,48 @@ EXPECTED_READ_TOOLS = {
     "get_kernel_info": NO_ARGS,
 }
 
+LAUNCH_PROFILE_ARGS = {
+    "type": "object",
+    "properties": {
+        "profile_id": {"type": "string", "description": "画像 id（先用 list_profiles 查）"},
+        "launch_mode": {
+            "type": "string",
+            "enum": ["manual", "debug"],
+            "default": "manual",
+            "description": (
+                "manual（默认）：给人用，没有 CDP。"
+                "debug：开放 CDP 供 agent 操作页面，只在 mcp.mode=automation 下可用；"
+                "要操作页面更省事的是直接用 open_browser。"
+            ),
+        },
+    },
+    "required": ["profile_id"],
+}
+
 EXPECTED_ACTION_TOOLS = {
-    "launch_profile": PROFILE_ID_ARGS,
+    "launch_profile": LAUNCH_PROFILE_ARGS,
     "stop_profile": PROFILE_ID_ARGS,
     "run_site_check": PROFILE_ID_ARGS,
     "run_warmup": PROFILE_ID_ARGS,
     "run_evolution": PROFILE_ID_ARGS,
 }
+
+EXPECTED_BROWSER_TOOLS = {
+    "get_cdp_endpoint": PROFILE_ID_ARGS,
+    "open_browser": {
+        "type": "object",
+        "properties": {
+            "profile": {"type": "string", "description": "画像 id 或画像名称（名称需完全一致且唯一）"},
+        },
+        "required": ["profile"],
+    },
+}
+# Page tools: pinned by name; their schemas all take a `profile` and are checked below.
+PAGE_TOOLS = (
+    "browser_navigate", "browser_snapshot", "browser_get_text", "browser_click", "browser_type",
+    "browser_press_key", "browser_scroll", "browser_screenshot", "browser_wait_for", "browser_dialog", "browser_batch", "browser_upload", "browser_downloads",
+    "browser_back", "browser_tabs",
+)
 
 
 def test_tool_snapshot_read_only_mode():
@@ -136,6 +187,23 @@ def test_tool_snapshot_full_mode():
     assert {t.name: t.input_schema for t in tools} == expected
 
 
+def test_tool_snapshot_automation_mode():
+    tools = mcp_server.build_mcp_tools("automation")
+    expected = {**EXPECTED_READ_TOOLS, **EXPECTED_ACTION_TOOLS, **EXPECTED_BROWSER_TOOLS}
+    assert [t.name for t in tools] == [*expected, *PAGE_TOOLS]
+    by_name = {t.name: t.input_schema for t in tools}
+    assert {name: by_name[name] for name in expected} == expected
+    for name in PAGE_TOOLS:
+        assert "profile" in by_name[name]["required"], name
+        assert by_name[name]["properties"]["profile"]["type"] == "string"
+
+
+def test_every_tool_has_an_english_summary():
+    for name, tool in mcp_server.TOOLS.items():
+        assert name in mcp_server.agent_tools.TOOL_EN, name
+        assert mcp_server.agent_tools.TOOL_EN[name] in mcp_server.tool_description(tool)
+
+
 def test_tool_snapshot_off_mode_is_empty():
     assert mcp_server.build_mcp_tools("off") == []
 
@@ -148,8 +216,21 @@ def test_no_cookie_or_destructive_tools_exist():
         assert "purge" not in forbidden
         assert "delete" not in forbidden
         assert "approve" not in forbidden
-        assert "cdp" not in forbidden
         assert "clipboard" not in forbidden
+        # CDP handout lives only in the automation-tier "browser" layer.
+        if "cdp" in forbidden:
+            assert mcp_server.TOOLS[forbidden].layer == "browser"
+
+
+def test_instructions_name_real_tools():
+    for name in (
+        "manager_status", "list_profiles", "get_profile_preflight", "open_browser",
+        "launch_profile", "stop_profile", "get_fingerprint_report", "get_cdp_endpoint",
+    ):
+        assert name in mcp_server.TOOLS, name
+        assert name in mcp_server.INSTRUCTIONS, name
+    server = mcp_server.build_server(FakeManager().client())
+    assert server.instructions == mcp_server.INSTRUCTIONS
 
 
 # ── Mapping integration ──────────────────────────────────────────────────────
@@ -570,6 +651,401 @@ async def test_no_secret_appears_in_any_tool_output(tmp_path):
     assert results["get_profile"]["live_status"]["status"] == "running"
 
 
+# ── Automation tier: launch_mode, get_cdp_endpoint, open_browser ─────────────
+
+PID = "p-auto"
+CDP_PATH = f"/api/profiles/{PID}/cdp"
+
+
+def debug_running_status(**overrides) -> dict:
+    return {
+        "status": "running",
+        "runtime_mode": "native",
+        "viewer_mode": "native-window",
+        "vnc_ws_port": 6080,
+        "display": ":0",
+        "cdp_url": CDP_PATH,
+        "browser_engine": "cloak",
+        "launch_mode": "debug",
+        **overrides,
+    }
+
+
+def automation_fake() -> FakeManager:
+    fake = FakeManager(mode="automation")
+    fake.routes[("GET", "/api/profiles")] = (
+        200,
+        [{"id": PID, "name": "店铺A"}, {"id": "p-b", "name": "重名"}, {"id": "p-c", "name": "重名"}],
+    )
+    fake.routes[("GET", f"{CDP_PATH}/json/list")] = (
+        200,
+        [
+            {"id": "T1", "type": "page", "title": "Example", "url": "https://example.com/",
+             "webSocketDebuggerUrl": f"ws://127.0.0.1:9999{CDP_PATH}/devtools/page/T1"},
+            {"id": "SW", "type": "service_worker", "title": "sw", "url": "https://example.com/sw.js"},
+        ],
+    )
+    return fake
+
+
+async def test_browser_tools_are_rejected_below_automation_mode():
+    for mode in ("read-only", "full"):
+        fake = automation_fake()
+        fake.mode = mode
+        for name, args in (("get_cdp_endpoint", {"profile_id": PID}), ("open_browser", {"profile": PID})):
+            result = await mcp_server.dispatch(fake.client(), name, args)
+            assert result["ok"] is False
+            assert result["reason"] == "mode_not_automation", (mode, name, result)
+        # Nothing reached the Manager's profile endpoints, and each was audited.
+        assert not any(path.startswith("/api/profiles") for _, path in fake.requests)
+        assert [a["reason"] for a in fake.audits] == ["mode_not_automation"] * 2
+
+
+async def test_launch_debug_needs_automation_mode():
+    fake = automation_fake()
+    fake.mode = "full"
+    result = await mcp_server.dispatch(
+        fake.client(), "launch_profile", {"profile_id": PID, "launch_mode": "debug"}
+    )
+    assert result["reason"] == "mode_not_automation"
+    assert not fake.hit("POST", f"/api/profiles/{PID}/launch")
+
+
+async def test_launch_manual_never_hands_out_cdp_even_in_automation_mode():
+    fake = automation_fake()
+    fake.routes[("POST", f"/api/profiles/{PID}/launch")] = (
+        200, {"profile_id": PID, "status": "running", "cdp_url": None, "launch_mode": "manual"},
+    )
+    result = await mcp_server.dispatch(fake.client(), "launch_profile", {"profile_id": PID})
+    assert result["ok"] is True
+    assert fake.bodies[("POST", f"/api/profiles/{PID}/launch")] == {"launch_mode": "manual"}
+    assert "cdp" not in json.dumps(result)
+
+
+async def test_launch_rejects_unknown_launch_mode():
+    fake = automation_fake()
+    result = await mcp_server.dispatch(
+        fake.client(), "launch_profile", {"profile_id": PID, "launch_mode": "headless"}
+    )
+    assert result["reason"] == "invalid_argument"
+    assert not fake.hit("POST", f"/api/profiles/{PID}/launch")
+
+
+async def test_launch_debug_in_automation_mode_returns_cdp_info():
+    fake = automation_fake()
+    fake.routes[("POST", f"/api/profiles/{PID}/launch")] = (
+        200, {"profile_id": PID, "status": "running", "cdp_url": CDP_PATH, "launch_mode": "debug"},
+    )
+    fake.routes[("GET", f"/api/profiles/{PID}/status")] = (200, debug_running_status())
+    result = await mcp_server.dispatch(
+        fake.client(), "launch_profile", {"profile_id": PID, "launch_mode": "debug"}
+    )
+    assert result["ok"] is True
+    assert fake.bodies[("POST", f"/api/profiles/{PID}/launch")] == {"launch_mode": "debug"}
+    assert result["cdp_http_endpoint"] == f"http://127.0.0.1:9999{CDP_PATH}"
+    assert result["cdp_ws_endpoint"] == f"ws://127.0.0.1:9999{CDP_PATH}"
+
+
+async def test_get_cdp_endpoint_returns_endpoints_and_page_tabs_only():
+    fake = automation_fake()
+    fake.routes[("GET", f"/api/profiles/{PID}/status")] = (200, debug_running_status())
+    result = await mcp_server.dispatch(fake.client(), "get_cdp_endpoint", {"profile_id": PID})
+    assert result["ok"] is True
+    assert result["cdp_http_endpoint"] == f"http://127.0.0.1:9999{CDP_PATH}"
+    assert result["cdp_ws_endpoint"] == f"ws://127.0.0.1:9999{CDP_PATH}"
+    assert result["tabs"] == [{"id": "T1", "title": "Example", "url": "https://example.com/"}]
+    assert result["auth_required"] is False
+    assert "auth_hint" not in result
+    assert "--cdp-endpoint" in result["usage"]["playwright_mcp"]
+    # Local access paths other than the Manager proxy stay hidden.
+    blob = json.dumps(result)
+    assert "6080" not in blob and '":0"' not in blob
+
+
+async def test_get_cdp_endpoint_auth_hint_never_echoes_the_token():
+    fake = automation_fake()
+    fake.routes[("GET", f"/api/profiles/{PID}/status")] = (200, debug_running_status())
+    client = mcp_server.RestClient(
+        "http://127.0.0.1:9999", transport=fake.transport, token="SECRET_AUTH_TOKEN_XYZ"
+    )
+    result = await mcp_server.dispatch(client, "get_cdp_endpoint", {"profile_id": PID})
+    assert result["auth_required"] is True
+    assert "Bearer" in result["auth_hint"]
+    # The with-auth snippets carry a placeholder, never the real token.
+    assert "--cdp-header" in result["usage"]["playwright_mcp"]
+    assert "--wsHeaders" in result["usage"]["chrome_devtools_mcp"]
+    assert "<TOKEN>" in result["usage"]["chrome_devtools_mcp"]
+    assert "SECRET_AUTH_TOKEN_XYZ" not in json.dumps(result)
+
+
+async def test_get_cdp_endpoint_error_states():
+    fake = automation_fake()
+    status_path = ("GET", f"/api/profiles/{PID}/status")
+    fake.routes[status_path] = (200, {"status": "stopped"})
+    result = await mcp_server.dispatch(fake.client(), "get_cdp_endpoint", {"profile_id": PID})
+    assert result["reason"] == "not_running"
+    fake.routes[status_path] = (200, debug_running_status(cdp_url=None, launch_mode="manual"))
+    result = await mcp_server.dispatch(fake.client(), "get_cdp_endpoint", {"profile_id": PID})
+    assert result["reason"] == "cdp_unavailable"
+    assert "stop_profile" in result["detail"]
+    result = await mcp_server.dispatch(fake.client(), "get_cdp_endpoint", {"profile_id": "missing"})
+    assert result["reason"] == "not_found"
+    result = await mcp_server.dispatch(fake.client(), "get_cdp_endpoint", {})
+    assert result["reason"] == "invalid_argument"
+
+
+async def test_open_browser_launches_in_debug_mode_when_stopped():
+    fake = automation_fake()
+    status_path = f"/api/profiles/{PID}/status"
+    # First status: stopped; after launch: running with CDP.
+    responses = [(200, {"status": "stopped"}), (200, debug_running_status())]
+
+    def handle_status(request):
+        status, payload = responses[0] if len(responses) == 1 else responses.pop(0)
+        return httpx.Response(status, json=payload)
+
+    original = fake._handle
+
+    def handle(request):
+        if request.url.path == status_path:
+            fake.requests.append((request.method, request.url.path))
+            return handle_status(request)
+        return original(request)
+
+    fake.transport = httpx.MockTransport(handle)
+    fake.routes[("POST", f"/api/profiles/{PID}/launch")] = (200, {"profile_id": PID, "status": "running"})
+    result = await mcp_server.dispatch(fake.client(), "open_browser", {"profile": "店铺A"})
+    assert result["ok"] is True
+    assert result["started"] is True
+    assert result["profile_id"] == PID
+    assert fake.bodies[("POST", f"/api/profiles/{PID}/launch")] == {"launch_mode": "debug"}
+    assert result["cdp_http_endpoint"].endswith(CDP_PATH)
+
+
+async def test_open_browser_reuses_a_running_debug_browser():
+    fake = automation_fake()
+    fake.routes[("GET", f"/api/profiles/{PID}/status")] = (200, debug_running_status())
+    result = await mcp_server.dispatch(fake.client(), "open_browser", {"profile": PID})
+    assert result["ok"] is True
+    assert result["started"] is False
+    assert not fake.hit("POST", f"/api/profiles/{PID}/launch")
+    assert not fake.hit("POST", f"/api/profiles/{PID}/stop")
+
+
+async def test_open_browser_never_restarts_a_manual_browser():
+    fake = automation_fake()
+    fake.routes[("GET", f"/api/profiles/{PID}/status")] = (
+        200, debug_running_status(cdp_url=None, launch_mode="manual")
+    )
+    result = await mcp_server.dispatch(fake.client(), "open_browser", {"profile": PID})
+    assert result["ok"] is False
+    assert result["reason"] == "already_running"
+    assert not fake.hit("POST", f"/api/profiles/{PID}/launch")
+    assert not fake.hit("POST", f"/api/profiles/{PID}/stop")
+
+
+async def test_open_browser_resolution_errors():
+    fake = automation_fake()
+    result = await mcp_server.dispatch(fake.client(), "open_browser", {"profile": "重名"})
+    assert result["reason"] == "invalid_argument"
+    assert "p-b" in result["detail"] and "p-c" in result["detail"]
+    result = await mcp_server.dispatch(fake.client(), "open_browser", {"profile": "没有这个"})
+    assert result["reason"] == "not_found"
+    result = await mcp_server.dispatch(fake.client(), "open_browser", {"profile": "  "})
+    assert result["reason"] == "invalid_argument"
+
+
+async def test_open_browser_maps_seat_busy():
+    fake = automation_fake()
+    fake.routes[("GET", f"/api/profiles/{PID}/status")] = (200, {"status": "stopped"})
+    fake.routes[("POST", f"/api/profiles/{PID}/launch")] = (409, {"detail": "license seat in use (session limit)"})
+    result = await mcp_server.dispatch(fake.client(), "open_browser", {"profile": PID})
+    assert result["reason"] == "seat_busy"
+
+
+# ── Token scope, leases, page tools, hints, backends ─────────────────────────
+
+
+async def test_token_scope_caps_the_mode():
+    fake = automation_fake()  # mode=automation configured
+    fake.routes[("POST", f"/api/profiles/{PID}/launch")] = (200, {"profile_id": PID, "status": "running"})
+    result = await mcp_server.dispatch(
+        fake.client(), "launch_profile", {"profile_id": PID}, token_scope="read"
+    )
+    assert result["reason"] == "scope_denied"
+    assert not fake.hit("POST", f"/api/profiles/{PID}/launch")
+    result = await mcp_server.dispatch(
+        fake.client(), "open_browser", {"profile": PID}, token_scope="control"
+    )
+    assert result["reason"] == "scope_denied"
+    result = await mcp_server.dispatch(
+        fake.client(), "launch_profile", {"profile_id": PID}, token_scope="control"
+    )
+    assert result["ok"] is True
+    # Visible tools shrink with the scope, too.
+    names = lambda scope: [t.name for t in agent_tools.visible_tools("automation", scope)]  # noqa: E731
+    assert names("read") == list(EXPECTED_READ_TOOLS)
+    assert names("control") == [*EXPECTED_READ_TOOLS, *EXPECTED_ACTION_TOOLS]
+    assert names("cdp") == [*EXPECTED_READ_TOOLS, *EXPECTED_ACTION_TOOLS, *EXPECTED_BROWSER_TOOLS, *PAGE_TOOLS]
+
+
+async def test_open_browser_stops_when_the_profile_is_leased_to_someone_else():
+    fake = automation_fake()
+    fake.lease_conflict = {"holder": "human", "kind": "human", "seconds_left": 900}
+    result = await mcp_server.dispatch(fake.client(), "open_browser", {"profile": PID})
+    assert result["ok"] is False
+    assert result["reason"] == "profile_leased"
+    assert result["lease"]["holder"] == "human"
+    assert "next_step" in result
+    assert not fake.hit("POST", f"/api/profiles/{PID}/launch")
+
+
+async def test_lease_is_taken_under_the_callers_holder_name():
+    fake = automation_fake()
+    fake.routes[("GET", f"/api/profiles/{PID}/status")] = (200, debug_running_status())
+    await mcp_server.dispatch(fake.client(), "open_browser", {"profile": PID}, client_name="codex")
+    holder = fake.bodies[("POST", f"/api/profiles/{PID}/lease")]["holder"]
+    assert holder.startswith("codex#")
+    await mcp_server.dispatch(fake.client(), "open_browser", {"profile": PID}, holder="my-agent")
+    assert fake.bodies[("POST", f"/api/profiles/{PID}/lease")]["holder"] == "my-agent"
+
+
+async def test_page_tools_resolve_the_profile_hold_the_lease_and_call_the_page_endpoint():
+    fake = automation_fake()
+    fake.routes[("POST", f"/api/profiles/{PID}/page/navigate")] = (
+        200, {"url": "https://example.com/", "title": "Example", "tab": 0, "status": 200}
+    )
+    result = await mcp_server.dispatch(
+        fake.client(), "browser_navigate", {"profile": "店铺A", "url": "https://example.com/"}
+    )
+    assert result == {
+        "ok": True, "profile_id": PID, "url": "https://example.com/",
+        "title": "Example", "tab": 0, "status": 200,
+    }
+    assert fake.hit("POST", f"/api/profiles/{PID}/lease")
+    assert fake.bodies[("POST", f"/api/profiles/{PID}/page/navigate")] == {"url": "https://example.com/"}
+
+
+async def test_page_tool_bodies():
+    fake = automation_fake()
+    for action in ("click", "type", "press_key", "scroll", "screenshot", "wait_for", "back", "tabs", "snapshot", "get_text",
+                   "dialog", "batch", "upload", "downloads"):
+        fake.routes[("POST", f"/api/profiles/{PID}/page/{action}")] = (200, {"url": "u"})
+    client = fake.client()
+    calls = [
+        ("browser_click", {"ref": "e3"}, "click", {"ref": "e3"}),
+        ("browser_type", {"ref": "e5", "text": "hi", "submit": True}, "type", {"ref": "e5", "text": "hi", "submit": True}),
+        ("browser_press_key", {"key": "Enter"}, "press_key", {"key": "Enter"}),
+        ("browser_scroll", {}, "scroll", {"direction": "down", "amount": 600}),
+        ("browser_screenshot", {"full_page": True}, "screenshot", {"full_page": True, "format": "jpeg"}),
+        ("browser_wait_for", {"text": "Done", "url": "/ok"}, "wait_for",
+         {"text": "Done", "text_gone": None, "url": "/ok", "selector": None, "ms": None, "timeout_ms": None}),
+        ("browser_dialog", {"action": "accept", "text": "Ada"}, "dialog", {"action": "accept", "text": "Ada"}),
+        ("browser_upload", {"ref": "label=File", "paths": ["/x/a.pdf"]}, "upload",
+         {"ref": "label=File", "paths": ["/x/a.pdf"]}),
+        ("browser_downloads", {}, "downloads", {}),
+        ("browser_batch", {"steps": [{"do": "back"}]}, "batch",
+         {"steps": [{"do": "back"}], "snapshot_after": True, "viewport_only": False, "stop_on_error": True}),
+        ("browser_back", {}, "back", {}),
+        ("browser_tabs", {"action": "select", "index": 1}, "tabs", {"action": "select", "index": 1, "url": None}),
+        ("browser_snapshot", {}, "snapshot", {"viewport_only": False}),
+        ("browser_snapshot", {"viewport_only": True}, "snapshot", {"viewport_only": True}),
+        ("browser_get_text", {"offset": 6000}, "get_text",
+         {"ref": None, "offset": 6000, "max_chars": 6000, "whole_page": False}),
+        ("browser_get_text", {"whole_page": True}, "get_text",
+         {"ref": None, "offset": 0, "max_chars": 6000, "whole_page": True}),
+    ]
+    for name, args, action, body in calls:
+        result = await mcp_server.dispatch(client, name, {"profile": PID, **args})
+        assert result["ok"] is True, (name, result)
+        assert fake.bodies.get(("POST", f"/api/profiles/{PID}/page/{action}"), {}) == body, name
+
+
+async def test_page_endpoint_errors_pass_through_structured_with_a_next_step():
+    fake = automation_fake()
+    fake.routes[("POST", f"/api/profiles/{PID}/page/click")] = (
+        409, {"ok": False, "reason": "stale_ref", "detail": "页面已变化"}
+    )
+    result = await mcp_server.dispatch(fake.client(), "browser_click", {"profile": PID, "ref": "e1"})
+    assert result["ok"] is False
+    assert result["reason"] == "stale_ref"
+    assert "browser_snapshot" in result["next_step"]
+
+
+async def test_page_tool_without_a_profile_is_invalid_argument():
+    fake = automation_fake()
+    result = await mcp_server.dispatch(fake.client(), "browser_snapshot", {})
+    assert result["reason"] == "invalid_argument"
+
+
+async def test_failures_carry_a_next_step_but_successes_do_not_invent_one():
+    fake = FakeManager(mode="full")
+    fake.routes[("POST", "/api/profiles/p1/launch")] = (409, {"detail": "license session limit"})
+    result = await mcp_server.dispatch(fake.client(), "launch_profile", {"profile_id": "p1"})
+    assert result["reason"] == "seat_busy"
+    assert "不要立刻重试" in result["next_step"]
+    fake.routes[("POST", "/api/profiles/p1/launch")] = (200, {"profile_id": "p1", "status": "running"})
+    ok = await mcp_server.dispatch(fake.client(), "launch_profile", {"profile_id": "p1"})
+    assert "next_step" not in ok
+
+
+def test_screenshot_result_becomes_image_content_not_base64_text():
+    result = {
+        "ok": True, "url": "u",
+        "image": {"mime": "image/jpeg", "data": "QUJD", "bytes": 3},
+    }
+    content = mcp_server.result_content(result)
+    assert [c.type for c in content] == ["text", "image"]
+    assert content[1].data == "QUJD" and content[1].mime_type == "image/jpeg"
+    assert "QUJD" not in content[0].text
+    plain = mcp_server.result_content({"ok": True})
+    assert [c.type for c in plain] == ["text"]
+
+
+def test_tool_specs_formats():
+    raw = agent_tools.tool_specs("automation", fmt="raw")
+    assert {"name", "description", "input_schema", "layer"} <= set(raw[0])
+    openai = agent_tools.tool_specs("read-only", fmt="openai")
+    assert openai[0]["type"] == "function"
+    assert openai[0]["function"]["parameters"]["type"] == "object"
+    anthropic = agent_tools.tool_specs("read-only", fmt="anthropic")
+    assert set(anthropic[0]) == {"name", "description", "input_schema"}
+    assert len(openai) == len(anthropic) == len(EXPECTED_READ_TOOLS)
+
+
+async def test_remote_backend_uses_the_manager_tool_api():
+    fake = FakeManager()
+    fake.routes[("GET", "/api/agent/tools")] = (200, {"mode": "full", "tools": [{"name": "list_profiles"}]})
+    fake.routes[("POST", "/api/agent/tools/list_profiles")] = (200, {"ok": True, "count": 0, "profiles": []})
+    backend = agent_tools.RemoteBackend(fake.client())
+    assert [t["name"] for t in await backend.list_tools()] == ["list_profiles"]
+    result = await backend.call("list_profiles", {}, "codex", "1.0")
+    assert result["ok"] is True
+    body = fake.bodies[("POST", "/api/agent/tools/list_profiles")]
+    assert body["arguments"] == {} and body["client"] == {"name": "codex", "version": "1.0"}
+    assert body["holder"].startswith("codex#")
+    # Raw REST was never touched, so a scoped agent token is enough.
+    assert not fake.hit("GET", "/api/profiles")
+
+
+async def test_auto_backend_falls_back_to_local_on_an_old_manager():
+    fake = FakeManager(mode="read-only")  # no /api/agent/tools route -> 404
+    fake.routes[("GET", "/api/profiles")] = (200, [])
+    backend = agent_tools.AutoBackend(fake.client())
+    specs = await backend.list_tools()
+    assert [t["name"] for t in specs] == list(EXPECTED_READ_TOOLS)
+    result = await backend.call("list_profiles", {}, "codex", None)
+    assert result["ok"] is True
+    assert fake.hit("GET", "/api/profiles")
+
+
+async def test_remote_backend_reports_a_revoked_token():
+    fake = FakeManager()
+    fake.routes[("POST", "/api/agent/tools/list_profiles")] = (401, {"detail": "Unauthorized"})
+    result = await agent_tools.RemoteBackend(fake.client()).call("list_profiles", {})
+    assert result["reason"] == "unauthorized"
+
+
 # ── Manager-side endpoints ───────────────────────────────────────────────────
 
 
@@ -581,6 +1057,9 @@ def test_mcp_settings_default_read_only_and_update(app_client):
     assert resp.status_code == 200
     assert resp.json() == {"mode": "full"}
     assert app_client.get("/api/settings/mcp").json() == {"mode": "full"}
+    resp = app_client.put("/api/settings/mcp", json={"mode": "automation"})
+    assert resp.status_code == 200
+    assert app_client.get("/api/settings/mcp").json() == {"mode": "automation"}
     resp = app_client.put("/api/settings/mcp", json={"mode": "bogus"})
     assert resp.status_code == 422
 
@@ -628,3 +1107,13 @@ def test_mcp_audit_db_roundtrip(tmp_db):
     assert rows[0]["ok"] is True
     assert rows[0]["args_summary"] == {"a": 1}
     assert db.list_mcp_audit(limit=0)  # clamped, still returns the row
+
+
+async def test_remote_calls_carry_a_per_session_lease_holder():
+    fake = FakeManager()
+    fake.routes[("POST", "/api/agent/tools/manager_status")] = (200, {"ok": True})
+    await agent_tools.RemoteBackend(fake.client()).call("manager_status", {}, "codex", None)
+    sent = fake.bodies[("POST", "/api/agent/tools/manager_status")]["holder"]
+    assert sent.startswith("codex#") and len(sent) > len("codex#")
+    await agent_tools.RemoteBackend(fake.client(), holder="cloak-cli").call("manager_status", {}, "cloak-cli", None)
+    assert fake.bodies[("POST", "/api/agent/tools/manager_status")]["holder"] == "cloak-cli"

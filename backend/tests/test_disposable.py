@@ -133,6 +133,22 @@ def test_burn_removes_row_and_directory(app_client: TestClient):
     assert all(p["id"] != profile["id"] for p in trash)
 
 
+def test_burn_never_removes_the_profiles_root(app_client: TestClient):
+    profile = _create_disposable(app_client)
+    root = db.DATA_DIR / "profiles"
+    keeper = root / "other-profile" / "Default"
+    keeper.mkdir(parents=True, exist_ok=True)
+    (keeper / "Cookies").write_bytes(b"keep")
+    with db.get_db() as conn:
+        conn.execute("UPDATE profiles SET user_data_dir = ? WHERE id = ?", (str(root), profile["id"]))
+        conn.commit()
+
+    res = app_client.post(f"/api/profiles/{profile['id']}/burn", json={"confirm": True})
+
+    assert res.status_code == 200, res.text
+    assert (keeper / "Cookies").exists()
+
+
 def test_burn_refuses_non_disposable_profile(app_client: TestClient):
     res = app_client.post("/api/profiles", json={"name": "普通画像"})
     assert res.status_code == 201

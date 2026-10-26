@@ -101,13 +101,17 @@ def save_config(
     api_key: str | None = None,
     executor_model: str = "",
     executor_effort: str = "",
+    clear_api_key: bool = False,
 ) -> None:
-    """Persist base_url/model; the key is write-only (set when provided)."""
+    """Persist base_url/model; the key is write-only (set when provided,
+    deleted when ``clear_api_key`` is set)."""
     set_setting(SETTING_BASE_URL, base_url.strip())
     set_setting(SETTING_MODEL, model.strip())
     set_setting(SETTING_EXECUTOR_MODEL, executor_model.strip())
     set_setting(SETTING_EXECUTOR_EFFORT, executor_effort.strip())
-    if api_key:
+    if clear_api_key:
+        set_setting(SETTING_API_KEY, "")
+    elif api_key:
         set_setting(SETTING_API_KEY, encrypt_value(api_key) or "")
 
 

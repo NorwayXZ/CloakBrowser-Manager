@@ -573,3 +573,19 @@ async def test_scheduler_tick_starts_only_due_profiles(tmp_db, monkeypatch: pyte
     started.clear()
     await main._evolution_tick()
     assert started == []
+
+
+def test_experiment_clone_never_carries_account_cookies(tmp_db):
+    from backend import database as db
+    from backend import main
+
+    source = db.create_profile(
+        name="Seller", fingerprint_seed=4242, platform="macos",
+        cookies_json='[{"name":"session-id","value":"secret","domain":".amazon.com","path":"/"}]',
+        account_platform="Amazon",
+    )
+
+    clone = main._evo_make_clone(db.get_profile(source["id"]))
+
+    assert clone["fingerprint_seed"] == 4242
+    assert not clone.get("cookies_json")

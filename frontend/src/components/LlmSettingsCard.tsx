@@ -44,7 +44,7 @@ export function LlmSettingsCard() {
     executorModel !== (status.executor_model ?? "") ||
     executorEffort !== (status.executor_effort ?? "");
 
-  const handleSave = async () => {
+  const save = async (clearKey: boolean) => {
     setBusy(true);
     setNotice(null);
     try {
@@ -52,12 +52,13 @@ export function LlmSettingsCard() {
         await api.updateLlmSettings({
           base_url: baseUrl.trim(),
           model: model.trim(),
-          api_key: apiKey.trim() ? apiKey : null,
+          api_key: !clearKey && apiKey.trim() ? apiKey : null,
+          clear_api_key: clearKey,
           executor_model: executorModel.trim(),
           executor_effort: executorEffort,
         }),
       );
-      setNotice({ tone: "success", text: "LLM 设置已保存。" });
+      setNotice({ tone: "success", text: clearKey ? "API 密钥已清除。" : "LLM 设置已保存。" });
     } catch (err) {
       setNotice({ tone: "error", text: err instanceof Error ? err.message : "保存失败" });
     } finally {
@@ -116,8 +117,18 @@ export function LlmSettingsCard() {
             autoComplete="new-password"
             onChange={(e) => setApiKey(e.target.value)}
           />
-          <div className="mt-1 text-xs leading-5 text-slate-500">
-            密钥只写不读：保存后这里不会再显示它。
+          <div className="mt-1 flex flex-wrap items-center gap-3 text-xs leading-5 text-slate-500">
+            <span>密钥只写不读：保存后这里不会再显示它。</span>
+            {status.has_api_key && (
+              <button
+                type="button"
+                className="text-red-600 underline disabled:opacity-60"
+                disabled={busy}
+                onClick={() => void save(true)}
+              >
+                清除已保存的密钥
+              </button>
+            )}
           </div>
         </div>
 
@@ -169,7 +180,7 @@ export function LlmSettingsCard() {
           <button
             className="btn-primary flex items-center gap-1.5 px-4 disabled:opacity-60"
             disabled={busy || !changed}
-            onClick={() => void handleSave()}
+            onClick={() => void save(false)}
           >
             <Save className="h-4 w-4" />
             <span>{busy ? "保存中..." : "保存设置"}</span>

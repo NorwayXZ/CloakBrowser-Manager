@@ -277,6 +277,8 @@ class ProfileResponse(BaseModel):
     cdp_url: str | None = None
     launch_mode: LaunchMode | None = None
     proxy_geo: dict | None = None
+    # Who is driving this running profile (an AI agent, or the user after a takeover).
+    agent_lease: dict | None = None
 
 
 class LaunchResponse(BaseModel):
@@ -385,6 +387,9 @@ class ProxyTestResponse(BaseModel):
     source: str = "ipapi.co"
     connection_mode: Literal["direct", "proxy"] | None = None
     ip_quality: IpQuality | None = None
+    # Every exit IP this test saw; more than one of a family = rotating proxy.
+    exit_ips: list[str] = []
+    rotating_ip: bool = False
 
 
 class GroupCreate(BaseModel):
@@ -590,6 +595,7 @@ class ProfileStatusResponse(BaseModel):
     browser_engine: str | None = None
     launch_mode: LaunchMode | None = None
     proxy_geo: dict | None = None
+    agent_lease: dict | None = None
 
 
 class ClipboardRequest(BaseModel):
@@ -632,14 +638,17 @@ class LlmSettingsModel(BaseModel):
     base_url: str = ""
     model: str = ""
     api_key: str | None = None  # write-only: omitted/empty keeps the stored key
+    clear_api_key: bool = False  # True deletes the stored key (wins over api_key)
     executor_model: str = ""  # AI 驾驶员的执行模型（与剧本生成模型分开）
     executor_effort: str = ""  # 执行模型的 effort 档位，空 = 服务商默认
 
 
 class McpSettingsModel(BaseModel):
     # off = bridge refuses to serve; read-only = the 14 read tools only;
-    # full = read tools + the 5 action tools. Stored as settings["mcp.mode"].
-    mode: Literal["off", "read-only", "full"] = "read-only"
+    # full = read tools + the 5 action tools; automation = full + the browser
+    # tools that hand the agent a CDP endpoint (CDP can read cookies, so it is
+    # its own opt-in tier). Stored as settings["mcp.mode"].
+    mode: Literal["off", "read-only", "full", "automation"] = "read-only"
 
 
 class UiPreferencesModel(BaseModel):

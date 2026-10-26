@@ -21,6 +21,7 @@ hiddenimports = (
 
 datas = [
     (str(ROOT / "frontend" / "dist"), "frontend/dist"),
+    (str(ROOT / "docs" / "AGENT.md"), "docs"),
     (str(BUILD_DIR / "app_version.json"), "."),
 ]
 datas += collect_data_files("cloakbrowser")

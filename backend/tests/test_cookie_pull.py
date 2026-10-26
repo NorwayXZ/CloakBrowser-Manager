@@ -88,6 +88,17 @@ async def test_pull_requires_a_running_browser(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_pull_from_a_manual_system_chrome_says_to_use_debug_mode(tmp_path):
+    # Branded Chrome ignores --load-extension, so waiting would only time out.
+    manager = _manager_with_context(tmp_path, None)
+    manager.running["p1"].browser_engine = "system_chrome"
+    manager.cookie_pulls.register_token("p1")
+
+    with pytest.raises(CookiePullError, match="调试模式"):
+        await manager.pull_profile_cookies("p1")
+
+
+@pytest.mark.asyncio
 async def test_pull_explains_manual_launch_without_the_pull_channel(tmp_path):
     # Running (context is None) but launched before the extension channel
     # existed, so no token was registered for it.

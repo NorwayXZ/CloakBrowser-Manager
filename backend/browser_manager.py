@@ -31,6 +31,7 @@ from .cookie_pull import (
     CookiePullUnavailable,
 )
 from .fingerprint_options import (
+    NOISE_OFF_ARG,
     apply_noise_preference,
     build_fingerprint_option_args,
     geolocation_plan,
@@ -2439,6 +2440,14 @@ class BrowserManager:
                     ),
                 })
 
+        if engine == "cloakbrowser" and NOISE_OFF_ARG in self._build_fingerprint_args(profile):
+            issues.append({
+                "severity": "info", "code": "noise_off_linkable",
+                "message": (
+                    "指纹噪声关闭：这台电脑上所有噪声关闭的画像 Canvas 指纹相同，网站能据此把它们关联成同一台设备。"
+                    "同一平台的多个账号不要都用噪声关闭的画像。"
+                ),
+            })
         fixed_language = parse_fingerprint_options(profile).language
         if fixed_language and engine == "cloakbrowser":
             issues.append({
@@ -2446,6 +2455,15 @@ class BrowserManager:
                 "message": (
                     f"浏览器语言固定为 {fixed_language}：界面、网页语言和日期格式都用它，时区仍按出口 IP。"
                     "网站能看出这是该语言的浏览器，但语言之间不会互相矛盾。"
+                ),
+            })
+        saved_geo = profile.get("proxy_geo") if isinstance(profile.get("proxy_geo"), dict) else {}
+        if saved_geo.get("rotating_ip"):
+            issues.append({
+                "severity": "warning", "code": "rotating_exit_ip",
+                "message": (
+                    "上次检测时这个代理的出口 IP 在变（" + "、".join(saved_geo.get("exit_ips") or []) + "）。"
+                    "时区和语言按启动时的 IP 设定，IP 一换就对不上，网站会报时区不一致；请在代理商那里改用固定会话。"
                 ),
             })
         if profile.get("geoip") and not profile.get("proxy_geo"):
@@ -3259,10 +3277,16 @@ class BrowserManager:
             cookies = live_cookies_to_profile(raw_cookies)
             logger.info("Pulled %d cookies from running profile %s", len(cookies), profile_id)
             return cookies
+        if running.browser_engine == "system_chrome":
+            # Branded Chrome ignores --load-extension, so the pull-back
+            # extension never loads there and a pull would only time out.
+            raise CookiePullError(
+                "系统 Chrome 的日常启动加载不了 Manager 的扩展，读不到 Cookie："
+                "请用调试模式打开这个画像，再导回 Cookie"
+            )
         if not self.cookie_pulls.has_token(profile_id):
             raise CookiePullError(
-                "这个浏览器还没有装上导回通道（它是用旧版本启动的）："
-                "请先关闭它，重新启动一次，再导回 Cookie"
+                "这个浏览器启动时没有带上导回通道：请先关闭它，重新启动一次，再导回 Cookie"
             )
         try:
             raw_cookies = await self.cookie_pulls.request_cookies(

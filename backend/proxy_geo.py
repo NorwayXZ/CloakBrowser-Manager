@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 from collections import Counter
 from typing import Any
 
@@ -228,6 +229,24 @@ def _choose_geo_result(results: list[dict[str, Any]]) -> dict[str, Any]:
     return chosen
 
 
+def exit_ip_spread(results: list[dict[str, Any]]) -> tuple[list[str], bool]:
+    """Every exit IP the lookup sites saw, and whether the exit rotates.
+
+    The sites are asked one after another over separate connections, so a
+    proxy that hands out a new address per connection shows several IPs.
+    A dual-stack direct connection legitimately shows one IPv4 and one IPv6
+    address, so only a second address of the same family counts.
+    """
+    ips = sorted({str(result["ip"]) for result in results if result.get("ip")})
+    families: Counter[int] = Counter()
+    for ip in ips:
+        try:
+            families[ipaddress.ip_address(ip).version] += 1
+        except ValueError:
+            continue
+    return ips, any(count > 1 for count in families.values())
+
+
 async def fetch_proxy_geo(proxy: str | None) -> dict[str, Any]:
     errors: list[str] = []
     async with httpx.AsyncClient(
@@ -250,6 +269,8 @@ async def fetch_proxy_geo(proxy: str | None) -> dict[str, Any]:
                 errors.append(f"{provider.__name__}: {type(exc).__name__}")
 
     if results:
-        return _choose_geo_result(results)
+        chosen = _choose_geo_result(results)
+        chosen["exit_ips"], chosen["rotating_ip"] = exit_ip_spread(results)
+        return chosen
 
     raise ProxyGeoError("; ".join(errors) or "proxy geo lookup failed")

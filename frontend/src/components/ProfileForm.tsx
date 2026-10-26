@@ -792,6 +792,22 @@ export function ProfileForm({
   )?.[0] ?? "custom";
 
   const currentEngine = normalizeFormEngine(form.browser_engine);
+  // A rotating exit breaks the timezone/locale chosen at launch: within one
+  // test (several IPs of one family) or since the last launch (same proxy,
+  // different IP).
+  const lastLaunchIp = profile && (profile.proxy ?? null) === (form.proxy ?? null)
+    ? profile.proxy_geo?.ip ?? null
+    : null;
+  const rotationNotice = proxyTest?.rotating_ip
+    ? `这个代理的出口 IP 在变：这一次检查就看到了 ${(proxyTest.exit_ips ?? []).join("、")}。时区和语言按启动时的 IP 设定，IP 一换就对不上，网站会报「时区不一致」。请在代理商那里改用固定会话（sticky session）。`
+    : proxyTest?.ip && lastLaunchIp && lastLaunchIp !== proxyTest.ip
+    ? `出口 IP 和上次启动时不一样（上次 ${lastLaunchIp}，现在 ${proxyTest.ip}）：可能是轮换代理，或代理商换了 IP。如果是轮换代理，浏览途中时区会对不上，请改用固定会话。`
+    : null;
+  // macOS personas run with noise off unless it is switched on explicitly.
+  const noiseEffectivelyOff = currentEngine === "cloakbrowser" && (
+    form.fingerprint_options?.noise === false
+    || (form.fingerprint_options?.noise == null && allowedPlatform === "macos")
+  );
   const realScreen = hostScreen && hostScreen.length === 2 ? hostScreen : null;
   // Sites read the real display through CSS media queries, so a CloakBrowser
   // profile follows it unless a custom size was chosen.
@@ -1389,6 +1405,11 @@ export function ProfileForm({
                         </button>
                       </div>
                     )}
+                    {proxyTest && rotationNotice && (
+                      <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-800" data-testid="rotating-ip-warning">
+                        {rotationNotice}
+                      </div>
+                    )}
                     {proxyTest?.ip_quality && <IpQualityPanel quality={proxyTest.ip_quality} />}
                   </div>
 
@@ -1718,6 +1739,11 @@ export function ProfileForm({
                       onChange={(value) => setOption("noise", value === "auto" ? null : value === "on")}
                     />
                     <FieldNote>噪声让每个画像的 Canvas、WebGL、音频输出各不相同。实测多数现代检测器对噪声净扣分，新建画像默认关闭；想回到内核默认可随时切换回「自动」；macOS 画像默认关闭。</FieldNote>
+                    {noiseEffectivelyOff && (
+                      <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800" data-testid="noise-linkage-warning">
+                        噪声关闭时，这台电脑上所有噪声关闭的画像 Canvas 指纹完全相同（实测两个不同种子结果一样），网站能据此把它们关联成同一台设备。打开噪声后各不相同，但 Pixelscan 会判为「检测到伪装」。同一平台的多个账号，不要都放在这台电脑上噪声关闭的画像里。
+                      </div>
+                    )}
                   </div>
 
                   <label className="pt-1.5 text-right text-sm font-medium text-slate-600">存储配额</label>

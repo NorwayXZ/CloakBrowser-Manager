@@ -87,6 +87,53 @@ export interface Profile {
   cdp_url: string | null;
   launch_mode: LaunchMode | null;
   proxy_geo: ProxyTestResult | null;
+  agent_lease?: AgentLease | null;
+}
+
+/** Who is driving a running profile: an AI agent, or the user after a takeover. */
+export interface AgentLease {
+  holder: string;
+  kind: "agent" | "human";
+  acquired_at: string;
+  expires_at: string;
+  seconds_left: number;
+}
+
+export type McpMode = "off" | "read-only" | "full" | "automation";
+export type AgentTokenScope = "read" | "control" | "cdp";
+
+export interface AgentToken {
+  id: string;
+  name: string;
+  scope: AgentTokenScope;
+  created_at: number;
+}
+
+export interface AgentTokenList {
+  /** False when the Manager has no authentication: tokens are then not checked. */
+  enforced: boolean;
+  scopes: AgentTokenScope[];
+  tokens: AgentToken[];
+}
+
+export interface AgentTokenCreated {
+  /** Plaintext token, shown exactly once. */
+  token: string;
+  record: AgentToken;
+  enforced: boolean;
+  note: string;
+}
+
+export interface McpAuditEntry {
+  id: string;
+  ts: string;
+  client_name: string | null;
+  client_version: string | null;
+  tool: string;
+  args_summary: Record<string, unknown>;
+  ok: boolean;
+  reason: string | null;
+  duration_ms: number | null;
 }
 
 export interface ProfileCreateData {
@@ -465,6 +512,8 @@ export interface LlmSettingsUpdate {
   base_url: string;
   model: string;
   api_key?: string | null;
+  /** Deletes the stored key; wins over api_key. */
+  clear_api_key?: boolean;
   executor_model: string;
   executor_effort: string;
 }
@@ -698,6 +747,9 @@ export interface ProxyTestResult {
   connection_mode?: "direct" | "proxy" | null;
   /** Whether the exit IP is known as a proxy, VPN or datacenter address. */
   ip_quality?: IpQuality | null;
+  /** Every exit IP this test saw; more than one of a family = rotating. */
+  exit_ips?: string[];
+  rotating_ip?: boolean;
 }
 
 export interface ProfileGroup {
@@ -966,6 +1018,17 @@ export const api = {
   stopProfile: (id: string) =>
     request<{ ok: boolean }>(`/api/profiles/${id}/stop`, { method: "POST" }),
 
+  /** The person takes over from an AI agent: parks the lease on "human" and cuts its CDP sockets. */
+  takeoverProfile: (id: string) =>
+    request<{ lease: AgentLease | null; cdp_connections_closed: number }>(
+      `/api/profiles/${id}/lease/takeover`,
+      { method: "POST", body: JSON.stringify({}) },
+    ),
+
+  /** The person hands the profile back to agents. */
+  releaseProfileLease: (id: string) =>
+    request<{ released: boolean }>(`/api/profiles/${id}/lease`, { method: "DELETE" }),
+
   getStatus: () => request<SystemStatus>("/api/status"),
 
   updateManager: () =>
@@ -1066,6 +1129,27 @@ export const api = {
     ),
 
   getLlmSettings: () => request<LlmSettings>("/api/settings/llm"),
+
+  getMcpMode: () => request<{ mode: McpMode }>("/api/settings/mcp"),
+
+  setMcpMode: (mode: McpMode) =>
+    request<{ mode: McpMode }>("/api/settings/mcp", {
+      method: "PUT",
+      body: JSON.stringify({ mode }),
+    }),
+
+  listAgentTokens: () => request<AgentTokenList>("/api/agent/tokens"),
+
+  createAgentToken: (name: string, scope: AgentTokenScope) =>
+    request<AgentTokenCreated>("/api/agent/tokens", {
+      method: "POST",
+      body: JSON.stringify({ name, scope }),
+    }),
+
+  revokeAgentToken: (id: string) =>
+    request<{ ok: boolean }>(`/api/agent/tokens/${id}`, { method: "DELETE" }),
+
+  listMcpAudit: (limit = 30) => request<McpAuditEntry[]>(`/api/mcp/audit?limit=${limit}`),
 
   updateLlmSettings: (data: LlmSettingsUpdate) =>
     request<LlmSettings>("/api/settings/llm", {

@@ -12,7 +12,8 @@ export type KernelCheck = Schemas["KernelCheckResponse"];
 export type BrowserUpdate = Schemas["BrowserUpdateResponse"];
 export type ManagerUpdate = Schemas["ManagerUpdateResponse"];
 export type AutomationHours = Schemas["AutomationHoursResponse"];
-export type LlmSettingsUpdate = Schemas["LlmSettingsModel"];
+// `clear_api_key` defaults to false on the backend; the panel only sends it to wipe the stored key.
+export type LlmSettingsUpdate = Omit<Schemas["LlmSettingsModel"], "clear_api_key"> & { clear_api_key?: boolean };
 
 /** /api/settings/llm answers a plain dict: the key itself is never sent back. */
 export interface LlmSettings {
