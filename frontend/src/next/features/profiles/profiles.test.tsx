@@ -404,6 +404,66 @@ describe("details panel", () => {
   });
 });
 
+describe("agent lease", () => {
+  const LEASE = { holder: "codex", kind: "agent", acquired_at: "2026-10-26T01:00:00Z", expires_at: "2026-10-26T01:10:00Z", seconds_left: 540 };
+
+  it("shows who drives a running environment and takes it over", async () => {
+    profiles = [{ ...AMAZON, status: "running", agent_lease: LEASE }, ETSY];
+    const { fetchMock } = await renderList([
+      {
+        method: "POST",
+        path: "/api/profiles/a/lease/takeover",
+        respond: () => {
+          profiles = profiles.map((p) => (p.id === "a" ? { ...p, agent_lease: { ...LEASE, holder: "human", kind: "human" } } : p));
+          return { lease: null, cdp_connections_closed: 1 };
+        },
+      },
+    ]);
+    const amazon = row("Amazon Seller #1");
+    expect(within(amazon).getByText("AI 控制中：codex")).toHaveAttribute("title", "AI 控制中：codex（9 分钟内有效）");
+    expect(within(row("Etsy UK")).queryByTestId("agent-lease")).not.toBeInTheDocument();
+    // One line: the action may not wrap.
+    expect(within(amazon).getByRole("button", { name: "接管「Amazon Seller #1」" })).toHaveClass("whitespace-nowrap", "shrink-0");
+    await expectNoAxeViolations(document.body);
+
+    fireEvent.click(within(amazon).getByRole("button", { name: "接管「Amazon Seller #1」" }));
+    await waitFor(() => expect(calls(fetchMock, "POST", /\/api\/profiles\/a\/lease\/takeover$/)).toHaveLength(1));
+    expect(await within(row("Amazon Seller #1")).findByText(/你已接管，AI 暂不能操作/)).toBeInTheDocument();
+  });
+
+  it("hands a taken-over environment back to the AI", async () => {
+    profiles = [{ ...AMAZON, status: "running", agent_lease: { ...LEASE, holder: "human", kind: "human" } }];
+    const { fetchMock } = await renderList([
+      {
+        method: "DELETE",
+        path: "/api/profiles/a/lease",
+        respond: () => {
+          profiles = profiles.map((p) => ({ ...p, agent_lease: null }));
+          return { released: true };
+        },
+      },
+    ]);
+    fireEvent.click(within(row("Amazon Seller #1")).getByRole("button", { name: "把「Amazon Seller #1」归还给 AI" }));
+    await waitFor(() => expect(calls(fetchMock, "DELETE", /\/lease$/)).toHaveLength(1));
+    await waitFor(() => expect(within(row("Amazon Seller #1")).queryByTestId("agent-lease")).not.toBeInTheDocument());
+  });
+
+  it("says why a takeover failed and does not open the details", async () => {
+    profiles = [{ ...AMAZON, status: "running", agent_lease: LEASE }];
+    await renderList([{ method: "POST", path: "/api/profiles/a/lease/takeover", status: 409, respond: { detail: "租约已过期" } }]);
+    fireEvent.click(within(row("Amazon Seller #1")).getByRole("button", { name: "接管「Amazon Seller #1」" }));
+    expect(await screen.findByText("没能接管「Amazon Seller #1」")).toBeInTheDocument();
+    expect(screen.getByText("租约已过期")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("shows no lease on a stopped environment", async () => {
+    profiles = [{ ...AMAZON, agent_lease: LEASE }];
+    await renderList();
+    expect(screen.queryByTestId("agent-lease")).not.toBeInTheDocument();
+  });
+});
+
 describe("trash and burn", () => {
   it("moves a stopped environment to the trash at once, with undo", async () => {
     const { fetchMock } = await renderList([

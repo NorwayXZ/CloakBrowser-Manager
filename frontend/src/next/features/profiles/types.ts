@@ -12,6 +12,15 @@ export type PreflightIssue = Schemas["PreflightIssue"];
 export type DeviceTemplate = Schemas["DeviceTemplateResponse"];
 export type BurnResult = Schemas["BurnResponse"];
 
+/** Who drives a running profile: an AI agent, or the person after a takeover. `agent_lease` is an untyped dict in the schema. */
+export interface AgentLease {
+  holder: string;
+  kind: "agent" | "human";
+  acquired_at: string;
+  expires_at: string;
+  seconds_left: number;
+}
+
 // The endpoints below return plain dicts on the backend (no response model),
 // so their shapes are written out here, matching backend/main.py.
 

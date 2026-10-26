@@ -25,6 +25,34 @@ export interface LlmSettings {
   executor_effort: string | null;
 }
 
+export type McpMode = Schemas["McpSettingsModel"]["mode"];
+export type McpAuditEntry = Schemas["McpAuditResponse"];
+export type AgentTokenScope = "read" | "control" | "cdp";
+
+// /api/agent/tokens answers plain dicts (no response model), matching backend/main.py.
+export interface AgentToken {
+  id: string;
+  name: string;
+  scope: AgentTokenScope;
+  /** Unix seconds. */
+  created_at: number;
+}
+
+export interface AgentTokenList {
+  /** False when the Manager has no authentication: tokens are then not checked. */
+  enforced: boolean;
+  scopes: AgentTokenScope[];
+  tokens: AgentToken[];
+}
+
+export interface AgentTokenCreated {
+  /** Plaintext token, shown exactly once. */
+  token: string;
+  record: AgentToken;
+  enforced: boolean;
+  note: string;
+}
+
 export type AppUpdatePhase = "idle" | "checking" | "downloading" | "backing_up" | "preparing" | "restarting" | "failed";
 
 export interface AppUpdateResult {
@@ -61,6 +89,9 @@ export interface UpdateCheck {
 export const settingsKeys = {
   kernel: ["settings", "kernel"] as const,
   llm: ["settings", "llm"] as const,
+  mcp: ["settings", "mcp"] as const,
+  agentTokens: ["agent", "tokens"] as const,
+  mcpAudit: ["mcp", "audit"] as const,
   hours: ["automation", "hours"] as const,
   appUpdate: ["app", "update"] as const,
   /** Last "检查更新" result, kept so the toolbar can mention a new version. */
@@ -82,6 +113,14 @@ export const settingsApi = {
 
   llm: () => request<LlmSettings>("/api/settings/llm"),
   saveLlm: (body: LlmSettingsUpdate) => request<LlmSettings>("/api/settings/llm", { method: "PUT", body }),
+
+  mcpMode: () => request<{ mode: McpMode }>("/api/settings/mcp"),
+  saveMcpMode: (mode: McpMode) => request<{ mode: McpMode }>("/api/settings/mcp", { method: "PUT", body: { mode } }),
+  agentTokens: () => request<AgentTokenList>("/api/agent/tokens"),
+  createAgentToken: (name: string, scope: AgentTokenScope) =>
+    request<AgentTokenCreated>("/api/agent/tokens", { method: "POST", body: { name, scope } }),
+  revokeAgentToken: (id: string) => request<{ ok: boolean }>(`/api/agent/tokens/${enc(id)}`, { method: "DELETE" }),
+  mcpAudit: (limit: number) => request<McpAuditEntry[]>(`/api/mcp/audit?limit=${limit}`),
 
   hours: () => request<AutomationHours>("/api/automation/hours"),
   saveHours: (hours: string | null) => request<AutomationHours>("/api/automation/hours", { method: "PUT", body: { hours } }),
@@ -106,6 +145,20 @@ export function useKernel() {
 
 export function useLlmSettings() {
   return useQuery({ queryKey: settingsKeys.llm, queryFn: settingsApi.llm });
+}
+
+export function useMcpMode() {
+  return useQuery({ queryKey: settingsKeys.mcp, queryFn: settingsApi.mcpMode });
+}
+
+export function useAgentTokens() {
+  return useQuery({ queryKey: settingsKeys.agentTokens, queryFn: settingsApi.agentTokens });
+}
+
+export const AUDIT_LIMIT = 30;
+
+export function useMcpAudit() {
+  return useQuery({ queryKey: settingsKeys.mcpAudit, queryFn: () => settingsApi.mcpAudit(AUDIT_LIMIT) });
 }
 
 export function useHours() {

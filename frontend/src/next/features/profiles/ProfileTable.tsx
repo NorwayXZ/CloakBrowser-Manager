@@ -3,7 +3,8 @@ import { useRef, type KeyboardEvent, type MouseEvent } from "react";
 import { cn } from "../../shared/lib/cn";
 import { matchesCombo } from "../../shared/lib/hotkeys";
 import { Badge, Button, Checkbox, IconButton, Menu, MenuItem, MenuSeparator, StatusDot, Table, TD, TH, THead, TR, Tooltip } from "../../ui";
-import { engineLabel, groupOf, isRunning, lastState, launchFailureReason, locationText, proxyHost, proxyType } from "./format";
+import { AgentLeaseBadge } from "./AgentLeaseBadge";
+import { engineLabel, groupOf, isRunning, leaseOf, lastState, launchFailureReason, locationText, proxyHost, proxyType } from "./format";
 import { NoteField } from "./NoteField";
 import type { LaunchMode, Profile } from "./types";
 
@@ -124,6 +125,7 @@ export function ProfileTable({
           const state = lastState(profile);
           const isBusy = busy.has(profile.id);
           const isSelected = selected.has(profile.id);
+          const lease = running ? leaseOf(profile) : null;
           return (
             <TR
               key={profile.id}
@@ -152,6 +154,7 @@ export function ProfileTable({
                 <div className="truncate text-xs text-fg-3">
                   {[engineLabel(profile), profile.account_platform].filter(Boolean).join(" · ")}
                 </div>
+                {lease && <AgentLeaseBadge profile={profile} lease={lease} />}
               </TD>
               {showGroup && (
                 <TD className="truncate text-fg-2" title={groupOf(profile)}>

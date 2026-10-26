@@ -2,7 +2,7 @@
  * How a profile is described in the list and the detail panel. Pure functions,
  * carried over from the current panel so both show the same words.
  */
-import type { Profile, ProfileCreate } from "./types";
+import type { AgentLease, Profile, ProfileCreate } from "./types";
 
 export const UNGROUPED = "未分组";
 
@@ -21,6 +21,12 @@ export function geoOf(profile: Pick<Profile, "proxy_geo">): ProxyGeo | null {
 
 export function groupOf(profile: Pick<Profile, "group_name">): string {
   return profile.group_name?.trim() || UNGROUPED;
+}
+
+/** The agent lease of a running profile, if an agent holds it or the person took over. */
+export function leaseOf(profile: Pick<Profile, "agent_lease">): AgentLease | null {
+  const lease = profile.agent_lease as AgentLease | null | undefined;
+  return lease?.holder ? lease : null;
 }
 
 export function isRunning(profile: Pick<Profile, "status">): boolean {
