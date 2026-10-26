@@ -76,7 +76,9 @@ async def test_call_saves_screenshots_to_a_file_instead_of_printing_base64(tmp_p
     assert code == 0
     assert out.read_bytes() == b"JPEGDATA"
     printed = capsys.readouterr().out
-    assert str(out) in printed and base64.b64encode(b"JPEGDATA").decode() not in printed
+    # Compare parsed JSON, not the raw text: JSON escapes the backslashes of a Windows path.
+    assert json.loads(printed)["image"]["path"] == str(out)
+    assert base64.b64encode(b"JPEGDATA").decode() not in printed
 
 
 async def test_mode_get_and_set(capsys):
