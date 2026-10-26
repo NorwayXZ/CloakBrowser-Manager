@@ -43,6 +43,7 @@ from .host_display import primary_screen_size
 from .fingerprint_report import DEFAULT_NETWORK_PROBE_URL, analyze_fingerprint, run_fingerprint_probe
 from .cloak_runtime import get_effective_chromium_version
 from .proxy_geo import fetch_proxy_geo
+from .proxy_probe import probe_proxy
 from .proxy_bridge import HttpProxyBridge
 from .runtime import RuntimeConfig, resolve_runtime, server_port
 from .session_keeper import (
@@ -2707,6 +2708,15 @@ class BrowserManager:
                         profile_id,
                     )
 
+            if browser_proxy:
+                # A dead proxy used to launch anyway: no page loaded, a Pro
+                # kernel could not verify its license, and nothing said why.
+                # Check it first and stop with the step that failed.
+                probe = await asyncio.to_thread(
+                    probe_proxy, browser_proxy if xray_process is not None else proxy,
+                )
+                if not probe.ok:
+                    raise BrowserLaunchError(f"启动失败：代理不可用，{probe.message}")
             resolved_timezone = profile.get("timezone") or None
             resolved_locale = profile.get("locale") or None
             proxy_geo: dict[str, Any] | None = None

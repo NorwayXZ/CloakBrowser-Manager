@@ -57,6 +57,18 @@ def isolated_secret_key(tmp_path_factory: pytest.TempPathFactory, monkeypatch: p
 
 
 @pytest.fixture(autouse=True)
+def proxies_look_healthy(monkeypatch: pytest.MonkeyPatch):
+    """No test reaches a real proxy: the health check answers "usable";
+    the probe's own tests run it against local fake proxies."""
+    from backend import browser_manager, main
+    from backend.proxy_probe import ProbeResult
+
+    healthy = lambda *_a, **_k: ProbeResult(ok=True, message="ok", stage="done", seconds=0.0)  # noqa: E731
+    monkeypatch.setattr(browser_manager, "probe_proxy", healthy)
+    monkeypatch.setattr(main, "probe_proxy", healthy)
+
+
+@pytest.fixture(autouse=True)
 def lsof_cannot_tell(monkeypatch: pytest.MonkeyPatch):
     """Launch tests use mock processes, which lsof knows nothing about: answer
     "unknown" so no launch waits for a window; tests of the window logic set

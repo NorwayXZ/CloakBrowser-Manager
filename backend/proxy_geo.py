@@ -269,17 +269,26 @@ async def fetch_proxy_geo(proxy: str | None) -> dict[str, Any]:
             _fetch_ip_api,
             _fetch_ipapi,
         )
-        for provider in providers:
+
+        async def ask(provider) -> tuple[dict[str, Any] | None, str | None]:
             try:
-                results.append(await asyncio.wait_for(provider(client), PROXY_REQUEST_SECONDS))
+                return await asyncio.wait_for(provider(client), PROXY_REQUEST_SECONDS), None
             except asyncio.TimeoutError:
-                errors.append(f"{provider.__name__}: no answer in {PROXY_REQUEST_SECONDS:.0f} s")
+                return None, f"{provider.__name__}: no answer in {PROXY_REQUEST_SECONDS:.0f} s"
             except (httpx.HTTPError, ValueError, ProxyGeoError) as exc:
-                errors.append(f"{provider.__name__}: {type(exc).__name__}")
+                return None, f"{provider.__name__}: {type(exc).__name__}"
+
+        # All sites at once: the slowest one sets the time, not their sum.
+        # Each still uses its own connection, so a rotating exit shows up.
+        for result, error in await asyncio.gather(*(ask(provider) for provider in providers)):
+            if result is not None:
+                results.append(result)
+            if error is not None:
+                errors.append(error)
 
     if results:
         chosen = _choose_geo_result(results)
         chosen["exit_ips"], chosen["rotating_ip"] = exit_ip_spread(results)
         return chosen
 
-    raise ProxyGeoError("; ".join(errors) or "proxy geo lookup failed")
+    raise ProxyGeoError("出口 IP 查询站全部没有回答（" + "; ".join(errors) + "）")

@@ -67,6 +67,7 @@ from .fingerprint_report import DEFAULT_NETWORK_PROBE_URL, DIAGNOSTIC_SCRIPT
 from .proxy_bridge import HttpProxyBridge
 from .proxy_geo import fetch_proxy_geo, suggested_locale, suggested_timezone
 from .ip_quality import check_ip_quality
+from .proxy_probe import probe_proxy
 from .request_guard import RequestGuardMiddleware
 from .runtime import server_port
 from .rfb import _RFB_MSG_SIZE, _build_server_cut_text, _filter_rfb_client_messages, _parse_kasmvnc_clipboard
@@ -2859,6 +2860,13 @@ async def test_proxy(req: ProxyTestRequest):
         ):
             proxy_bridge = HttpProxyBridge(proxy)
             effective_proxy = await proxy_bridge.start()
+        # A few-second health check first: a dead proxy is reported with the
+        # step that failed instead of after every lookup has timed out.
+        probe_target = effective_proxy if xray_process is not None else proxy
+        if probe_target:
+            probe = await asyncio.to_thread(probe_proxy, probe_target)
+            if not probe.ok:
+                raise HTTPException(status_code=400, detail=f"代理不可用：{probe.message}")
         data = await asyncio.wait_for(fetch_proxy_geo(effective_proxy), PROXY_TEST_SECONDS)
         data["connection_mode"] = "proxy" if effective_proxy else "direct"
         try:
@@ -2871,6 +2879,8 @@ async def test_proxy(req: ProxyTestRequest):
         if proxy:
             detail += "代理端口能连上却不转发请求时就是这样，通常是代理那一端的出口断了。"
         raise HTTPException(status_code=400, detail=detail) from exc
+    except HTTPException:
+        raise
     except Exception as exc:
         label = "代理测试" if proxy else "直连出口检测"
         raise HTTPException(status_code=400, detail=f"{label}失败：{exc}") from exc

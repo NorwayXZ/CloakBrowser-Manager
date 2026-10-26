@@ -1010,3 +1010,17 @@ def test_panel_page_is_always_revalidated(app_client: TestClient):
 
     assert resp.status_code == 200
     assert resp.headers["cache-control"] == "no-cache"
+
+
+def test_proxy_test_reports_a_dead_proxy_without_waiting_for_lookups(app_client: TestClient):
+    from backend import main
+    from backend.proxy_probe import ProbeResult
+
+    dead = ProbeResult(ok=False, message="代理能连上，但 6 秒内没有转发请求：通常是代理那一端的出口断了", stage="forward", seconds=6.0)
+    with patch.object(main, "probe_proxy", lambda *_a: dead), \
+            patch("backend.main.fetch_proxy_geo", AsyncMock()) as lookup:
+        response = app_client.post("/api/proxy/test", json={"proxy": "socks5://192.168.100.1:19998"})
+
+    assert response.status_code == 400
+    assert response.json()["detail"].startswith("代理不可用：代理能连上，但 6 秒内没有转发请求")
+    lookup.assert_not_awaited()

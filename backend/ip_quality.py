@@ -107,12 +107,15 @@ async def check_ip_quality(
         follow_redirects=True,
         **connection,
     ) as client:
-        for name, source in SOURCES:
+
+        async def ask(name: str, source) -> dict[str, str]:
             try:
-                signals.append(await asyncio.wait_for(source(client, ip), PROXY_REQUEST_SECONDS))
+                return await asyncio.wait_for(source(client, ip), PROXY_REQUEST_SECONDS)
             except asyncio.TimeoutError:
-                signals.append(_signal(name, "unknown", f"{PROXY_REQUEST_SECONDS:.0f} 秒内没有回答"))
+                return _signal(name, "unknown", f"{PROXY_REQUEST_SECONDS:.0f} 秒内没有回答")
             except (httpx.HTTPError, ValueError) as exc:
-                signals.append(_signal(name, "unknown", f"查询失败（{type(exc).__name__}）"))
+                return _signal(name, "unknown", f"查询失败（{type(exc).__name__}）")
+
+        signals = list(await asyncio.gather(*(ask(name, source) for name, source in SOURCES)))
     verdict, summary = summarize(signals)
     return {"verdict": verdict, "summary": summary, "signals": signals, "links": manual_links(ip)}

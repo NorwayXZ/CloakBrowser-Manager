@@ -213,6 +213,25 @@ async def test_start_wait_ends_a_browser_that_never_opens(monkeypatch, tmp_path:
     terminate.assert_awaited_once_with(process)
 
 
+@pytest.mark.asyncio
+async def test_launch_stops_before_the_browser_when_the_proxy_is_dead(monkeypatch, tmp_path: Path):
+    from backend.proxy_probe import ProbeResult
+
+    manager = BrowserManager(RuntimeConfig("macos", "native", "native-window", tmp_path))
+    launched = MagicMock()
+    monkeypatch.setattr(module, "_launch_cloakbrowser_manual_process", launched)
+    monkeypatch.setattr(module, "probe_proxy", lambda *_a: ProbeResult(
+        ok=False, message="代理转发了连接，但 6 秒内没有连通外网：代理的出口很可能断了", stage="tls", seconds=6.0,
+    ))
+    profile = {**_profile(tmp_path, "cloakbrowser", "macos"), "proxy": "socks5://192.168.100.1:19998"}
+
+    with pytest.raises(module.BrowserLaunchError, match="代理不可用"):
+        await manager.launch(profile)
+
+    launched.assert_not_called()
+    assert "p1" not in manager.running
+
+
 # ── License route ─────────────────────────────────────────────────────────────
 
 
