@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { request } from "../../shared/api/client";
 import type {
+  AgentLease,
   BurnResult,
   DeviceTemplate,
   FingerprintReport,
@@ -50,6 +51,10 @@ export const profilesApi = {
   groups: () => request<ProfileGroup[]>("/api/groups"),
   createGroup: (name: string) => request<ProfileGroup>("/api/groups", { method: "POST", body: { name } }),
   deleteGroup: (id: string) => request<{ ok: boolean }>(`/api/groups/${enc(id)}`, { method: "DELETE" }),
+  /** The person takes over from an AI agent: parks the lease on "human" and cuts the agent's CDP sockets. */
+  takeover: (id: string) => request<{ lease: AgentLease | null; cdp_connections_closed: number }>(`/api/profiles/${enc(id)}/lease/takeover`, { method: "POST", body: {} }),
+  /** The person hands the profile back to agents. */
+  releaseLease: (id: string) => request<{ released: boolean }>(`/api/profiles/${enc(id)}/lease`, { method: "DELETE" }),
   setClipboard: (id: string, text: string) => request<{ ok: boolean }>(`/api/profiles/${enc(id)}/clipboard`, { method: "POST", body: { text } }),
   getClipboard: (id: string) => request<{ text: string }>(`/api/profiles/${enc(id)}/clipboard`),
 };

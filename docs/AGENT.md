@@ -63,7 +63,7 @@ curl -X POST http://127.0.0.1:8080/api/agent/tools/open_browser \
 
 ## 权限档位
 
-由人在 Manager 里设置（面板左侧「AI 接入」，或命令行 `cloak mode`、API `PUT /api/settings/mcp`），决定你看到哪些工具。MCP 客户端改完模式要重启，工具列表是连接时协商的。
+由人在 Manager 里设置（面板「设置 → AI 接入」，旧界面在左侧「AI 接入」，或命令行 `cloak mode`、API `PUT /api/settings/mcp`），决定你看到哪些工具。MCP 客户端改完模式要重启，工具列表是连接时协商的。
 
 | 模式 | 你能做什么 |
 | --- | --- |
@@ -207,7 +207,7 @@ curl -X POST http://127.0.0.1:8080/api/agent/tools/open_browser \
 
 ## 范围化 token（Manager 开了鉴权时）
 
-管理员可以签发只给 agent 用的 token，比 `AUTH_TOKEN` 权限小。面板左侧「AI 接入」里可以签发、撤销，也能看到最近的 agent 操作记录；命令行同样可以：
+管理员可以签发只给 agent 用的 token，比 `AUTH_TOKEN` 权限小。面板「设置 → AI 接入」里可以签发、撤销，也能看到最近的 agent 操作记录；命令行同样可以：
 
 ```bash
 ./bin/cloak token create "codex 笔记本" control     # 输出的 token 只显示一次

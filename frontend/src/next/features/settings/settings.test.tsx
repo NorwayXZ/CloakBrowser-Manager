@@ -294,6 +294,141 @@ describe("settings › AI", () => {
   });
 });
 
+describe("settings › AI 接入", () => {
+  const NO_TOKENS = { enforced: true, scopes: ["read", "control", "cdp"], tokens: [] };
+  const TOKEN = { id: "t1", name: "codex 笔记本", scope: "control", created_at: 1_700_000_000 };
+  const AUDIT = [{ id: "a1", ts: "2026-10-26T01:00:00+00:00", client_name: "codex", client_version: null, tool: "open_browser", args_summary: {}, ok: false, reason: "profile_leased", duration_ms: 12 }];
+  let mode: string;
+
+  function agentRoutes(extra: MockRoute[] = [], tokens: unknown = NO_TOKENS, audit: unknown = []): MockRoute[] {
+    return [
+      ...extra,
+      { path: "/api/settings/mcp", respond: () => ({ mode }) },
+      { method: "PUT", path: "/api/settings/mcp", respond: (body: { mode: string }) => ((mode = body.mode), { mode }) },
+      { path: "/api/agent/tokens", respond: tokens },
+      { path: "/api/mcp/audit?limit=30", respond: audit },
+    ];
+  }
+
+  beforeEach(() => {
+    mode = "read-only";
+  });
+
+  it("shows the current mode and saves a change", async () => {
+    const { fetchMock } = await open("/settings/agent", agentRoutes(), "AI agent 权限");
+    expect(await screen.findByRole("radio", { name: "只读（默认）" })).toBeChecked();
+    fireEvent.click(screen.getByRole("radio", { name: "可启停" }));
+    expect(await screen.findByText("AI agent 权限已保存")).toBeInTheDocument();
+    expect(screen.getByText(/MCP 客户端需要重启/)).toBeInTheDocument();
+    expect(bodies(fetchMock, "PUT", "/api/settings/mcp")).toEqual([{ mode: "full" }]);
+    expect(screen.getByRole("radio", { name: "可启停" })).toBeChecked();
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("warns that page control can read cookies and does nothing when declined", async () => {
+    const { fetchMock } = await open("/settings/agent", agentRoutes(), "AI agent 权限");
+    fireEvent.click(await screen.findByRole("radio", { name: "可操作页面" }));
+    expect(await within(await screen.findByRole("dialog")).findByText(/全部 Cookie/)).toBeInTheDocument();
+    await cancelDialog();
+    expect(bodies(fetchMock, "PUT", "/api/settings/mcp")).toEqual([]);
+    expect(screen.getByRole("radio", { name: "只读（默认）" })).toBeChecked();
+
+    fireEvent.click(screen.getByRole("radio", { name: "可操作页面" }));
+    await confirmWith("确定开启");
+    expect(await screen.findByText(/当前允许 AI 操作页面/)).toBeInTheDocument();
+    expect(bodies(fetchMock, "PUT", "/api/settings/mcp")).toEqual([{ mode: "automation" }]);
+  });
+
+  it("shows why saving the mode failed", async () => {
+    await open("/settings/agent", agentRoutes([{ method: "PUT", path: "/api/settings/mcp", status: 500, respond: { detail: "写不进去" } }]), "AI agent 权限");
+    fireEvent.click(await screen.findByRole("radio", { name: "关闭" }));
+    expect(await screen.findByText("写不进去")).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "只读（默认）" })).toBeChecked();
+  });
+
+  it("lists connection addresses for this Manager", async () => {
+    await open("/settings/agent", agentRoutes(), "接入地址");
+    expect(screen.getByText(`${window.location.origin}/api/agent/mcp`)).toBeInTheDocument();
+    expect(screen.getByText(`${window.location.origin}/api/agent/tools?format=openai`)).toBeInTheDocument();
+    expect(screen.getByText(`${window.location.origin}/api/agent/guide`)).toBeInTheDocument();
+    expect(screen.getByText("python -m backend.mcp_server")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "复制HTTP MCP" })).toBeInTheDocument();
+  });
+
+  it("issues a token, shows it once, and lists it", async () => {
+    let tokens: unknown[] = [];
+    const { fetchMock } = await open(
+      "/settings/agent",
+      agentRoutes([
+        { path: "/api/agent/tokens", respond: () => ({ ...NO_TOKENS, tokens }) },
+        { method: "POST", path: "/api/agent/tokens", status: 201, respond: () => ((tokens = [TOKEN]), { token: "cbm_control_SECRET", record: TOKEN, enforced: true, note: "" }) },
+      ]),
+      "Agent token",
+    );
+    const issue = await screen.findByRole("button", { name: "签发 token" });
+    expect(issue).toBeDisabled();
+    expect(screen.getByText("还没有签发过 token。")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("名称"), { target: { value: " codex 笔记本 " } });
+    fireEvent.change(screen.getByLabelText("权限范围"), { target: { value: "control" } });
+    fireEvent.click(issue);
+    expect(await screen.findByText("cbm_control_SECRET")).toBeInTheDocument();
+    expect(screen.getByText(/只显示这一次/)).toBeInTheDocument();
+    expect(bodies(fetchMock, "POST", "/api/agent/tokens")).toEqual([{ name: "codex 笔记本", scope: "control" }]);
+    expect(await screen.findByRole("button", { name: "撤销 codex 笔记本" })).toBeInTheDocument();
+    await expectNoAxeViolations(document.body);
+    fireEvent.click(screen.getByRole("button", { name: "我已保存，关闭" }));
+    expect(screen.queryByText("cbm_control_SECRET")).not.toBeInTheDocument();
+  });
+
+  it("revokes a token only after confirmation", async () => {
+    let tokens = [TOKEN];
+    const { fetchMock } = await open(
+      "/settings/agent",
+      agentRoutes([
+        { path: "/api/agent/tokens", respond: () => ({ ...NO_TOKENS, tokens }) },
+        { method: "DELETE", path: "/api/agent/tokens/t1", respond: () => ((tokens = []), { ok: true }) },
+      ]),
+      "Agent token",
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "撤销 codex 笔记本" }));
+    await cancelDialog();
+    expect(bodies(fetchMock, "DELETE", "/api/agent/tokens/t1")).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "撤销 codex 笔记本" }));
+    await confirmWith("撤销");
+    expect(await screen.findByText("还没有签发过 token。")).toBeInTheDocument();
+    expect(bodies(fetchMock, "DELETE", "/api/agent/tokens/t1")).toHaveLength(1);
+  });
+
+  it("tells the user tokens are not checked when the Manager has no sign-in", async () => {
+    await open("/settings/agent", agentRoutes([], { ...NO_TOKENS, enforced: false }), "Agent token");
+    expect(await screen.findByText(/token 不会被检查/)).toBeInTheDocument();
+  });
+
+  it("shows recent agent calls, failures with their reason", async () => {
+    await open("/settings/agent", agentRoutes([], NO_TOKENS, AUDIT), "最近的 agent 操作");
+    const table = await screen.findByRole("table", { name: "agent 操作记录" });
+    expect(within(table).getByText("open_browser")).toBeInTheDocument();
+    expect(within(table).getByText("profile_leased")).toBeInTheDocument();
+    expect(within(table).getByText("codex")).toBeInTheDocument();
+    expect(within(table).getByText("12 ms")).toBeInTheDocument();
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("says when there are no agent calls yet, and reloads on demand", async () => {
+    const { fetchMock } = await open("/settings/agent", agentRoutes(), "最近的 agent 操作");
+    expect(await screen.findByText("还没有 agent 调用记录。")).toBeInTheDocument();
+    const before = fetchMock.mock.calls.filter(([u]) => String(u).startsWith("/api/mcp/audit")).length;
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([u]) => String(u).startsWith("/api/mcp/audit")).length).toBe(before + 1));
+  });
+
+  it("shows why the mode could not be read", async () => {
+    await open("/settings/agent", agentRoutes([{ path: "/api/settings/mcp", status: 500, respond: { detail: "读不到" } }]), "AI agent 权限");
+    expect(await screen.findByText("AI 接入设置没有读出来")).toBeInTheDocument();
+    expect(screen.getByText("读不到")).toBeInTheDocument();
+  });
+});
+
 describe("settings › automation", () => {
   it("loads the current window and saves edits", async () => {
     const { fetchMock } = await open(

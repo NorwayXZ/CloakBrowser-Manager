@@ -5,6 +5,7 @@ import { cn } from "../shared/lib/cn";
 import { PageHeader, Section, Spinner } from "../ui";
 import { AboutSection } from "../features/settings/AboutSection";
 import { AccountSection } from "../features/settings/AccountSection";
+import { AgentAccessSection } from "../features/settings/AgentAccessSection";
 import { AiSection } from "../features/settings/AiSection";
 import { AutomationSection } from "../features/settings/AutomationSection";
 import { KernelSection } from "../features/settings/KernelSection";
@@ -13,6 +14,7 @@ const SECTIONS = [
   { id: "appearance", label: "外观" },
   { id: "kernel", label: "浏览器内核" },
   { id: "ai", label: "AI 接口" },
+  { id: "agent", label: "AI 接入" },
   { id: "automation", label: "自动化" },
   { id: "account", label: "账号与安全" },
   { id: "about", label: "关于与更新" },
@@ -25,7 +27,7 @@ export function SettingsPage() {
 
   return (
     <div className="flex min-h-full flex-col gap-6 p-6">
-      <PageHeader title="设置" description="外观、内核、AI 接口、自动化、账号与更新。" />
+      <PageHeader title="设置" description="外观、内核、AI 接口、AI 接入、自动化、账号与更新。" />
       <div className="flex min-w-0 flex-col gap-6 md:flex-row">
         <nav aria-label="设置分类" className="shrink-0 md:w-44">
           <ul className="flex gap-1 overflow-x-auto md:flex-col">
@@ -120,6 +122,8 @@ function CurrentSection({ id }: { id: (typeof SECTIONS)[number]["id"] }) {
       return <KernelSection />;
     case "ai":
       return <AiSection />;
+    case "agent":
+      return <AgentAccessSection />;
     case "automation":
       return <AutomationSection />;
     case "account":
