@@ -758,6 +758,101 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/mail/addresses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Mail Addresses */
+        get: operations["list_mail_addresses_api_mail_addresses_get"];
+        put?: never;
+        /** Create Mail Address */
+        post: operations["create_mail_address_api_mail_addresses_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mail/addresses/{address}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Forget Mail Address
+         * @description Forget an address here; the mailbox on the server is left alone.
+         */
+        delete: operations["forget_mail_address_api_mail_addresses__address__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mail/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Mail Server
+         * @description Log in with the saved admin account and list the server's domains.
+         */
+        post: operations["check_mail_server_api_mail_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mail/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Mail Messages */
+        get: operations["list_mail_messages_api_mail_messages_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mail/wait": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Wait For Mail
+         * @description Long-poll for a new message to an address; the code and link come extracted.
+         */
+        post: operations["wait_for_mail_api_mail_wait_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/mcp/audit": {
         parameters: {
             query?: never;
@@ -1619,6 +1714,24 @@ export interface paths {
         get: operations["get_llm_settings_api_settings_llm_get"];
         /** Update Llm Settings */
         put: operations["update_llm_settings_api_settings_llm_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/mail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Mail Settings */
+        get: operations["get_mail_settings_api_settings_mail_get"];
+        /** Update Mail Settings */
+        put: operations["update_mail_settings_api_settings_mail_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -2579,6 +2692,62 @@ export interface components {
             token?: string | null;
             /** Username */
             username?: string | null;
+        };
+        /** MailAddressCreate */
+        MailAddressCreate: {
+            /** Domain */
+            domain?: string | null;
+            /** Local Part */
+            local_part?: string | null;
+            /** Profile Id */
+            profile_id?: string | null;
+        };
+        /** MailSettingsModel */
+        MailSettingsModel: {
+            /**
+             * Admin Email
+             * @default
+             */
+            admin_email: string;
+            /**
+             * Base Url
+             * @default
+             */
+            base_url: string;
+            /**
+             * Clear Password
+             * @default false
+             */
+            clear_password: boolean;
+            /** Domains */
+            domains?: string[];
+            /** Password */
+            password?: string | null;
+        };
+        /** MailWaitRequest */
+        MailWaitRequest: {
+            /** Address */
+            address: string;
+            /**
+             * From Contains
+             * @default
+             */
+            from_contains: string;
+            /**
+             * Include Delivered
+             * @default false
+             */
+            include_delivered: boolean;
+            /**
+             * Subject Contains
+             * @default
+             */
+            subject_contains: string;
+            /**
+             * Timeout S
+             * @default 120
+             */
+            timeout_s: number;
         };
         /** ManagerUpdateResponse */
         ManagerUpdateResponse: {
@@ -4679,6 +4848,186 @@ export interface operations {
             };
         };
     };
+    list_mail_addresses_api_mail_addresses_get: {
+        parameters: {
+            query?: {
+                profile_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_mail_address_api_mail_addresses_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MailAddressCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    forget_mail_address_api_mail_addresses__address__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                address: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    check_mail_server_api_mail_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    list_mail_messages_api_mail_messages_get: {
+        parameters: {
+            query: {
+                address: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    wait_for_mail_api_mail_wait_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MailWaitRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_mcp_audit_api_mcp_audit_get: {
         parameters: {
             query?: {
@@ -6367,6 +6716,59 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["LlmSettingsModel"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_mail_settings_api_settings_mail_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    update_mail_settings_api_settings_mail_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MailSettingsModel"];
             };
         };
         responses: {

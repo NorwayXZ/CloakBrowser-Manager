@@ -12,6 +12,7 @@ const ViewerPage = lazy(() => import("../features/profiles/ViewerPage").then((m)
 const EditorPage = lazy(() => import("../features/editor/EditorPage").then((m) => ({ default: m.EditorPage })));
 const ProxiesPage = lazy(() => import("../features/proxies/ProxiesPage").then((m) => ({ default: m.ProxiesPage })));
 const DataPage = lazy(() => import("../features/data/DataPage").then((m) => ({ default: m.DataPage })));
+const MailPage = lazy(() => import("../features/mail/MailPage").then((m) => ({ default: m.MailPage })));
 const ChecksPage = lazy(() => import("../features/checks/ChecksPage").then((m) => ({ default: m.ChecksPage })));
 const SettingsPage = lazy(() => import("../pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 
@@ -44,6 +45,7 @@ export const routes: RouteObject[] = [
         ],
       },
       { path: "proxies", element: page(<ProxiesPage />) },
+      { path: "mail", element: page(<MailPage />) },
       { path: "checks", element: page(<ChecksPage />) },
       { path: "checks/evolution", element: page(<ChecksPage />) },
       { path: "checks/links", element: page(<ChecksPage />) },

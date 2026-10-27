@@ -69,7 +69,7 @@ curl -X POST http://127.0.0.1:8080/api/agent/tools/open_browser \
 | --- | --- |
 | `off` | 全部拒绝 |
 | `read-only`（默认） | 14 个只读工具：看画像、预检、检测报告、养号/进化状态、内核信息 |
-| `full` | 再加启停画像、跑检测/养号/进化（`launch_profile` 只能 `manual`） |
+| `full` | 再加启停画像、跑检测/养号/进化（`launch_profile` 只能 `manual`），以及 3 个邮箱工具 |
 | `automation` | 再加 `open_browser`、`get_cdp_endpoint` 和 15 个页面工具，`launch_profile` 可用 `debug` |
 
 **为什么页面控制单独成档**：CDP 能读取页面的全部 Cookie，而桥在其他档位刻意不提供任何 Cookie 读取。开 `automation` 等于允许 agent 接触该画像的登录态，请只在需要操作页面时开，用完改回 `full` 或 `read-only`。
@@ -84,6 +84,17 @@ curl -X POST http://127.0.0.1:8080/api/agent/tools/open_browser \
 6. 做完 `stop_profile`（同时释放控制租约）。
 
 只想打开浏览器给人用：`launch_profile`（`manual`，没有 CDP）。
+
+## 邮箱：注册时要邮箱和验证码
+
+用户在 Manager 的「邮箱」页接好自己的邮箱服务器（Cloud Mail）后，`full` 档起就有这三个工具。**不要向用户要邮箱地址或验证码。**
+
+1. `mail_get_address(profile)`：给画像一个能收信的地址。同一画像默认一直给同一个；要再注册一个账号时传 `new=true`。
+2. 把地址填进注册表单并提交。
+3. `mail_wait_code(address)`：等这个地址的新邮件（默认 120 秒，最多 170），直接回 `code`（验证码）和 `link`（验证链接）。只算上次取过之后的新邮件，所以同一封不会给两次。`code` 为空时读 `text` 自己找；要点链接就 `browser_navigate(link)`。
+4. 没等到（`mail_timeout`）：确认表单真的提交了、地址没填错，必要时点页面上的「重新发送」，再等一次。
+
+`mail_list_messages(address)` 可以回看这个地址最近的邮件。可以用 `from_contains` / `subject_contains` 只等某个网站的邮件，避免拿错。
 
 ## 操作页面：内置页面工具
 
@@ -290,6 +301,9 @@ MCP 客户端除了工具，还能读到：
 | `page_navigating` | 页面还在跳转中 | 等一两秒再 `browser_snapshot` |
 | `no_page` | 没有打开的标签页 | `browser_tabs(action=new)` 或 `browser_navigate` |
 | `navigation_failed` / `timeout` | 网址打不开 / 操作超时 | `browser_snapshot` 看现状，检查代理出口 |
+| `mail_not_configured` | 用户还没接好邮箱服务器 | 告诉用户去「邮箱」页配置，不要自己找别的邮箱 |
+| `mail_timeout` | 等待时间内没收到新邮件 | 检查表单是否提交成功、地址是否填对，必要时重新发送后再等 |
+| `mail_server_error` | 邮箱服务器出错或连不上 | 稍等再试一次，还不行把 `detail` 告诉用户 |
 | `seat_busy` | 授权单座位被占 | 等几分钟，**不要立刻重试**；或先关掉别的画像 |
 | `automation_busy` | 另一个自动化（检测/养号/进化）在跑，带 `owner` | 等它结束 |
 | `conflict` / `manager_error` / `bridge_error` | 其他冲突或错误 | 读 `detail`，不要盲目重试 |

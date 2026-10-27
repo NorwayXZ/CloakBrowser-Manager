@@ -148,12 +148,43 @@ LAUNCH_PROFILE_ARGS = {
     "required": ["profile_id"],
 }
 
+MAIL_ADDRESS_ARGS = {
+    "type": "object",
+    "properties": {
+        "profile": {"type": "string", "description": "画像 id 或名称：地址记在这个画像名下，以后再要会给同一个"},
+        "new": {"type": "boolean", "default": False, "description": "true = 给这个画像再发一个新地址（同一画像注册第二个账号时用）"},
+        "domain": {"type": "string", "description": "可选：指定域名（如 example.com），不填随机选一个"},
+    },
+    "required": ["profile"],
+}
+MAIL_WAIT_ARGS = {
+    "type": "object",
+    "properties": {
+        "address": {"type": "string", "description": "mail_get_address 给的邮箱地址"},
+        "timeout_s": {"type": "number", "default": 120, "maximum": 170, "description": "最多等多少秒（默认 120，上限 170）"},
+        "from_contains": {"type": "string", "description": "可选：发件人里要包含的文字，如 github.com"},
+        "subject_contains": {"type": "string", "description": "可选：标题里要包含的文字"},
+    },
+    "required": ["address"],
+}
+MAIL_LIST_ARGS = {
+    "type": "object",
+    "properties": {
+        "address": {"type": "string", "description": "mail_get_address 给的邮箱地址"},
+        "limit": {"type": "integer", "default": 5, "minimum": 1, "maximum": 20},
+    },
+    "required": ["address"],
+}
+
 EXPECTED_ACTION_TOOLS = {
     "launch_profile": LAUNCH_PROFILE_ARGS,
     "stop_profile": PROFILE_ID_ARGS,
     "run_site_check": PROFILE_ID_ARGS,
     "run_warmup": PROFILE_ID_ARGS,
     "run_evolution": PROFILE_ID_ARGS,
+    "mail_get_address": MAIL_ADDRESS_ARGS,
+    "mail_wait_code": MAIL_WAIT_ARGS,
+    "mail_list_messages": MAIL_LIST_ARGS,
 }
 
 EXPECTED_BROWSER_TOOLS = {

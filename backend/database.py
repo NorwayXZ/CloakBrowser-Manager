@@ -178,6 +178,13 @@ def init_db():
                 detail_json TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS mail_addresses (
+                address TEXT PRIMARY KEY,
+                profile_id TEXT,
+                created_at TEXT NOT NULL,
+                last_delivered_id INTEGER NOT NULL DEFAULT 0
+            );
+
             CREATE TABLE IF NOT EXISTS mcp_audit_log (
                 id TEXT PRIMARY KEY,
                 ts TEXT NOT NULL,
@@ -854,6 +861,61 @@ def create_proxy_preset(name: str, proxy: str, mode: str) -> dict[str, Any]:
 def delete_proxy_preset(preset_id: str) -> bool:
     with get_db() as conn:
         cursor = conn.execute("DELETE FROM proxy_presets WHERE id = ?", (preset_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+# ── Mail addresses (邮箱) ──────────────────────────────────────────────────────
+
+
+def list_mail_addresses(profile_id: str | None = None) -> list[dict[str, Any]]:
+    """Newest first, with the profile's name when it still exists."""
+    query = (
+        "SELECT m.address, m.profile_id, m.created_at, m.last_delivered_id, p.name AS profile_name "
+        "FROM mail_addresses m LEFT JOIN profiles p ON p.id = m.profile_id"
+    )
+    params: tuple[Any, ...] = ()
+    if profile_id:
+        query += " WHERE m.profile_id = ?"
+        params = (profile_id,)
+    with get_db() as conn:
+        rows = conn.execute(query + " ORDER BY m.created_at DESC", params).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_mail_address(address: str) -> dict[str, Any] | None:
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT m.address, m.profile_id, m.created_at, m.last_delivered_id, p.name AS profile_name "
+            "FROM mail_addresses m LEFT JOIN profiles p ON p.id = m.profile_id WHERE m.address = ?",
+            (address.lower(),),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def add_mail_address(address: str, profile_id: str | None) -> dict[str, Any]:
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO mail_addresses (address, profile_id, created_at) VALUES (?, ?, ?)",
+            (address.lower(), profile_id, _now()),
+        )
+        conn.commit()
+    return get_mail_address(address) or {}
+
+
+def set_mail_delivered(address: str, message_id: int) -> None:
+    """Remember the newest message handed to an agent, so the next wait skips it."""
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE mail_addresses SET last_delivered_id = MAX(last_delivered_id, ?) WHERE address = ?",
+            (message_id, address.lower()),
+        )
+        conn.commit()
+
+
+def delete_mail_address(address: str) -> bool:
+    with get_db() as conn:
+        cursor = conn.execute("DELETE FROM mail_addresses WHERE address = ?", (address.lower(),))
         conn.commit()
         return cursor.rowcount > 0
 
