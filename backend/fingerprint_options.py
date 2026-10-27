@@ -115,10 +115,13 @@ def geolocation_plan(
     *,
     can_override: bool,
 ) -> tuple[str, dict[str, float] | None]:
-    """How a launch answers navigator.geolocation: ("override", coords), "block" or "real".
+    """How a launch answers navigator.geolocation: ("override", coords), "ask", "block" or "real".
 
-    Only CDP launches can report fake coordinates; everywhere else an
-    IP-based choice blocks the permission so the real location never leaks.
+    Only CDP launches can report fake coordinates. Elsewhere the IP-based
+    choice leaves the permission at Chrome's default, "ask": blocking it for
+    every site made navigator.permissions report "denied" on a fresh
+    profile, where a real Chrome says "prompt". A site then has to ask, and
+    only an explicit allow (in Chrome and in macOS) would reveal a position.
     """
     mode = parse_fingerprint_options(profile).geolocation
     if mode == "real":
@@ -130,7 +133,7 @@ def geolocation_plan(
             "longitude": float(geo["longitude"]),
             "accuracy": GEOLOCATION_ACCURACY_METERS,
         }
-    return "block", None
+    return ("block", None) if mode == "block" else ("ask", None)
 
 
 def _major(version: str | None) -> int | None:

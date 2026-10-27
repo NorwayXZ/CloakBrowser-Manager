@@ -12,6 +12,7 @@ import {
   locationText,
   proxyHost,
   proxyType,
+  seedDeviceLabel,
 } from "./format";
 import { NoteField } from "./NoteField";
 import type { RowActions } from "./ProfileTable";
@@ -144,8 +145,19 @@ export function ProfileDrawer({
                 value: profile.geoip ? "跟随出口 IP" : [profile.timezone, profile.locale].filter(Boolean).join(" · ") || "未设置",
               },
               { label: "账号平台", value: profile.account_platform || "未设置" },
-              { label: "屏幕", value: <span className="tabular">{profile.screen_width} × {profile.screen_height}</span> },
-              ...(profile.device_profile ? [{ label: "设备画像", value: <span className="break-all">{profile.device_profile}</span> }] : []),
+              {
+                label: "屏幕",
+                // A profile following the display launches with this computer's
+                // screen, not the size stored with it.
+                value: profile.browser_engine !== "system_chrome" && (profile.fingerprint_options?.screen ?? "real") === "real" && profile.platform === "macos"
+                  ? "跟随电脑屏幕"
+                  : <span className="tabular">{profile.screen_width} × {profile.screen_height}</span>,
+              },
+              ...(profile.seed_device?.applies
+                ? [{ label: "设备（按种子生成）", value: seedDeviceLabel(profile) ?? "首次打开后显示" }]
+                : profile.device_profile
+                  ? [{ label: "设备画像", value: <span className="break-all">{profile.device_profile}</span> }]
+                  : []),
               { label: "User-Agent", value: <span className="break-all text-xs">{profile.user_agent || "跟随真实浏览器"}</span> },
               { label: "最近打开", value: formatDateTime(profile.last_opened_at) },
               { label: "创建时间", value: formatDateTime(profile.created_at) },

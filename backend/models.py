@@ -279,6 +279,10 @@ class ProfileResponse(BaseModel):
     proxy_geo: dict | None = None
     # Who is driving this running profile (an AI agent, or the user after a takeover).
     agent_lease: dict | None = None
+    # macOS profiles on a Mac: the Apple device the kernel built from the
+    # seed, as seen in the profile's own report ({"applies": true, "model":
+    # null…} until it has been opened once); null where it does not apply.
+    seed_device: dict | None = None
 
 
 class LaunchResponse(BaseModel):

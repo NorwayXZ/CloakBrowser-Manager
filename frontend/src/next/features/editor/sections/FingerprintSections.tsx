@@ -175,7 +175,7 @@ export function MoreFingerprintSection({ editor, hostOS }: { editor: Editor; hos
           label="地理位置"
           description={
             geolocation === "ip"
-              ? "网页请求定位时，调试启动返回出口 IP 所在城市的坐标；日常启动改不了坐标，会直接拒绝，不暴露真实位置。"
+              ? "调试启动：网页请求定位时返回出口 IP 所在城市的坐标。日常启动改不了坐标，和普通 Chrome 一样先询问：请点「禁止」，点允许会给出这台电脑的真实位置。"
               : geolocation === "block"
                 ? "所有网站请求定位都直接拒绝。"
                 : "和普通 Chrome 一样，由你决定是否给网站真实位置。用代理时不建议。"

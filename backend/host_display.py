@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ctypes
 import logging
+import platform
 import sys
 
 logger = logging.getLogger(__name__)
@@ -55,3 +56,62 @@ def primary_screen_size() -> tuple[int, int] | None:
     if size[0] < MIN_WIDTH or size[1] < MIN_HEIGHT:
         return None
     return size
+
+
+def _macos_primary_visible_frame() -> tuple[float, float, float, float, float]:
+    """(screen height, visible x, visible y from the bottom, visible width, visible height).
+
+    NSScreen's visibleFrame is the area left after the menu bar and the Dock.
+    The first screen in NSScreen.screens is the one with the menu bar.
+    """
+    objc = ctypes.CDLL("/usr/lib/libobjc.A.dylib")
+    ctypes.CDLL("/System/Library/Frameworks/AppKit.framework/AppKit")
+    objc.objc_getClass.restype = ctypes.c_void_p
+    objc.objc_getClass.argtypes = [ctypes.c_char_p]
+    objc.sel_registerName.restype = ctypes.c_void_p
+    objc.sel_registerName.argtypes = [ctypes.c_char_p]
+    send = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)(("objc_msgSend", objc))
+    send_index = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong)(
+        ("objc_msgSend", objc)
+    )
+    # Structs this size come back through a hidden pointer on Intel, which
+    # objc_msgSend_stret handles; Apple silicon returns them directly.
+    rect_symbol = "objc_msgSend_stret" if platform.machine() == "x86_64" else "objc_msgSend"
+    send_rect = ctypes.CFUNCTYPE(_CGRect, ctypes.c_void_p, ctypes.c_void_p)((rect_symbol, objc))
+
+    def sel(name: bytes) -> int:
+        return objc.sel_registerName(name)
+
+    pool = send(send(objc.objc_getClass(b"NSAutoreleasePool"), sel(b"alloc")), sel(b"init"))
+    try:
+        screens = send(objc.objc_getClass(b"NSScreen"), sel(b"screens"))
+        if not screens:
+            raise ValueError("no screens")
+        screen = send_index(screens, sel(b"objectAtIndex:"), 0)
+        frame = send_rect(screen, sel(b"frame"))
+        visible = send_rect(screen, sel(b"visibleFrame"))
+        return (frame.size.height, visible.origin.x - frame.origin.x, visible.origin.y - frame.origin.y,
+                visible.size.width, visible.size.height)
+    finally:
+        send(pool, sel(b"drain"))
+
+
+def primary_visible_frame() -> tuple[int, int, int, int] | None:
+    """Area of the menu-bar screen left by the menu bar and Dock, if known.
+
+    Returned as (left, top, width, height) in screen points from the top-left
+    corner, the way browsers place windows and report screen.avail*.
+    """
+    if sys.platform != "darwin":
+        return None
+    try:
+        screen_height, x, y_from_bottom, width, height = _macos_primary_visible_frame()
+    except (OSError, AttributeError, ValueError) as exc:
+        logger.warning("Could not read the screen's visible area: %s", exc)
+        return None
+    left = int(round(x))
+    top = int(round(screen_height - (y_from_bottom + height)))
+    frame = left, top, int(round(width)), int(round(height))
+    if frame[2] < MIN_WIDTH or frame[3] < MIN_HEIGHT or top < 0:
+        return None
+    return frame

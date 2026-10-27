@@ -85,6 +85,7 @@ def unknown_host_screen(monkeypatch: pytest.MonkeyPatch):
     from backend import browser_manager, main
 
     monkeypatch.setattr(browser_manager, "primary_screen_size", lambda: None)
+    monkeypatch.setattr(browser_manager, "primary_visible_frame", lambda: None)
     monkeypatch.setattr(main, "primary_screen_size", lambda: None)
 
 

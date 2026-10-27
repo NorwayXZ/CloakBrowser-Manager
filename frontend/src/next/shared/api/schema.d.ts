@@ -2961,6 +2961,10 @@ export interface components {
              * @default 1920
              */
             screen_width: number;
+            /** Seed Device */
+            seed_device?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Startup Urls
              * @default []

@@ -196,3 +196,10 @@ export const DISPOSABLE_REGIONS: { code: string; label: string }[] = [
   { code: "AU", label: "澳大利亚" },
   { code: "CA", label: "加拿大" },
 ];
+
+
+/** "Apple M4 Pro · 14 核 · 32 GB" once a launch has seen the seed's device; null otherwise. */
+export function seedDeviceLabel(profile: { seed_device?: { [key: string]: unknown } | null } | null): string | null {
+  const label = profile?.seed_device?.label;
+  return typeof label === "string" && label ? label : null;
+}

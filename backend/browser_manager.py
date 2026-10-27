@@ -39,7 +39,8 @@ from .fingerprint_options import (
     unsupported_option_labels,
     webrtc_ip_arg,
 )
-from .host_display import primary_screen_size
+from . import chrome_versions, seed_device
+from .host_display import primary_screen_size, primary_visible_frame
 from .fingerprint_report import DEFAULT_NETWORK_PROBE_URL, analyze_fingerprint, run_fingerprint_probe
 from .cloak_runtime import get_effective_chromium_version
 from .proxy_geo import fetch_proxy_geo
@@ -95,6 +96,9 @@ MAC_STARTUP_POLL_SECONDS = 0.5
 # Route the license check through the profile's proxy when the direct path to
 # cloakbrowser.dev is down (kernel switch, Chromium 148+).
 LICENSE_THROUGH_PROXY_ARG = "--license-through-proxy"
+# Launch-time only (never stored): the screen's real visible area, set when
+# the screen follows this computer's display.
+VISIBLE_FRAME_KEY = "_visible_frame"
 LICENSE_THROUGH_PROXY_MIN_MAJOR = 148
 LICENSE_PROBE_TIMEOUT_SECONDS = 4.0
 _MACOS_LOCALE_LAUNCH_LOCK = threading.Lock()
@@ -386,8 +390,19 @@ def _sync_session_restore(user_data_dir: Path) -> None:
     _write_json_file(prefs_path, prefs)
 
 
-def _sync_native_window_placement(user_data_dir: Path, width: int, height: int) -> None:
-    """Keep Chromium's saved headed window bounds aligned with the profile screen."""
+def _sync_native_window_placement(
+    user_data_dir: Path,
+    width: int,
+    height: int,
+    *,
+    left: int | None = None,
+    top: int | None = None,
+) -> None:
+    """Keep Chromium's saved headed window bounds aligned with the profile screen.
+
+    With ``left``/``top`` (the screen's real visible area) the window is put
+    exactly there; otherwise its last position is kept.
+    """
     if width <= 0 or height <= 0:
         return
 
@@ -404,12 +419,14 @@ def _sync_native_window_placement(user_data_dir: Path, width: int, height: int) 
         placement = {}
         browser["window_placement"] = placement
 
-    left = placement.get("left", 0)
-    top = placement.get("top", 30)
-    if not isinstance(left, int):
-        left = 0
-    if not isinstance(top, int):
-        top = 30
+    if left is None:
+        left = placement.get("left", 0)
+        if not isinstance(left, int):
+            left = 0
+    if top is None:
+        top = placement.get("top", 30)
+        if not isinstance(top, int):
+            top = 30
     placement.update({
         "left": left,
         "top": top,
@@ -949,12 +966,14 @@ def _sync_macos_window_after_launch(process: subprocess.Popen[Any], viewport: An
     if not isinstance(width, int) or not isinstance(height, int) or width <= 0 or height <= 0:
         return
 
+    left = viewport["x"] if isinstance(viewport.get("x"), int) else 30
+    top = viewport["y"] if isinstance(viewport.get("y"), int) else 30
     script = f'''tell application "System Events"
   set targetProcess to first application process whose unix id is {process.pid}
   set frontmost of targetProcess to true
   repeat 30 times
     if (count of windows of targetProcess) > 0 then
-      set position of front window of targetProcess to {{30, 30}}
+      set position of front window of targetProcess to {{{left}, {top}}}
       set size of front window of targetProcess to {{{width}, {height}}}
       exit repeat
     end if
@@ -2376,7 +2395,19 @@ class BrowserManager:
         size = primary_screen_size()
         if size is None:
             return profile
-        return {**profile, "screen_width": size[0], "screen_height": size[1]}
+        followed = {**profile, "screen_width": size[0], "screen_height": size[1]}
+        visible = primary_visible_frame()
+        if visible is not None and visible[3] <= size[1]:
+            followed[VISIBLE_FRAME_KEY] = visible
+            options = parse_fingerprint_options(profile)
+            if options.taskbar_height is None:
+                # screen.availHeight = height - taskbar: the kernel's fixed
+                # 95 px left a window reaching past the real Dock. Use what
+                # the menu bar and Dock really take on this screen.
+                followed["fingerprint_options"] = {
+                    **options.model_dump(), "taskbar_height": size[1] - visible[3],
+                }
+        return followed
 
     def preflight(self, profile: dict[str, Any], launch_mode: str = "manual") -> dict[str, Any]:
         """Check compatibility before a process is started.
@@ -2489,6 +2520,18 @@ class BrowserManager:
                     ),
                 })
 
+        if (
+            engine == "cloakbrowser"
+            and mode == "manual"
+            and parse_fingerprint_options(profile).geolocation == "ip"
+        ):
+            issues.append({
+                "severity": "info", "code": "geolocation_asks",
+                "message": (
+                    "日常启动改不了定位坐标：网站要位置时浏览器会询问，请点「禁止」；"
+                    "点允许会给出这台电脑的真实位置。需要假坐标时用调试启动，或把地理位置设为「禁止」。"
+                ),
+            })
         if engine == "cloakbrowser" and NOISE_OFF_ARG in self._build_fingerprint_args(profile):
             issues.append({
                 "severity": "info", "code": "noise_off_linkable",
@@ -2620,11 +2663,19 @@ class BrowserManager:
                 and self.runtime.runtime_mode == "native"
                 and not effective_headless
             ):
-                _sync_native_window_placement(
-                    user_data_dir,
-                    int(profile.get("screen_width", 1440)),
-                    int(profile.get("screen_height", 900)),
-                )
+                visible = profile.get(VISIBLE_FRAME_KEY)
+                if visible:
+                    # The window fills the area the menu bar and Dock leave,
+                    # like a real maximized window: never past the Dock.
+                    _sync_native_window_placement(
+                        user_data_dir, visible[2], visible[3], left=visible[0], top=visible[1],
+                    )
+                else:
+                    _sync_native_window_placement(
+                        user_data_dir,
+                        int(profile.get("screen_width", 1440)),
+                        int(profile.get("screen_height", 900)),
+                    )
 
             if display is not None and ws_port is not None:
                 await self.vnc.start_vnc(
@@ -2797,6 +2848,7 @@ class BrowserManager:
                 if SESSION_RESTORE_ARG not in extra_args:
                     extra_args.append(SESSION_RESTORE_ARG)
                 extra_args += await self._license_route_args(browser_proxy, user_launch_args)
+                extra_args += await self._brand_version_args(profile, user_launch_args)
             extra_args += user_launch_args
 
             launch_env = _build_locale_timezone_env(
@@ -2846,6 +2898,11 @@ class BrowserManager:
                     "width": profile.get("screen_width", 1440),
                     "height": profile.get("screen_height", 900),
                 }
+                visible = profile.get(VISIBLE_FRAME_KEY)
+                if visible:
+                    launch_options["viewport"] = {
+                        "width": visible[2], "height": visible[3], "x": visible[0], "y": visible[1],
+                    }
 
             use_manual_system_chrome = (
                 requested_launch_mode == "manual"
@@ -3136,6 +3193,41 @@ class BrowserManager:
             "cloakbrowser.dev is unreachable directly; routing the license check through the profile proxy"
         )
         return [LICENSE_THROUGH_PROXY_ARG]
+
+    async def _brand_version_args(
+        self,
+        profile: dict[str, Any],
+        user_launch_args: list[str],
+    ) -> list[str]:
+        """Report the current stable patch of the kernel's Chrome major.
+
+        Only for Chrome-branded profiles that did not set a version
+        themselves; the kernel applies a version only with a brand set.
+        """
+        options = parse_fingerprint_options(profile)
+        if options.brand_version or options.brand not in (None, "Chrome"):
+            return []
+        if _has_chrome_arg(user_launch_args, "--fingerprint-brand-version"):
+            return []
+        kernel_version = get_effective_chromium_version()
+        if not re.match(r"^\d+\.\d+\.\d+\.\d+", kernel_version or ""):
+            return []  # unknown kernel version: nothing to align
+        from . import database as db
+
+        try:
+            versions = await asyncio.wait_for(
+                chrome_versions.stable_versions(str(profile.get("platform") or ""), db.get_setting, db.set_setting),
+                timeout=chrome_versions.FETCH_SECONDS + 1,
+            )
+        except Exception:
+            return []
+        target = chrome_versions.aligned_patch(kernel_version, versions)
+        if target is None:
+            return []
+        args = [f"--fingerprint-brand-version={target}"]
+        if not options.brand and not _has_chrome_arg(user_launch_args, "--fingerprint-brand"):
+            args.insert(0, "--fingerprint-brand=Chrome")
+        return args
 
     async def _wait_for_manual_start(
         self,
@@ -3533,6 +3625,17 @@ class BrowserManager:
             "raw": raw,
         }
         running.fingerprint_report = report
+        if seed_derived_macos:
+            # Remember which Apple device the kernel built from this seed, so
+            # the panel can show it instead of the ignored device template.
+            device = seed_device.from_report(raw)
+            if device:
+                try:
+                    from . import database as db
+
+                    seed_device.save(db.set_setting, get_effective_chromium_version(), profile.get("fingerprint_seed"), device)
+                except Exception as exc:
+                    logger.debug("Could not store the seed device for %s: %s", profile_id, exc)
         return report
 
     async def cleanup_all(self):

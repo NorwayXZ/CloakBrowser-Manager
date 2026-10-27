@@ -21,12 +21,17 @@ export const BasicSection = forwardRef<HTMLInputElement, {
   hostOS: HostOS | null;
   nameError: string | null;
   onNameChange: () => void;
-}>(function BasicSection({ editor, profileId, groups, hostOS, nameError, onNameChange }, nameRef) {
+  /** The Apple device the kernel builds from this seed, once a launch has seen it. */
+  seedDeviceLabel?: string | null;
+}>(function BasicSection({ editor, profileId, groups, hostOS, nameError, onNameChange, seedDeviceLabel }, nameRef) {
   const { form, set } = editor;
   const engine = normalizeFormEngine(form.browser_engine);
   const platform = getDevicePlatformForHost(hostOS);
   const presets = getDeviceProfilesForPlatform(platform);
   const device = selectedDevice(form, hostOS);
+  // On a Mac the kernel derives a whole Apple device from the seed and
+  // ignores the template picked here.
+  const seedDerived = hostOS === "macos" && platform === "macos" && engine === "cloakbrowser";
 
   return (
     <Section id="form-basic" title="基础设置" description="名称、分组、账号平台只用于管理；浏览器、设备画像、User-Agent、Cookie 和启动页面会影响实际打开的浏览器。">
@@ -80,7 +85,15 @@ export const BasicSection = forwardRef<HTMLInputElement, {
           <span className="inline-flex h-8 w-fit items-center rounded border border-border bg-surface-2 px-2.5 text-sm text-fg">{platformLabel(platform)}</span>
           <span className="text-xs text-fg-3">按当前电脑锁定：只提供同系统的设备画像，避免跨系统画像互相矛盾。</span>
         </div>
-        <FormField label="设备画像" className="md:col-span-2" description="一键套用同平台的屏幕、CPU、GPU 组合；稳定原生下主要用作记录，伪装画像会写入可控参数。">
+        <FormField
+          label="设备画像"
+          className="md:col-span-2"
+          description={
+            seedDerived
+              ? `在这台 Mac 上，内核按稳定种子生成整套 Apple 设备（GPU、核心数、内存），这里的选择只作记录、不会生效。网站实际看到：${seedDeviceLabel ?? "首次打开后显示"}。`
+              : "一键套用同平台的屏幕、CPU、GPU 组合；稳定原生下主要用作记录，伪装画像会写入可控参数。"
+          }
+        >
           <Select value={device.id} onChange={(event) => editor.changeDevice(event.target.value)}>
             {getDeviceProfileFamiliesForPlatform(platform).map((family) => (
               <optgroup key={family} label={family}>

@@ -57,7 +57,7 @@ from . import linkability
 from . import secrets_crypto
 from .browser_manager import BrowserLaunchError, BrowserManager, CookiePullError, _normalize_proxy, _validate_proxy
 from .cloak_runtime import get_effective_chromium_version
-from . import desktop_app, self_update, site_checks
+from . import desktop_app, seed_device, self_update, site_checks
 from . import behavior_traces, llm_client, sentence_profile, warmup, warmup_script
 from .behavior_traces import BehaviorRecorder
 from .site_check_job import SiteCheckJob, describe_environment
@@ -618,6 +618,19 @@ def _profile_response(profile: dict) -> ProfileResponse:
     )
     payload["tags"] = [TagResponse(**tag) for tag in profile.get("tags", [])]
     payload["fingerprint_options"] = parse_fingerprint_options(profile)
+    if seed_device.applies(
+        host_os=browser_mgr.runtime.host_os,
+        platform=profile.get("platform"),
+        engine=browser_mgr._browser_engine(profile),
+    ):
+        device = seed_device.load(db.get_setting, get_effective_chromium_version(), profile.get("fingerprint_seed")) or {}
+        payload["seed_device"] = {
+            "applies": True,
+            "model": device.get("model"),
+            "cores": device.get("cores"),
+            "memory_gb": device.get("memory_gb"),
+            "label": seed_device.describe(device),
+        }
     return ProfileResponse(**payload)
 
 

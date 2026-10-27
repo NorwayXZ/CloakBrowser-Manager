@@ -1693,7 +1693,7 @@ export function ProfileForm({
                     />
                     <FieldNote>
                       {(fingerprintOptions.geolocation ?? "ip") === "ip"
-                        ? "网页请求定位时，调试启动返回出口 IP 所在城市的坐标；普通启动改不了坐标，会直接拒绝定位，不暴露真实位置。"
+                        ? "调试启动：网页请求定位时返回出口 IP 所在城市的坐标。日常启动改不了坐标，和普通 Chrome 一样先询问：请点「禁止」，点允许会给出这台电脑的真实位置。"
                         : (fingerprintOptions.geolocation ?? "ip") === "block"
                         ? "所有网站请求定位都直接拒绝。"
                         : "和普通 Chrome 一样，网站请求时由你决定是否给出电脑的真实位置。用代理时不建议。"}

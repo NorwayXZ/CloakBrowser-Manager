@@ -14,6 +14,7 @@ import { useProxyPresets } from "./api";
 import { SECTIONS, type EditorState } from "./model";
 import { AdvancedSection } from "./sections/AdvancedSection";
 import { BasicSection } from "./sections/BasicSection";
+import { seedDeviceLabel } from "../profiles/format";
 import { FingerprintSection, MoreFingerprintSection } from "./sections/FingerprintSections";
 import { ProxySection } from "./sections/ProxySection";
 import { SummaryPanel } from "./SummaryPanel";
@@ -258,7 +259,7 @@ function Editor({
                 {saveError}
               </Banner>
             )}
-            <BasicSection ref={nameRef} editor={editor} profileId={profile?.id ?? null} groups={groups} hostOS={hostOS} nameError={nameError} onNameChange={() => setNameError(null)} />
+            <BasicSection ref={nameRef} editor={editor} profileId={profile?.id ?? null} groups={groups} hostOS={hostOS} nameError={nameError} onNameChange={() => setNameError(null)} seedDeviceLabel={seedDeviceLabel(profile)} />
             <ProxySection editor={editor} presets={presets} />
             <FingerprintSection editor={editor} hostOS={hostOS} hostScreen={hostScreen} isEdit={isEdit} />
             <MoreFingerprintSection editor={editor} hostOS={hostOS} />

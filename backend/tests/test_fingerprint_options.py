@@ -263,8 +263,8 @@ def test_geolocation_follows_exit_ip_only_when_cdp_can_override():
     assert geolocation_plan({}, GEO, can_override=True) == (
         "override", {"latitude": 25.05, "longitude": 121.53, "accuracy": 1000},
     )
-    assert geolocation_plan({}, GEO, can_override=False) == ("block", None)
-    assert geolocation_plan({}, {"ip": "198.51.100.7"}, can_override=True) == ("block", None)
+    assert geolocation_plan({}, GEO, can_override=False) == ("ask", None)
+    assert geolocation_plan({}, {"ip": "198.51.100.7"}, can_override=True) == ("ask", None)
     assert geolocation_plan({"fingerprint_options": {"geolocation": "block"}}, GEO, can_override=True) == ("block", None)
     assert geolocation_plan({"fingerprint_options": {"geolocation": "real"}}, GEO, can_override=False) == ("real", None)
 
@@ -314,7 +314,8 @@ async def test_debug_launch_reports_exit_ip_coordinates(monkeypatch: pytest.Monk
 
 
 @pytest.mark.asyncio
-async def test_manual_launch_blocks_geolocation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+async def test_manual_launch_leaves_geolocation_at_ask(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    # A real fresh Chrome reports "prompt"; a site-wide block reads "denied".
     import json as _json
 
     manager = BrowserManager(RuntimeConfig("windows", "native", "native-window", tmp_path))
@@ -323,6 +324,22 @@ async def test_manual_launch_blocks_geolocation(monkeypatch: pytest.MonkeyPatch,
     monkeypatch.setattr(manager, "_watch_process", AsyncMock())
 
     await manager.launch(_profile(tmp_path), launch_mode="manual")
+
+    prefs_path = tmp_path / "profile" / "Default" / "Preferences"
+    prefs = _json.loads(prefs_path.read_text()) if prefs_path.exists() else {}
+    assert "geolocation" not in prefs.get("profile", {}).get("default_content_setting_values", {})
+
+
+@pytest.mark.asyncio
+async def test_manual_launch_still_blocks_when_asked_to(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    import json as _json
+
+    manager = BrowserManager(RuntimeConfig("windows", "native", "native-window", tmp_path))
+    monkeypatch.setattr(module, "fetch_proxy_geo", AsyncMock(return_value=GEO))
+    monkeypatch.setattr(module, "_launch_cloakbrowser_manual_process", MagicMock(return_value=MagicMock()))
+    monkeypatch.setattr(manager, "_watch_process", AsyncMock())
+
+    await manager.launch({**_profile(tmp_path), "fingerprint_options": {"geolocation": "block"}}, launch_mode="manual")
 
     prefs = _json.loads((tmp_path / "profile" / "Default" / "Preferences").read_text())
     assert prefs["profile"]["default_content_setting_values"]["geolocation"] == 2
