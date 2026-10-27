@@ -67,7 +67,10 @@ def _tls_server(tmp_path: Path) -> ssl.SSLContext:
     return context
 
 
-def test_a_closed_port_fails_at_once():
+def test_a_closed_port_fails_at_once(monkeypatch):
+    # Windows retries a refused connection for about 2 s before reporting it,
+    # so this test keeps the real connect timeout, not the quick one.
+    monkeypatch.setattr(proxy_probe, "CONNECT_SECONDS", 4.0)
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
     port = sock.getsockname()[1]
