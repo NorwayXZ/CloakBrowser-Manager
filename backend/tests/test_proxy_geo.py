@@ -54,27 +54,40 @@ async def test_out_of_range_coordinates_are_dropped():
 
 
 async def _socks5_that_never_connects():
-    """Answer the SOCKS5 greeting ("no auth"), then never answer CONNECT."""
+    """Answer the SOCKS5 greeting ("no auth"), then never answer CONNECT.
+
+    Returns the server, its proxy URL and the open client connections. The
+    test closes those itself: from Python 3.12 the server's shutdown waits for
+    every connection handler, and these never end on their own.
+    """
     held: list = []
 
     async def handle(reader, writer):
-        await reader.readexactly(3)
-        writer.write(b"\x05\x00")
-        await writer.drain()
         held.append(writer)
-        await reader.read()  # until the client gives up
+        try:
+            await reader.readexactly(3)
+            writer.write(b"\x05\x00")
+            await writer.drain()
+            await reader.read()  # until the client gives up or the test ends
+        except (ConnectionError, asyncio.IncompleteReadError):
+            pass
 
     server = await asyncio.start_server(handle, "127.0.0.1", 0)
-    return server, f"socks5://127.0.0.1:{server.sockets[0].getsockname()[1]}"
+    return server, f"socks5://127.0.0.1:{server.sockets[0].getsockname()[1]}", held
 
 
 @pytest.mark.asyncio
 async def test_lookup_through_a_proxy_that_never_forwards_gives_up(monkeypatch):
     # httpx does not time out the SOCKS5 handshake; this hung "check proxy" forever.
     monkeypatch.setattr(proxy_geo, "PROXY_REQUEST_SECONDS", 0.3)
-    server, proxy = await _socks5_that_never_connects()
-    async with server:
-        started = asyncio.get_running_loop().time()
+    server, proxy, held = await _socks5_that_never_connects()
+    started = asyncio.get_running_loop().time()
+    try:
         with pytest.raises(proxy_geo.ProxyGeoError, match="no answer"):
             await asyncio.wait_for(proxy_geo.fetch_proxy_geo(proxy), 10)
+    finally:
+        for writer in held:
+            writer.close()
+        server.close()
+        await asyncio.wait_for(server.wait_closed(), 5)
     assert asyncio.get_running_loop().time() - started < 5
