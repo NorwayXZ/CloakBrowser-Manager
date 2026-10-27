@@ -58,7 +58,7 @@ from . import secrets_crypto
 from .browser_manager import BrowserLaunchError, BrowserManager, CookiePullError, _normalize_proxy, _validate_proxy
 from .cloak_runtime import get_effective_chromium_version
 from . import desktop_app, seed_device, self_update, site_checks
-from . import behavior_traces, llm_client, sentence_profile, warmup, warmup_script
+from . import behavior_traces, llm_client, mailbox, sentence_profile, warmup, warmup_script
 from .behavior_traces import BehaviorRecorder
 from .site_check_job import SiteCheckJob, describe_environment
 from .desktop_app import app_version as desktop_app_version
@@ -99,6 +99,9 @@ from .models import (
     KernelOverviewResponse,
     KernelSettingsModel,
     LlmSettingsModel,
+    MailAddressCreate,
+    MailSettingsModel,
+    MailWaitRequest,
     ClipboardRequest,
     GroupCreate,
     GroupResponse,
@@ -1798,6 +1801,129 @@ async def update_llm_settings(body: LlmSettingsModel):
         clear_api_key=body.clear_api_key,
     )
     return llm_client.config_status(db.get_setting)
+
+
+# ── Mail (邮箱：给 agent 发地址、收验证码) ─────────────────────────────────────
+
+
+def _mail_http_error(exc: mailbox.MailError) -> HTTPException:
+    if isinstance(exc, mailbox.MailNotConfiguredError):
+        return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, mailbox.MailServerError):
+        return HTTPException(status_code=502, detail=f"邮箱服务器：{exc}")
+    return HTTPException(status_code=400, detail=str(exc))
+
+
+def _mail_client() -> mailbox.CloudMailClient:
+    try:
+        return mailbox.client_for(db.get_setting)
+    except mailbox.MailError as exc:
+        raise _mail_http_error(exc) from exc
+
+
+def _known_mail_address(address: str) -> dict:
+    record = db.get_mail_address(address.strip())
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"{address} 不是 Manager 发出的地址：先在「邮箱」页或用 mail_get_address 创建")
+    return record
+
+
+@app.get("/api/settings/mail")
+async def get_mail_settings():
+    return mailbox.config_status(db.get_setting)
+
+
+@app.put("/api/settings/mail")
+async def update_mail_settings(body: MailSettingsModel):
+    mailbox.save_config(
+        db.set_setting,
+        base_url=body.base_url,
+        admin_email=body.admin_email,
+        password=body.password,
+        clear_password=body.clear_password,
+        domains=body.domains,
+    )
+    return mailbox.config_status(db.get_setting)
+
+
+@app.post("/api/mail/check")
+async def check_mail_server():
+    """Log in with the saved admin account and list the server's domains."""
+    try:
+        return await _mail_client().check()
+    except mailbox.MailError as exc:
+        raise _mail_http_error(exc) from exc
+
+
+@app.get("/api/mail/addresses")
+async def list_mail_addresses(profile_id: str | None = None):
+    return db.list_mail_addresses(profile_id)
+
+
+@app.post("/api/mail/addresses", status_code=201)
+async def create_mail_address(body: MailAddressCreate):
+    if body.profile_id and not db.get_profile(body.profile_id):
+        raise HTTPException(status_code=404, detail="Profile not found")
+    client = _mail_client()
+    try:
+        domain = await mailbox.choose_domain(client, body.domain)
+        chosen = mailbox.validate_local_part(body.local_part) if body.local_part else None
+        for _attempt in range(5):
+            address = f"{chosen or mailbox.random_local_part()}@{domain}"
+            if db.get_mail_address(address):
+                if chosen:
+                    raise mailbox.MailError(f"{address} 已经发出过了")
+                continue
+            try:
+                await client.create_address(address)
+            except mailbox.MailServerError as exc:
+                taken = any(word in str(exc).lower() for word in ("存在", "exist", "占用"))
+                if chosen or not taken:
+                    raise
+                continue
+            return db.add_mail_address(address, body.profile_id)
+        raise mailbox.MailError("连续几个随机地址都被占用了，请再试一次或自己指定前缀")
+    except mailbox.MailError as exc:
+        raise _mail_http_error(exc) from exc
+
+
+@app.delete("/api/mail/addresses/{address}")
+async def forget_mail_address(address: str):
+    """Forget an address here; the mailbox on the server is left alone."""
+    if not db.delete_mail_address(address):
+        raise HTTPException(status_code=404, detail="没有这个地址")
+    return {"ok": True}
+
+
+@app.get("/api/mail/messages")
+async def list_mail_messages(address: str, limit: int = 20):
+    record = _known_mail_address(address)
+    try:
+        messages = await _mail_client().messages(record["address"], limit=limit)
+    except mailbox.MailError as exc:
+        raise _mail_http_error(exc) from exc
+    return {"address": record["address"], "last_delivered_id": record["last_delivered_id"], "messages": messages}
+
+
+@app.post("/api/mail/wait")
+async def wait_for_mail(body: MailWaitRequest):
+    """Long-poll for a new message to an address; the code and link come extracted."""
+    record = _known_mail_address(body.address)
+    try:
+        message = await mailbox.wait_for_message(
+            _mail_client(),
+            record["address"],
+            after_id=0 if body.include_delivered else int(record["last_delivered_id"] or 0),
+            timeout=body.timeout_s,
+            from_contains=body.from_contains.strip(),
+            subject_contains=body.subject_contains.strip(),
+        )
+    except mailbox.MailError as exc:
+        raise _mail_http_error(exc) from exc
+    if message is None:
+        return {"found": False, "address": record["address"], "waited_s": body.timeout_s}
+    db.set_mail_delivered(record["address"], message["id"])
+    return {"found": True, "address": record["address"], "message": message}
 
 
 # ── MCP bridge (stdio MCP 接口） ─────────────────────────────────────────────

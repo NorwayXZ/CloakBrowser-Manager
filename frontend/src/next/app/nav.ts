@@ -1,4 +1,4 @@
-import { Database, Globe2, LayoutGrid, Settings, ShieldCheck, type LucideIcon } from "lucide-react";
+import { Database, Globe2, LayoutGrid, Mail, Settings, ShieldCheck, type LucideIcon } from "lucide-react";
 
 export interface NavItem {
   path: string;
@@ -11,9 +11,10 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { path: "/profiles", label: "环境", icon: LayoutGrid, key: "1" },
   { path: "/proxies", label: "代理", icon: Globe2, key: "2" },
-  { path: "/checks", label: "检测", icon: ShieldCheck, key: "3" },
-  { path: "/data", label: "数据", icon: Database, key: "4" },
-  { path: "/settings", label: "设置", icon: Settings, key: "5" },
+  { path: "/mail", label: "邮箱", icon: Mail, key: "3" },
+  { path: "/checks", label: "检测", icon: ShieldCheck, key: "4" },
+  { path: "/data", label: "数据", icon: Database, key: "5" },
+  { path: "/settings", label: "设置", icon: Settings, key: "6" },
 ];
 
 export function navItemFor(pathname: string): NavItem | undefined {

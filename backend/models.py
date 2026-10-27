@@ -647,6 +647,29 @@ class LlmSettingsModel(BaseModel):
     executor_effort: str = ""  # 执行模型的 effort 档位，空 = 服务商默认
 
 
+class MailSettingsModel(BaseModel):
+    base_url: str = ""
+    admin_email: str = ""
+    password: str | None = None  # write-only: omitted/empty keeps the stored password
+    clear_password: bool = False
+    domains: list[str] = Field(default_factory=list)  # empty = every domain on the server
+
+
+class MailAddressCreate(BaseModel):
+    profile_id: str | None = None
+    domain: str | None = None  # default: a random one of the chosen domains
+    local_part: str | None = None  # default: a name-like prefix
+
+
+class MailWaitRequest(BaseModel):
+    address: str
+    timeout_s: float = Field(default=120, ge=0, le=170)
+    from_contains: str = ""
+    subject_contains: str = ""
+    # False: only mail newer than the last one handed out for this address.
+    include_delivered: bool = False
+
+
 class McpSettingsModel(BaseModel):
     # off = bridge refuses to serve; read-only = the 14 read tools only;
     # full = read tools + the 5 action tools; automation = full + the browser

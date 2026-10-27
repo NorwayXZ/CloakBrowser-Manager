@@ -12,8 +12,8 @@ Design (see MCP-PLAN.md):
   (``http://127.0.0.1:{server_port()}/api/...``). Nothing here touches a
   browser directly; the Manager is the only executor.
 * Tools are layered. The 14 read tools are always available unless the mode
-  is ``off``; the 5 action tools (launch / stop / site-check / warm-up /
-  evolution) register when the Manager setting ``mcp.mode`` is ``full`` or
+  is ``off``; the action tools (launch / stop / site-check / warm-up /
+  evolution / mail) register when the Manager setting ``mcp.mode`` is ``full`` or
   ``automation`` (default ``read-only``). The browser tools (CDP handout and
   page control) are a separate tier that only registers in ``automation``.
   Destructive operations, proposal approvals and Cookie tools are not tools at
@@ -416,6 +416,9 @@ NEXT_STEPS: dict[str, str] = {
     "ambiguous_selector": "匹配到多个：把选择器写具体（加 name=…），或改用 browser_snapshot 里的 ref。",
     "navigation_failed": "网址打不开：检查网址和代理出口，必要时 get_fingerprint_report。",
     "timeout": "操作超时：页面可能还在加载，browser_snapshot 看看现状再决定是否重试。",
+    "mail_not_configured": "邮箱还没配置：告诉用户在 Manager 的「邮箱」页填写邮箱服务器和管理员账号，不要自己去找别的邮箱。",
+    "mail_server_error": "邮箱服务器出错或连不上：稍等再试一次；还不行就把 detail 告诉用户。",
+    "mail_timeout": "还没收到邮件：确认表单真的提交成功、地址没填错（browser_snapshot 看看页面），需要的话点页面上的「重新发送」，再调一次 mail_wait_code。",
 }
 
 
@@ -973,6 +976,143 @@ async def _run_evolution(client: RestClient, args: dict[str, Any]) -> dict[str, 
     return {"ok": True, "started": bool(isinstance(payload, dict) and payload.get("started"))}
 
 
+# ── Tools: mail (action layer) ────────────────────────────────────────────────
+
+
+def _mail_error(status: int, payload: Any, *, tool: str) -> dict[str, Any]:
+    detail = _detail_of(payload)
+    if status == 409:
+        return {"ok": False, "reason": "mail_not_configured", "detail": detail}
+    if status == 502:
+        return {"ok": False, "reason": "mail_server_error", "detail": detail}
+    return error_result(status, payload, tool=tool)
+
+
+MAIL_ADDRESS_ARGS: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "profile": {"type": "string", "description": "画像 id 或名称：地址记在这个画像名下，以后再要会给同一个"},
+        "new": {"type": "boolean", "default": False, "description": "true = 给这个画像再发一个新地址（同一画像注册第二个账号时用）"},
+        "domain": {"type": "string", "description": "可选：指定域名（如 example.com），不填随机选一个"},
+    },
+    "required": ["profile"],
+}
+
+MAIL_WAIT_ARGS: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "address": {"type": "string", "description": "mail_get_address 给的邮箱地址"},
+        "timeout_s": {"type": "number", "default": 120, "maximum": 170, "description": "最多等多少秒（默认 120，上限 170）"},
+        "from_contains": {"type": "string", "description": "可选：发件人里要包含的文字，如 github.com"},
+        "subject_contains": {"type": "string", "description": "可选：标题里要包含的文字"},
+    },
+    "required": ["address"],
+}
+
+MAIL_LIST_ARGS: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "address": {"type": "string", "description": "mail_get_address 给的邮箱地址"},
+        "limit": {"type": "integer", "default": 5, "minimum": 1, "maximum": 20},
+    },
+    "required": ["address"],
+}
+
+
+def _mail_summary(message: dict[str, Any], *, text_limit: int) -> dict[str, Any]:
+    return {
+        "id": message.get("id"),
+        "from": message.get("from"),
+        "subject": message.get("subject"),
+        "received_at": message.get("received_at"),
+        "code": message.get("code"),
+        "link": message.get("link"),
+        "text": str(message.get("text") or "")[:text_limit],
+    }
+
+
+@register(
+    "mail_get_address",
+    "给画像一个能收信的邮箱地址，注册账号时填它。同一画像默认一直给同一个地址；new=true 再发一个新的。"
+    "填进表单提交后，用 mail_wait_code 取验证码。邮箱没配置回 mail_not_configured。",
+    MAIL_ADDRESS_ARGS,
+    "action",
+)
+async def _mail_get_address(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    ref = str(args.get("profile") or "").strip()
+    if not ref:
+        return {"ok": False, "reason": "invalid_argument", "detail": "缺少 profile（画像 id 或名称），先用 list_profiles 查。"}
+    profile_id, err = await _resolve_profile(client, ref)
+    if err:
+        return err
+    next_step = "把地址填进注册表单并提交，然后调 mail_wait_code(address=…) 等验证码。"
+    if not args.get("new"):
+        status, payload = await client.get(f"/api/mail/addresses?profile_id={quote(profile_id, safe='')}")
+        if status >= 300 or not isinstance(payload, list):
+            return _mail_error(status, payload, tool="mail_get_address")
+        if payload:
+            return {"ok": True, "address": payload[0]["address"], "created": False, "profile_id": profile_id, "next_step": next_step}
+    body: dict[str, Any] = {"profile_id": profile_id}
+    if args.get("domain"):
+        body["domain"] = str(args["domain"])
+    status, payload = await client.post("/api/mail/addresses", json_body=body)
+    if status >= 300 or not isinstance(payload, dict):
+        return _mail_error(status, payload, tool="mail_get_address")
+    return {"ok": True, "address": payload["address"], "created": True, "profile_id": profile_id, "next_step": next_step}
+
+
+@register(
+    "mail_wait_code",
+    "等这个地址收到新邮件（只算上次取过之后的新邮件），直接回验证码 code 和验证链接 link。"
+    "提交注册表单后调用；默认最多等 120 秒，没等到回 mail_timeout。code 为空时看 text 自己找。",
+    MAIL_WAIT_ARGS,
+    "action",
+)
+async def _mail_wait_code(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    address = str(args.get("address") or "").strip()
+    if not address:
+        return {"ok": False, "reason": "invalid_argument", "detail": "缺少 address，先调 mail_get_address。"}
+    try:
+        raw_timeout = args.get("timeout_s")
+        timeout_s = max(0.0, min(float(120 if raw_timeout is None else raw_timeout), 170.0))
+    except (TypeError, ValueError):
+        return {"ok": False, "reason": "invalid_argument", "detail": "timeout_s 要是秒数"}
+    status, payload = await client.post(
+        "/api/mail/wait",
+        json_body={
+            "address": address,
+            "timeout_s": timeout_s,
+            "from_contains": str(args.get("from_contains") or ""),
+            "subject_contains": str(args.get("subject_contains") or ""),
+        },
+        timeout=ACTION_TIMEOUT_S,
+    )
+    if status >= 300 or not isinstance(payload, dict):
+        return _mail_error(status, payload, tool="mail_wait_code")
+    if not payload.get("found"):
+        return {"ok": False, "reason": "mail_timeout", "detail": f"{timeout_s:.0f} 秒内 {address} 没有收到新邮件。"}
+    message = payload.get("message") or {}
+    return {"ok": True, "address": address, **_mail_summary(message, text_limit=1500)}
+
+
+@register(
+    "mail_list_messages",
+    "列出这个地址最近收到的邮件（新的在前），每封带提取出的 code / link 和正文开头。用来回看已经取过的验证码或邮件内容。",
+    MAIL_LIST_ARGS,
+    "action",
+)
+async def _mail_list_messages(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    address = str(args.get("address") or "").strip()
+    if not address:
+        return {"ok": False, "reason": "invalid_argument", "detail": "缺少 address，先调 mail_get_address。"}
+    limit = max(1, min(int(args.get("limit") or 5), 20))
+    status, payload = await client.get(f"/api/mail/messages?address={quote(address, safe='')}&limit={limit}")
+    if status >= 300 or not isinstance(payload, dict):
+        return _mail_error(status, payload, tool="mail_list_messages")
+    messages = [_mail_summary(m, text_limit=500) for m in payload.get("messages") or []]
+    return {"ok": True, "address": address, "count": len(messages), "messages": messages}
+
+
 # ── Tools: browser layer (registered only when mcp.mode == "automation") ─────
 
 
@@ -1417,6 +1557,9 @@ TOOL_EN: dict[str, str] = {
     "browser_dialog": "Accept or dismiss a JS dialog (alert/confirm/prompt/beforeunload) that froze the page. Required when an action result carries `dialog`.",
     "browser_back": "Go back one step in the current tab.",
     "browser_tabs": "List, open, select or close tabs.",
+    "mail_get_address": "Get a receiving email address for a profile (the same one each time; new=true for another). Fill it into a sign-up form, then call mail_wait_code.",
+    "mail_wait_code": "Wait for a new mail to the address and return the extracted verification code / link (default 120 s, max 170 s).",
+    "mail_list_messages": "Recent mail to the address, newest first, with extracted code / link and a text excerpt.",
 }
 
 
@@ -1574,9 +1717,10 @@ CloakBrowser Manager runs isolated fingerprint-browser profiles on this machine.
    动作结果里出现 dialog 字段，说明弹了 JS 对话框，先 browser_dialog 处理。上传只允许 agent 文件目录里的文件（browser_downloads 能看到目录位置）。
    也可以把 open_browser 返回的 cdp_http_endpoint 交给 Playwright / playwright-mcp / chrome-devtools-mcp。
 6. 用完 stop_profile。
+注册要邮箱验证时（full 档）：mail_get_address(profile) 拿地址 → 填表提交 → mail_wait_code(address) 拿验证码或验证链接。不要向用户要邮箱或验证码。
 
 规则 / Rules:
-- 权限由 Manager 设置 mcp.mode 决定：read-only 只读；full 加启停与检测/养号/进化；automation 再加 open_browser / get_cdp_endpoint / browser_* 页面工具。你的 token 还可能把上限压得更低（scope_denied）。工具列表在连接时协商，改模式后要重启客户端。
+- 权限由 Manager 设置 mcp.mode 决定：read-only 只读；full 加启停、检测/养号/进化和邮箱；automation 再加 open_browser / get_cdp_endpoint / browser_* 页面工具。你的 token 还可能把上限压得更低（scope_denied）。工具列表在连接时协商，改模式后要重启客户端。
 - 页面控制会拿一个「控制租约」。profile_leased 说明用户在接管或别的 agent 在用：停下来等，不要重试轰炸，也不要绕过。
 - CDP/页面控制能碰到 Cookie：只对当前任务需要的画像开，用完就关；不要导出或回显 Cookie、账号、代理凭据。
 - 不要改画像的指纹配置来「绕过」问题；指纹异常先看 get_fingerprint_report / get_profile_preflight，把结论告诉用户。
