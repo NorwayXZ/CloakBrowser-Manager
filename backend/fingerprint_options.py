@@ -102,10 +102,15 @@ def apply_noise_preference(args: list[str], profile: dict[str, Any]) -> list[str
     return args
 
 
-def webrtc_ip_arg(profile: dict[str, Any], exit_ip: str | None, *, proxied: bool) -> str | None:
-    """WebRTC ICE candidate IP: the fixed one, else the proxy exit IP."""
+def webrtc_ip_arg(profile: dict[str, Any], exit_ip: str | None) -> str | None:
+    """WebRTC ICE candidate IP: the fixed one, else the exit IP sites already see.
+
+    Also without a proxy: the kernel gathers no candidates at all without this
+    flag, and sites then report WebRTC as disabled, which a stock Chrome never
+    is. The exit IP is what every site sees anyway, so nothing new is shown.
+    """
     options = parse_fingerprint_options(profile)
-    ip = options.webrtc_ip if options.webrtc == "custom" else (exit_ip if proxied else None)
+    ip = options.webrtc_ip if options.webrtc == "custom" else exit_ip
     return f"--fingerprint-webrtc-ip={ip}" if ip else None
 
 

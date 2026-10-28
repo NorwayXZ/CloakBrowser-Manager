@@ -87,12 +87,12 @@ def test_noise_on_overrides_the_macos_persona_default(tmp_path: Path):
     assert args[-1] == "--fingerprint-brand=Chrome"
 
 
-def test_webrtc_ip_prefers_fixed_ip_then_proxy_exit():
+def test_webrtc_ip_prefers_fixed_ip_then_exit_ip():
     fixed = {"fingerprint_options": {"webrtc_ip": "203.0.113.9"}}
-    assert webrtc_ip_arg(fixed, "198.51.100.1", proxied=True) == "--fingerprint-webrtc-ip=203.0.113.9"
-    assert webrtc_ip_arg({}, "198.51.100.1", proxied=True) == "--fingerprint-webrtc-ip=198.51.100.1"
-    assert webrtc_ip_arg({}, "198.51.100.1", proxied=False) is None
-    assert webrtc_ip_arg({}, None, proxied=True) is None
+    assert webrtc_ip_arg(fixed, "198.51.100.1") == "--fingerprint-webrtc-ip=203.0.113.9"
+    # With or without a proxy: the exit IP is what sites already see.
+    assert webrtc_ip_arg({}, "198.51.100.1") == "--fingerprint-webrtc-ip=198.51.100.1"
+    assert webrtc_ip_arg({}, None) is None
 
 
 def test_options_newer_than_the_kernel_are_reported():
@@ -246,7 +246,7 @@ def test_webrtc_has_no_disable_mode(app_client: TestClient):
 
 def test_legacy_webrtc_ip_still_means_a_fixed_ip():
     profile = {"fingerprint_options": {"webrtc_ip": "203.0.113.9"}}
-    assert webrtc_ip_arg(profile, "198.51.100.1", proxied=True) == "--fingerprint-webrtc-ip=203.0.113.9"
+    assert webrtc_ip_arg(profile, "198.51.100.1") == "--fingerprint-webrtc-ip=203.0.113.9"
 
 
 def test_custom_webrtc_without_ip_is_rejected(app_client: TestClient):
