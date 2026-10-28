@@ -2838,11 +2838,7 @@ class BrowserManager:
                     extra_args.append(f"--fingerprint-locale={resolved_locale}")
                 if resolved_timezone and not any(arg.startswith("--fingerprint-timezone") for arg in user_launch_args):
                     extra_args.append(f"--fingerprint-timezone={resolved_timezone}")
-                webrtc_arg = webrtc_ip_arg(
-                    profile,
-                    (proxy_geo or {}).get("ip"),
-                    proxied=bool(browser_proxy),
-                )
+                webrtc_arg = webrtc_ip_arg(profile, (proxy_geo or {}).get("ip"))
                 if webrtc_arg and not any(arg.startswith("--fingerprint-webrtc-ip") for arg in user_launch_args):
                     extra_args.append(webrtc_arg)
                 if SESSION_RESTORE_ARG not in extra_args:
