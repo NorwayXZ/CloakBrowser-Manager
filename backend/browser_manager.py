@@ -3013,7 +3013,11 @@ class BrowserManager:
                         }
                     });
                 """
-                init_scripts = [clipboard_init_js]
+                # Only the VNC viewer reads it (the clipboard endpoint refuses
+                # other modes). Elsewhere it was a `window.__clipboardText`
+                # global on every page of a debug launch: one line of page
+                # script tells it apart from a stock Chrome.
+                init_scripts = [clipboard_init_js] if self.runtime.viewer_mode == "vnc" else []
                 fingerprint_init_js = ""
                 if browser_engine == "system_chrome":
                     fingerprint_init_js = _build_fingerprint_init_script(

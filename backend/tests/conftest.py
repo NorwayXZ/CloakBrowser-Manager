@@ -57,6 +57,15 @@ def isolated_secret_key(tmp_path_factory: pytest.TempPathFactory, monkeypatch: p
 
 
 @pytest.fixture(autouse=True)
+def no_local_geoip(monkeypatch: pytest.MonkeyPatch):
+    """GeoIP votes come from the mocked lookup sites only, never from a
+    GeoLite2 database that happens to be on this machine."""
+    from backend import proxy_geo
+
+    monkeypatch.setattr(proxy_geo, "_local_geoip_path", lambda: None)
+
+
+@pytest.fixture(autouse=True)
 def proxies_look_healthy(monkeypatch: pytest.MonkeyPatch):
     """No test reaches a real proxy: the health check answers "usable";
     the probe's own tests run it against local fake proxies."""
