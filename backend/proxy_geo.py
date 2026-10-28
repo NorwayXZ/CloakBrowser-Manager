@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import logging
 from collections import Counter
+from pathlib import Path
 from typing import Any
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 COUNTRY_LOCALE_DEFAULTS: dict[str, str] = {
@@ -211,29 +215,107 @@ async def _fetch_ipwhois_app(client: httpx.AsyncClient) -> dict[str, Any]:
     }, data.get("latitude"), data.get("longitude")))
 
 
+# Which database answers behind each lookup site. ipwho.is and ipwhois.app
+# are both ipwhois.io: counted as two votes they could outvote the other
+# sites with one database's answer (measured: Washington vs Los Angeles,
+# and anti-fraud services that use the other databases flagged the
+# mismatched timezone as a VPN).
+_DATABASE_OF = {"ipwho.is": "ipwhois.io", "ipwhois.app": "ipwhois.io"}
+MAXMIND_SOURCE = "MaxMind GeoLite2"
+# Ties go to the database anti-fraud services use most.
+_DATABASE_PREFERENCE = (MAXMIND_SOURCE, "ipinfo.io", "ip-api.com", "ipapi.co", "ipwhois.io")
+
+
+def _database(result: dict[str, Any]) -> str:
+    source = str(result.get("source") or "")
+    return _DATABASE_OF.get(source, source)
+
+
+def _preference(database: str) -> int:
+    return _DATABASE_PREFERENCE.index(database) if database in _DATABASE_PREFERENCE else len(_DATABASE_PREFERENCE)
+
+
 def _choose_geo_result(results: list[dict[str, Any]]) -> dict[str, Any]:
-    """Choose a stable GeoIP result, preferring timezone consensus."""
+    """Choose the timezone most distinct databases agree on (one vote each)."""
     if not results:
         raise ProxyGeoError("proxy geo lookup failed")
 
-    timezone_counts = Counter(
-        str(result.get("timezone"))
-        for result in results
-        if result.get("timezone")
-    )
-    if not timezone_counts:
+    by_database: dict[str, dict[str, Any]] = {}
+    for result in results:
+        by_database.setdefault(_database(result), result)
+    voters = {db: result for db, result in by_database.items() if result.get("timezone")}
+    if not voters:
         return results[0]
 
-    chosen_timezone, _count = timezone_counts.most_common(1)[0]
-    agreeing = [
-        result for result in results
-        if result.get("timezone") == chosen_timezone
-    ]
-    chosen = dict(agreeing[0])
-    chosen["source"] = "majority: " + ", ".join(
-        str(result.get("source")) for result in agreeing if result.get("source")
+    votes = Counter(str(result["timezone"]) for result in voters.values())
+    best_rank = {
+        timezone: min(_preference(db) for db, result in voters.items() if result["timezone"] == timezone)
+        for timezone in votes
+    }
+    chosen_timezone = min(votes, key=lambda tz: (-votes[tz], best_rank[tz]))
+    agreeing = sorted(
+        (db for db, result in voters.items() if result["timezone"] == chosen_timezone),
+        key=_preference,
     )
+    # The local database knows no ISP; show an online site's answer when one agrees.
+    base_db = next((db for db in agreeing if db != MAXMIND_SOURCE), agreeing[0])
+    chosen = dict(voters[base_db])
+    chosen["source"] = "majority: " + ", ".join(agreeing)
     return chosen
+
+
+def _local_geoip_path() -> Path | None:
+    """The GeoLite2-City database the cloakbrowser package keeps, if it is there.
+
+    Only read: downloading it is the package's job (on its own schedule).
+    """
+    try:
+        from cloakbrowser.config import get_cache_dir
+    except ImportError:
+        return None
+    path = get_cache_dir() / "geoip" / "GeoLite2-City.mmdb"
+    return path if path.is_file() else None
+
+
+_READER: Any = None
+_READER_PATH: Path | None = None
+
+
+def _maxmind_lookup(ip: str) -> dict[str, Any] | None:
+    """MaxMind's answer for ``ip`` from the local database; None if unavailable."""
+    global _READER, _READER_PATH
+    path = _local_geoip_path()
+    if path is None:
+        return None
+    try:
+        address = ipaddress.ip_address(ip)
+    except ValueError:
+        return None
+    if address.is_private or address.is_loopback:
+        return None
+    try:
+        import geoip2.database
+
+        if _READER is None or _READER_PATH != path:
+            _READER = geoip2.database.Reader(str(path))
+            _READER_PATH = path
+        city = _READER.city(ip)
+    except Exception as exc:  # missing package, unreadable file, unknown address
+        logger.debug("Local GeoIP lookup failed for %s: %s", ip, exc)
+        return None
+    if not city.location.time_zone:
+        return None
+    return _with_locale(_with_coordinates({
+        "ip": ip,
+        "country": city.country.name,
+        "country_code": city.country.iso_code,
+        "region": city.subdivisions.most_specific.name,
+        "city": city.city.name,
+        "timezone": city.location.time_zone,
+        "org": None,
+        "asn": None,
+        "source": MAXMIND_SOURCE,
+    }, city.location.latitude, city.location.longitude))
 
 
 def exit_ip_spread(results: list[dict[str, Any]]) -> tuple[list[str], bool]:
@@ -287,8 +369,12 @@ async def fetch_proxy_geo(proxy: str | None) -> dict[str, Any]:
                 errors.append(error)
 
     if results:
-        chosen = _choose_geo_result(results)
-        chosen["exit_ips"], chosen["rotating_ip"] = exit_ip_spread(results)
+        exit_ips, rotating = exit_ip_spread(results)
+        # The address most sites saw is the exit; MaxMind gets a vote on it too.
+        seen = Counter(str(result["ip"]) for result in results if result.get("ip"))
+        local = _maxmind_lookup(seen.most_common(1)[0][0]) if seen else None
+        chosen = _choose_geo_result([*results, local] if local else results)
+        chosen["exit_ips"], chosen["rotating_ip"] = exit_ips, rotating
         return chosen
 
     raise ProxyGeoError("出口 IP 查询站全部没有回答（" + "; ".join(errors) + "）")

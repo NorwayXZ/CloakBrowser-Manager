@@ -1934,3 +1934,41 @@ def test_manual_process_headed_has_no_headless_switch(monkeypatch, tmp_path: Pat
     assert not any(arg.startswith("--headless") for arg in calls["cmd"])
     assert calls["build_kwargs"]["headless"] is False
     window_sync.assert_called_once()
+
+
+# ── Page-visible traces of a debug launch ────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_native_debug_launch_adds_no_script_to_pages(monkeypatch, tmp_path: Path):
+    # The clipboard helper left `window.__clipboardText` on every page; only
+    # the VNC viewer ever reads it.
+    from backend import browser_manager as module
+
+    context = MagicMock(pages=[])
+    context.add_init_script = AsyncMock()
+    manager = BrowserManager(NATIVE_RUNTIME)
+    manager._wait_for_cdp = AsyncMock()
+    monkeypatch.setattr(module, "launch_persistent_context_async", AsyncMock(return_value=context))
+
+    await manager.launch(_launch_profile(tmp_path), launch_mode="debug")
+
+    context.add_init_script.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_vnc_debug_launch_keeps_the_clipboard_helper(monkeypatch, tmp_path: Path):
+    from backend import browser_manager as module
+
+    context = MagicMock(pages=[])
+    context.add_init_script = AsyncMock()
+    manager = BrowserManager(DOCKER_RUNTIME)
+    manager.vnc.allocate = AsyncMock(return_value=(100, 6100))
+    manager.vnc.start_vnc = AsyncMock()
+    manager._wait_for_cdp = AsyncMock()
+    monkeypatch.setattr(module, "launch_persistent_context_async", AsyncMock(return_value=context))
+
+    await manager.launch(_launch_profile(tmp_path), launch_mode="debug")
+
+    scripts = [call.args[0] for call in context.add_init_script.await_args_list]
+    assert any("__clipboardText" in script for script in scripts)
