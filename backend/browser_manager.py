@@ -45,6 +45,7 @@ from .fingerprint_report import DEFAULT_NETWORK_PROBE_URL, analyze_fingerprint, 
 from .cloak_runtime import get_effective_chromium_version
 from .proxy_geo import fetch_proxy_geo
 from .proxy_probe import probe_proxy
+from .database import validate_profile_route
 from .proxy_bridge import HttpProxyBridge
 from .runtime import RuntimeConfig, resolve_runtime, server_port
 from .session_keeper import (
@@ -2717,6 +2718,13 @@ class BrowserManager:
             if proxy:
                 _validate_proxy(proxy)
 
+            relay = validate_profile_route(proxy, profile.get("proxy_connection_mode", "direct"), profile.get("relay_id"))
+            if relay:
+                overrides = {"--no-proxy-server", "--proxy-server", "--proxy-pac-url", "--proxy-auto-detect", "--proxy-bypass-list"}
+                if any(arg.split("=", 1)[0].lower() in overrides for arg in user_launch_args):
+                    raise ValueError("中转模式不能用高级启动参数覆盖代理连接")
+                user_launch_args.append("--disable-quic")
+
             browser_engine = self._browser_engine(profile)
             if self.runtime.host_os == "macos" and browser_engine == "cloakbrowser":
                 _quarantine_macos_cloak_sync_data(
@@ -2733,7 +2741,13 @@ class BrowserManager:
                 else:
                     remove_session_keeper_extension(user_data_dir)
             browser_proxy = proxy
-            if proxy and is_xray_link(proxy):
+            if relay:
+                xray_process = await start_xray_proxy(
+                    proxy, user_data_dir=user_data_dir, data_dir=self.runtime.data_dir,
+                    relay_link=relay["proxy"],
+                )
+                browser_proxy = xray_process.browser_proxy
+            elif proxy and is_xray_link(proxy):
                 xray_process = await start_xray_proxy(
                     proxy,
                     user_data_dir=user_data_dir,

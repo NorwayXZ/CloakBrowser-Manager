@@ -68,3 +68,7 @@ Windows: %LOCALAPPDATA%\CloakBrowser Manager
 
 - [README.md](README.md)
 - [docs/local-install-uninstall.zh-CN.md](docs/local-install-uninstall.zh-CN.md)
+
+## SOCKS5 中转（v0.9.0）
+
+「代理 → 中转服务器」添加加密入口后，在环境的 SOCKS5 设置中选择直接连接或通过中转。旧环境保持直连，不改变已有 Cookie、账号或浏览器画像。中转使用 TCP，失败不自动回退；升级后按 [中转教程](docs/PROXY_RELAY.md) 设置即可。

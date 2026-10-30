@@ -363,7 +363,52 @@ def parse_xray_link(value: str) -> dict[str, Any]:
     )
 
 
-def build_xray_config(link: str, local_port: int) -> dict[str, Any]:
+def validate_relay_link(link: str) -> dict[str, Any]:
+    """A relay must encrypt the first hop, independently of the final SOCKS5."""
+    parsed = parse_xray_link(link)
+    outbound = parsed["outbound"]
+    security = outbound.get("streamSettings", {}).get("security")
+    tls = outbound.get("streamSettings", {}).get("tlsSettings", {})
+    if tls.get("allowInsecure"):
+        raise XrayProxyError("当前 Xray 不再支持跳过 TLS 校验；请使用有效证书或 REALITY 中转入口")
+    tls.pop("allowInsecure", None)
+    if outbound["protocol"] == "shadowsocks" and outbound["settings"]["servers"][0].get("method") in {"none", "plain", ""}:
+        raise XrayProxyError("中转服务器不能使用明文 Shadowsocks 加密方式")
+    if outbound["protocol"] != "shadowsocks" and security not in {"tls", "reality"}:
+        raise XrayProxyError("中转入口需要加密：请使用 VLESS TLS/REALITY、Trojan、VMess TLS 或 Shadowsocks 链接")
+    return outbound
+
+
+def socks5_outbound(link: str) -> dict[str, Any]:
+    parsed = urlsplit(link.strip())
+    if parsed.scheme.lower() != "socks5":
+        raise XrayProxyError("中转模式的最终出口必须是 SOCKS5，请填写 SOCKS5 地址")
+    host, port = _host_port(parsed.hostname, parsed.port, label="SOCKS5")
+    if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+        raise XrayProxyError("SOCKS5 地址不支持路径、查询参数或片段；会话参数请保留在用户名中")
+    server: dict[str, Any] = {"address": host, "port": port}
+    if parsed.username is not None or parsed.password is not None:
+        server["users"] = [{"user": unquote(parsed.username or ""), "pass": unquote(parsed.password or "")}]
+    return {"protocol": "socks", "settings": {"servers": [server]}}
+
+
+def build_xray_config(link: str, local_port: int, *, relay_link: str | None = None) -> dict[str, Any]:
+    if relay_link is not None:
+        final = socks5_outbound(link)
+        relay = validate_relay_link(relay_link)
+        return {
+            "log": {"loglevel": "warning"},
+            "inbounds": [{"tag": "browser-socks", "listen": "127.0.0.1", "port": local_port,
+                          "protocol": "socks", "settings": {"auth": "noauth", "udp": False}}],
+            "outbounds": [
+                {**final, "tag": "proxy", "streamSettings": {"sockopt": {"dialerProxy": "relay"}}},
+                {**relay, "tag": "relay"},
+            ],
+            # No freedom fallback: losing the relay must never select a local or relay-server exit.
+            "routing": {"domainStrategy": "AsIs", "rules": [
+                {"type": "field", "inboundTag": ["browser-socks"], "outboundTag": "proxy"},
+            ]},
+        }
     parsed = parse_xray_link(link)
     return {
         "log": {"loglevel": "warning"},
@@ -691,6 +736,7 @@ async def start_xray_proxy(
     *,
     user_data_dir: Path,
     data_dir: Path,
+    relay_link: str | None = None,
 ) -> XrayProcess:
     """Start one local SOCKS5 endpoint backed by an Xray outbound."""
     binary, xray_asset_dir = await ensure_xray_runtime(data_dir)
@@ -700,7 +746,7 @@ async def start_xray_proxy(
     config_path = xray_dir / "config.json"
     log_path = xray_dir / "xray.log"
     config_path.write_text(
-        json.dumps(build_xray_config(link, local_port), indent=2),
+        json.dumps(build_xray_config(link, local_port, relay_link=relay_link), indent=2),
         encoding="utf-8",
     )
     if os.name != "nt":

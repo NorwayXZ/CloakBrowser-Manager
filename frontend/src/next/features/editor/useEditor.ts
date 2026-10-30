@@ -93,7 +93,7 @@ export function useEditor(profile: Profile | null, hostOS: HostOS | null) {
   };
 
   const setProxyParts = (next: ProxyParts) => {
-    setState((s) => ({ ...s, proxyParts: next, form: { ...s.form, proxy: proxyFromParts(next) } }));
+    setState((s) => ({ ...s, proxyParts: next, form: { ...s.form, proxy: proxyFromParts(next), ...(next.kind !== "custom" || next.scheme !== "socks5" ? { proxy_connection_mode: "direct", relay_id: null } : {}) } }));
     clearProxyTest();
   };
 
@@ -106,6 +106,11 @@ export function useEditor(profile: Profile | null, hostOS: HostOS | null) {
     proxyTestError,
     set,
     setOption,
+    setRouteMode: (mode: "direct" | "relay") => {
+      setForm(f => ({ ...f, proxy_connection_mode: mode, relay_id: mode === "direct" ? null : f.relay_id }));
+      clearProxyTest();
+    },
+    setRelay: (id: string | null) => { set("relay_id", id); clearProxyTest(); },
     setForm,
     restore: (draft: EditorState) => setState(draft),
     discardDraft: () => writeDraft(profileId, null),
@@ -121,7 +126,7 @@ export function useEditor(profile: Profile | null, hostOS: HostOS | null) {
     setProxyKind: (kind: ProxyKind) => setProxyParts({ ...proxyParts, kind, raw: kind === "xray" ? proxyParts.raw : "" }),
     setProxyPart: <K extends keyof ProxyParts>(key: K, value: ProxyParts[K]) => setProxyParts({ ...proxyParts, [key]: value }),
     usePreset: (proxy: string) => {
-      setState((s) => ({ ...s, proxyParts: parseProxy(proxy), form: { ...s.form, proxy } }));
+      setState((s) => ({ ...s, proxyParts: parseProxy(proxy), form: { ...s.form, proxy, ...(!proxy.startsWith("socks5://") ? { proxy_connection_mode: "direct", relay_id: null } : {}) } }));
       clearProxyTest();
     },
     setStartupUrlsText: (text: string) => setState((s) => ({ ...s, startupUrlsText: text, form: { ...s.form, startup_urls: startupUrlsFromText(text) } })),

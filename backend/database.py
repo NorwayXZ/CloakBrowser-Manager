@@ -26,10 +26,10 @@ CONFIGURATION_SCHEMA_VERSION = 1
 # idempotent ALTER TABLEs in init_db; this number only lets a program notice
 # that the data was last written by a newer one (a downgrade), whose layout it
 # cannot be sure to read. Raise it whenever a migration is added.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 SETTING_SCHEMA_VERSION = "db.schema_version"
 CONFIGURATION_PROFILE_FIELDS = (
-    "name", "browser_engine", "device_profile", "fingerprint_seed", "proxy", "timezone", "locale", "platform",
+    "name", "browser_engine", "device_profile", "fingerprint_seed", "proxy", "proxy_connection_mode", "relay_id", "timezone", "locale", "platform",
     "user_agent", "screen_width", "screen_height", "gpu_vendor", "gpu_renderer", "hardware_concurrency",
     "device_memory", "humanize", "human_preset", "headless", "geoip", "clipboard_sync", "auto_launch",
     "color_scheme", "group_name", "account_platform", "cookies_json", "startup_urls", "launch_args",
@@ -98,6 +98,14 @@ def init_db():
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL UNIQUE,
                 color TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS relay_nodes (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                proxy TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -206,6 +214,12 @@ def init_db():
             conn.commit()
         if "launch_args" not in cols:
             conn.execute("ALTER TABLE profiles ADD COLUMN launch_args TEXT DEFAULT '[]'")
+            conn.commit()
+        if "proxy_connection_mode" not in cols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN proxy_connection_mode TEXT NOT NULL DEFAULT 'direct'")
+            conn.commit()
+        if "relay_id" not in cols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN relay_id TEXT")
             conn.commit()
         if "auto_launch" not in cols:
             conn.execute("ALTER TABLE profiles ADD COLUMN auto_launch BOOLEAN DEFAULT 0")
@@ -468,6 +482,7 @@ def export_configuration() -> dict[str, Any]:
         "profiles": profiles,
         "groups": list_groups(),
         "proxy_presets": list_proxy_presets(),
+        "relay_nodes": list_relay_nodes(),
     }
 
 
@@ -483,6 +498,24 @@ def import_configuration(payload: dict[str, Any]) -> dict[str, int]:
     profiles = payload.get("profiles")
     if not isinstance(groups, list) or not isinstance(presets, list) or not isinstance(profiles, list):
         raise ValueError("配置备份内容不完整")
+
+    relay_rows = payload.get("relay_nodes", [])
+    if not isinstance(relay_rows, list):
+        raise ValueError("中转服务器备份格式无效")
+    relay_sources = {item.get("id"): item for item in relay_rows if isinstance(item, dict) and item.get("id")}
+    from .xray_runtime import validate_relay_link, socks5_outbound
+    for item in relay_sources.values():
+        if not str(item.get("name", "")).strip():
+            raise ValueError("中转服务器缺少名称")
+        validate_relay_link(str(item.get("proxy", "")))
+    for item in profiles:
+        if isinstance(item, dict) and item.get("proxy_connection_mode") == "relay":
+            if item.get("relay_id") not in relay_sources:
+                raise ValueError("备份缺少环境使用的中转服务器，无法导入")
+            socks5_outbound(str(item.get("proxy", "")))
+    relay_ids = {}
+    for old_id, item in relay_sources.items():
+        relay_ids[old_id] = create_relay_node(str(item["name"]).strip(), str(item["proxy"]))["id"]
 
     existing_group_names = {item["name"] for item in list_groups()}
     imported_groups = 0
@@ -517,6 +550,8 @@ def import_configuration(payload: dict[str, Any]) -> dict[str, int]:
         if not name:
             continue
         seed = values.pop("fingerprint_seed", None)
+        if values.get("proxy_connection_mode") == "relay":
+            values["relay_id"] = relay_ids[values["relay_id"]]
         created = create_profile(name=name, fingerprint_seed=seed, **values)
         if item.get("deleted"):
             delete_profile(created["id"])
@@ -534,6 +569,10 @@ def create_profile(
     fingerprint_seed: int | None = None,
     **fields: Any,
 ) -> dict[str, Any]:
+    mode = fields.get("proxy_connection_mode", "direct")
+    validate_profile_route(fields.get("proxy"), mode, fields.get("relay_id"))
+    if mode == "direct":
+        fields["relay_id"] = None
     profile_id = str(uuid.uuid4())
     seed = fingerprint_seed if fingerprint_seed is not None else random.randint(10000, 99999)
     user_data_dir = str(DATA_DIR / "profiles" / profile_id)
@@ -543,7 +582,7 @@ def create_profile(
     with get_db() as conn:
         conn.execute(
             """INSERT INTO profiles (
-                id, name, browser_engine, device_profile, fingerprint_seed, proxy, timezone, locale, platform,
+                id, name, browser_engine, device_profile, fingerprint_seed, proxy, proxy_connection_mode, relay_id, timezone, locale, platform,
                 user_agent, screen_width, screen_height, gpu_vendor, gpu_renderer,
                 hardware_concurrency, device_memory, humanize, human_preset, headless, geoip,
                 clipboard_sync, auto_launch, color_scheme, group_name, account_platform,
@@ -551,13 +590,14 @@ def create_profile(
                 warmup_enabled, warmup_daily_max, warmup_targets, warmup_persona,
                 evolution_enabled, evolution_interval_hours,
                 user_data_dir, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 profile_id, name,
                 fields.get("browser_engine", "auto"),
                 fields.get("device_profile"),
                 seed,
                 encrypt_value(fields.get("proxy")),
+                mode, fields.get("relay_id"),
                 fields.get("timezone"),
                 fields.get("locale"),
                 fields.get("platform", "windows"),
@@ -637,6 +677,8 @@ def _hydrate_profile(row: sqlite3.Row) -> dict[str, Any]:
             "SELECT tag, color FROM profile_tags WHERE profile_id = ?",
             (profile["id"],),
         ).fetchall()
+        relay = conn.execute("SELECT name FROM relay_nodes WHERE id=?", (profile.get("relay_id"),)).fetchone() if profile.get("relay_id") else None
+    profile["relay_name"] = relay["name"] if relay else None
     profile["tags"] = [dict(t) for t in tags]
     return profile
 
@@ -662,6 +704,11 @@ def update_profile(profile_id: str, **fields: Any) -> dict[str, Any] | None:
     if not existing:
         return None
 
+    mode = fields.get("proxy_connection_mode", existing.get("proxy_connection_mode", "direct"))
+    relay_id = fields.get("relay_id", existing.get("relay_id"))
+    validate_profile_route(fields.get("proxy", existing.get("proxy")), mode, relay_id)
+    if mode == "direct":
+        fields["relay_id"] = None
     tags = fields.pop("tags", None)
 
     # Only update fields that were explicitly provided
@@ -683,12 +730,13 @@ def update_profile(profile_id: str, **fields: Any) -> dict[str, Any] | None:
     if fields.get("fingerprint_seed") is None:
         fields.pop("fingerprint_seed", None)
 
-    if "proxy" in fields and fields["proxy"] != existing.get("proxy"):
+    if any(key in fields and fields[key] != existing.get(key)
+           for key in ("proxy", "proxy_connection_mode", "relay_id")):
         update_cols.append("proxy_geo_json = ?")
         update_vals.append(None)
 
     for col in (
-        "name", "browser_engine", "device_profile", "fingerprint_seed", "proxy", "timezone", "locale", "platform",
+        "name", "browser_engine", "device_profile", "fingerprint_seed", "proxy", "proxy_connection_mode", "relay_id", "timezone", "locale", "platform",
         "user_agent", "screen_width", "screen_height", "gpu_vendor", "gpu_renderer",
         "hardware_concurrency", "device_memory", "humanize", "human_preset", "headless", "geoip",
         "clipboard_sync", "auto_launch", "color_scheme", "group_name", "account_platform", "cookies_json",
@@ -863,6 +911,87 @@ def delete_proxy_preset(preset_id: str) -> bool:
         cursor = conn.execute("DELETE FROM proxy_presets WHERE id = ?", (preset_id,))
         conn.commit()
         return cursor.rowcount > 0
+
+
+def get_relay_node(relay_id: str) -> dict[str, Any] | None:
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM relay_nodes WHERE id=?", (relay_id,)).fetchone()
+    if row is None:
+        return None
+    item = dict(row)
+    item["proxy"] = decrypt_value(item["proxy"])
+    return item
+
+
+def list_relay_nodes() -> list[dict[str, Any]]:
+    with get_db() as conn:
+        rows = conn.execute("""SELECT r.*, (SELECT COUNT(*) FROM profiles p
+            WHERE p.relay_id=r.id AND p.proxy_connection_mode='relay') AS profile_count
+            FROM relay_nodes r ORDER BY r.created_at DESC""").fetchall()
+    items = [dict(row) for row in rows]
+    for item in items:
+        item["proxy"] = decrypt_value(item["proxy"])
+    return items
+
+
+def create_relay_node(name: str, proxy: str) -> dict[str, Any]:
+    from .xray_runtime import validate_relay_link
+    validate_relay_link(proxy)
+    name = name.strip()
+    if not name or len(name) > 64:
+        raise ValueError("中转服务器名称需要 1 到 64 个字符")
+    relay_id, now = str(uuid.uuid4()), _now()
+    with get_db() as conn:
+        # Importing into an existing installation must not overwrite a shared relay.
+        actual_name, suffix = name, 2
+        while conn.execute("SELECT 1 FROM relay_nodes WHERE name=?", (actual_name,)).fetchone():
+            ending = f" ({suffix})"
+            actual_name = name[:64-len(ending)] + ending
+            suffix += 1
+        conn.execute("INSERT INTO relay_nodes (id,name,proxy,created_at,updated_at) VALUES (?,?,?,?,?)",
+                     (relay_id, actual_name, encrypt_value(proxy), now, now))
+        conn.commit()
+    return get_relay_node(relay_id)  # type: ignore[return-value]
+
+
+def update_relay_node(relay_id: str, name: str, proxy: str) -> dict[str, Any] | None:
+    from .xray_runtime import validate_relay_link
+    validate_relay_link(proxy)
+    name = name.strip()
+    if not name or len(name) > 64:
+        raise ValueError("中转服务器名称需要 1 到 64 个字符")
+    with get_db() as conn:
+        cursor = conn.execute("UPDATE relay_nodes SET name=?,proxy=?,updated_at=? WHERE id=?",
+                              (name, encrypt_value(proxy), _now(), relay_id))
+        if not cursor.rowcount:
+            return None
+        conn.execute("UPDATE profiles SET proxy_geo_json=NULL WHERE relay_id=?", (relay_id,))
+        conn.commit()
+    return get_relay_node(relay_id)
+
+
+def delete_relay_node(relay_id: str) -> bool:
+    with get_db() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM profiles WHERE relay_id=? AND proxy_connection_mode='relay'",
+                             (relay_id,)).fetchone()[0]
+        if count:
+            raise ValueError(f"这个中转服务器仍被 {count} 个环境使用，请先修改这些环境的连接方式（包括回收站中的环境）")
+        cursor = conn.execute("DELETE FROM relay_nodes WHERE id=?", (relay_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def validate_profile_route(proxy: str | None, mode: str, relay_id: str | None) -> dict[str, Any] | None:
+    if mode == "direct":
+        return None
+    if mode != "relay":
+        raise ValueError("代理连接方式必须是 direct 或 relay")
+    from .xray_runtime import socks5_outbound, validate_relay_link
+    socks5_outbound(proxy or "")
+    if not relay_id or not (relay := get_relay_node(relay_id)):
+        raise ValueError("请选择有效的中转服务器；中转不可用时不会自动改为直连")
+    validate_relay_link(relay["proxy"])
+    return relay
 
 
 # ── Mail addresses (邮箱) ──────────────────────────────────────────────────────

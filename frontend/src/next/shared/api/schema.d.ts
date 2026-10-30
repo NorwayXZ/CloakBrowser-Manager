@@ -1703,6 +1703,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/relay-nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Relay Nodes */
+        get: operations["list_relay_nodes_api_relay_nodes_get"];
+        put?: never;
+        /** Create Relay Node */
+        post: operations["create_relay_node_api_relay_nodes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/relay-nodes/{relay_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update Relay Node */
+        put: operations["update_relay_node_api_relay_nodes__relay_id__put"];
+        post?: never;
+        /** Delete Relay Node */
+        delete: operations["delete_relay_node_api_relay_nodes__relay_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/relay-nodes/{relay_id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test Relay Node */
+        post: operations["test_relay_node_api_relay_nodes__relay_id__test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/llm": {
         parameters: {
             query?: never;
@@ -2967,6 +3020,14 @@ export interface components {
             /** Proxy */
             proxy?: string | null;
             /**
+             * Proxy Connection Mode
+             * @default direct
+             * @enum {string}
+             */
+            proxy_connection_mode: "direct" | "relay";
+            /** Relay Id */
+            relay_id?: string | null;
+            /**
              * Screen Height
              * @default 1080
              */
@@ -3110,10 +3171,20 @@ export interface components {
             platform: string;
             /** Proxy */
             proxy?: string | null;
+            /**
+             * Proxy Connection Mode
+             * @default direct
+             * @enum {string}
+             */
+            proxy_connection_mode: "direct" | "relay";
             /** Proxy Geo */
             proxy_geo?: {
                 [key: string]: unknown;
             } | null;
+            /** Relay Id */
+            relay_id?: string | null;
+            /** Relay Name */
+            relay_name?: string | null;
             /**
              * Runtime Mode
              * @default docker
@@ -3266,6 +3337,10 @@ export interface components {
             platform?: ("windows" | "macos" | "linux") | null;
             /** Proxy */
             proxy?: string | null;
+            /** Proxy Connection Mode */
+            proxy_connection_mode?: ("direct" | "relay") | null;
+            /** Relay Id */
+            relay_id?: string | null;
             /** Screen Height */
             screen_height?: number | null;
             /** Screen Width */
@@ -3320,6 +3395,14 @@ export interface components {
         ProxyTestRequest: {
             /** Proxy */
             proxy?: string | null;
+            /**
+             * Proxy Connection Mode
+             * @default direct
+             * @enum {string}
+             */
+            proxy_connection_mode: "direct" | "relay";
+            /** Relay Id */
+            relay_id?: string | null;
         };
         /** ProxyTestResponse */
         ProxyTestResponse: {
@@ -3333,11 +3416,15 @@ export interface components {
             country?: string | null;
             /** Country Code */
             country_code?: string | null;
+            /** Elapsed Ms */
+            elapsed_ms?: number | null;
             /**
              * Exit Ips
              * @default []
              */
             exit_ips: string[];
+            /** Handshake Ms */
+            handshake_ms?: number | null;
             /** Ip */
             ip?: string | null;
             ip_quality?: components["schemas"]["IpQuality"] | null;
@@ -3348,8 +3435,16 @@ export interface components {
             ok: boolean;
             /** Org */
             org?: string | null;
+            /**
+             * Proxy Connection Mode
+             * @default direct
+             * @enum {string}
+             */
+            proxy_connection_mode: "direct" | "relay";
             /** Region */
             region?: string | null;
+            /** Relay Name */
+            relay_name?: string | null;
             /**
              * Rotating Ip
              * @default false
@@ -3364,6 +3459,31 @@ export interface components {
             suggested_locale?: string | null;
             /** Timezone */
             timezone?: string | null;
+        };
+        /** RelayNodeCreate */
+        RelayNodeCreate: {
+            /** Name */
+            name: string;
+            /** Proxy */
+            proxy: string;
+        };
+        /** RelayNodeResponse */
+        RelayNodeResponse: {
+            /** Created At */
+            created_at: string;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Profile Count
+             * @default 0
+             */
+            profile_count: number;
+            /** Proxy */
+            proxy: string;
+            /** Updated At */
+            updated_at: string;
         };
         /**
          * SentenceAssembledPayload
@@ -6665,6 +6785,156 @@ export interface operations {
                 "application/json": components["schemas"]["ProxyTestRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProxyTestResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_relay_nodes_api_relay_nodes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RelayNodeResponse"][];
+                };
+            };
+        };
+    };
+    create_relay_node_api_relay_nodes_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RelayNodeCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RelayNodeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_relay_node_api_relay_nodes__relay_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                relay_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RelayNodeCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RelayNodeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_relay_node_api_relay_nodes__relay_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                relay_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_relay_node_api_relay_nodes__relay_id__test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                relay_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

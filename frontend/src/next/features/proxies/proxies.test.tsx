@@ -28,6 +28,29 @@ beforeEach(() => {
 
 afterEach(() => vi.unstubAllGlobals());
 
+describe("relay nodes", () => {
+  it("adds an encrypted relay independently of saved final proxies", async () => {
+    const relays: object[] = [];
+    const { fetchMock } = await open([
+      { path: "/api/relay-nodes", respond: () => relays },
+      { method: "POST", path: "/api/relay-nodes", respond: (body: unknown) => {
+        const item = { ...(body as object), id: "relay-1", profile_count: 0, created_at: "2026-10-30", updated_at: "2026-10-30" };
+        relays.push(item); return item;
+      } },
+    ]);
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "中转服务器" }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("button", { name: "添加中转服务器" }));
+    const dialog = await screen.findByRole("dialog", { name: "添加中转服务器" });
+    fireEvent.change(within(dialog).getByLabelText("中转名称"), { target: { value: "美国中转" } });
+    fireEvent.change(within(dialog).getByLabelText("中转连接链接"), { target: { value: "trojan://private-password@relay.example:443" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "保存中转服务器" }));
+    await screen.findByRole("row", { name: /美国中转/ });
+    expect(screen.queryByText(/private-password/)).not.toBeInTheDocument();
+    expect(bodies(fetchMock, "POST", "/api/relay-nodes")[0]).toEqual({ name: "美国中转", proxy: "trojan://private-password@relay.example:443" });
+    expect(bodies(fetchMock, "POST", "/api/proxy-presets")).toHaveLength(0);
+  });
+});
+
 describe("saved proxies", () => {
   it("lists saved proxies without showing their passwords", async () => {
     await open();

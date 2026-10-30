@@ -118,6 +118,8 @@ class ProfileCreate(BaseModel):
     device_profile: str | None = None
     fingerprint_seed: int | None = None  # random if not set
     proxy: str | None = None  # "http://user:pass@host:port" or null
+    proxy_connection_mode: Literal["direct", "relay"] = "direct"
+    relay_id: str | None = None
     timezone: str | None = None  # "America/New_York"
     locale: str | None = None  # "en-US"
     platform: Literal["windows", "macos", "linux"] = "windows"
@@ -157,6 +159,8 @@ class ProfileUpdate(BaseModel):
     device_profile: str | None = Field(default=None)
     fingerprint_seed: int | None = None
     proxy: str | None = Field(default=None)
+    proxy_connection_mode: Literal["direct", "relay"] | None = None
+    relay_id: str | None = None
     timezone: str | None = Field(default=None)
     locale: str | None = Field(default=None)
     platform: Literal["windows", "macos", "linux"] | None = None
@@ -207,6 +211,9 @@ class ProfileResponse(BaseModel):
     device_profile: str | None = None
     fingerprint_seed: int
     proxy: str | None = None
+    proxy_connection_mode: Literal["direct", "relay"] = "direct"
+    relay_id: str | None = None
+    relay_name: str | None = None
     timezone: str | None = None
     locale: str | None = None
     platform: str = "windows"
@@ -357,6 +364,8 @@ class PreflightResponse(BaseModel):
 
 class ProxyTestRequest(BaseModel):
     proxy: str | None = None
+    proxy_connection_mode: Literal["direct", "relay"] = "direct"
+    relay_id: str | None = None
 
 
 class IpQualitySignal(BaseModel):
@@ -394,6 +403,22 @@ class ProxyTestResponse(BaseModel):
     # Every exit IP this test saw; more than one of a family = rotating proxy.
     exit_ips: list[str] = []
     rotating_ip: bool = False
+    proxy_connection_mode: Literal["direct", "relay"] = "direct"
+    relay_name: str | None = None
+    elapsed_ms: int | None = None
+    handshake_ms: int | None = None
+
+
+class RelayNodeCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    proxy: str = Field(min_length=1)
+
+
+class RelayNodeResponse(RelayNodeCreate):
+    id: str
+    created_at: str
+    updated_at: str
+    profile_count: int = 0
 
 
 class GroupCreate(BaseModel):

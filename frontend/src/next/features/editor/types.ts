@@ -34,6 +34,8 @@ export interface EditorForm {
   device_profile?: string | null;
   fingerprint_seed?: number | null;
   proxy?: string | null;
+  proxy_connection_mode?: "direct" | "relay";
+  relay_id?: string | null;
   timezone?: string | null;
   locale?: string | null;
   platform?: string;
@@ -94,6 +96,10 @@ export interface ProxyTestResult {
   asn: string | null;
   source: string;
   connection_mode?: "direct" | "proxy" | null;
+  proxy_connection_mode?: "direct" | "relay";
+  relay_name?: string | null;
+  elapsed_ms?: number | null;
+  handshake_ms?: number | null;
   ip_quality?: IpQuality | null;
 }
 

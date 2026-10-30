@@ -265,6 +265,7 @@ export function initialState(profile: Profile | null, hostOS?: HostOS | null): E
     device_profile: deviceProfile.id,
     fingerprint_seed: profile.fingerprint_seed,
     proxy: profile.proxy,
+    ...(profile.proxy_connection_mode === "relay" ? { proxy_connection_mode: "relay" as const, relay_id: profile.relay_id } : {}),
     timezone: profile.timezone,
     locale: profile.locale,
     platform: profile.platform,

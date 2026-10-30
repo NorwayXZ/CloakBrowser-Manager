@@ -75,6 +75,16 @@ def main() -> None:
         )
         assert "Xray" in (result.stdout + result.stderr)
 
+        # Exercise the real encrypted relay and final authenticated SOCKS5 on
+        # loopback with this platform's binary, including the no-fallback case.
+        subprocess.run(
+            [sys.executable, "-m", "pytest", "backend/tests/test_relay_runtime_live.py", "-q"],
+            cwd=REPOSITORY_ROOT,
+            env={**os.environ, "CLOAKBROWSER_RELAY_TEST_XRAY": str(binary)},
+            check=True,
+            timeout=90,
+        )
+
         from cloakbrowser.download import ensure_binary
 
         expected = get_effective_chromium_version()

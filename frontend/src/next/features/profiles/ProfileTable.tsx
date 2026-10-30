@@ -167,6 +167,7 @@ export function ProfileTable({
                 </div>
                 <div className="flex min-w-0 items-center gap-1.5 text-xs text-fg-3">
                   <Badge className="h-4 px-1 text-[11px]">{proxyType(profile)}</Badge>
+                  {profile.proxy_connection_mode === "relay" && <Badge className="h-4 max-w-32 truncate px-1 text-[11px]" title={profile.relay_name ?? "中转服务器"}>中转 · {profile.relay_name ?? "已选择"}</Badge>}
                   <MapPin className="h-3 w-3 shrink-0" aria-hidden />
                   <span className="truncate" title={locationText(profile)}>
                     {locationText(profile)}

@@ -139,6 +139,7 @@ export function ProfileDrawer({
             items={[
               { label: "出口", value: <span className="break-all font-mono text-xs">{proxyHost(profile)}</span> },
               { label: "代理类型", value: proxyType(profile) },
+              { label: "连接方式", value: profile.proxy_connection_mode === "relay" ? `经中转 · ${profile.relay_name ?? "已选择"}` : "直接连接" },
               { label: "出口地区", value: locationText(profile) },
               {
                 label: "时区 / 语言",

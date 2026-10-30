@@ -41,6 +41,8 @@ export interface Profile {
   device_profile: string | null;
   fingerprint_seed: number;
   proxy: string | null;
+  proxy_connection_mode?: "direct" | "relay";
+  relay_id?: string | null;
   timezone: string | null;
   locale: string | null;
   platform: string;
@@ -142,6 +144,8 @@ export interface ProfileCreateData {
   device_profile?: string | null;
   fingerprint_seed?: number | null;
   proxy?: string | null;
+  proxy_connection_mode?: "direct" | "relay";
+  relay_id?: string | null;
   timezone?: string | null;
   locale?: string | null;
   platform?: string;

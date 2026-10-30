@@ -25,7 +25,7 @@ export const editorKeys = {
 export const editorApi = {
   proxyPresets: () => request<ProxyPreset[]>("/api/proxy-presets"),
   // The backend dials out through the proxy and asks several IP services.
-  testProxy: (proxy: string | null) => request<ProxyTestResult>("/api/proxy/test", { method: "POST", body: { proxy }, timeoutMs: 60_000 }),
+  testProxy: (proxy: string | null, route?: { proxy_connection_mode: "relay"; relay_id?: string | null }) => request<ProxyTestResult>("/api/proxy/test", { method: "POST", body: { proxy, ...route }, timeoutMs: 60_000 }),
   mergeCookies: (text: string, existing: string | null, domain: string | null) =>
     request<CookieMergeResult>("/api/cookies/merge", { method: "POST", body: { text, existing, domain } }),
   pullCookies: (id: string) => request<CookiePullResult>(`/api/profiles/${enc(id)}/cookies/pull`, { method: "POST", timeoutMs: 30_000 }),

@@ -60,6 +60,30 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+it("persists a relay per environment and compares both paths using the same final SOCKS5", async () => {
+  const relay = { id: "relay-us", name: "美国中转", proxy: "trojan://secret@relay.example:443", created_at: "2026-10-30", updated_at: "2026-10-30" };
+  const { fetchMock } = await openEditor("/profiles/new", "macos", null, [
+    { path: "/api/relay-nodes", respond: [relay] },
+    { method: "POST", path: "/api/proxy/test", respond: { ok: true, ip: "203.0.113.99", elapsed_ms: 123, country: "US" } },
+  ]);
+  setName("独立 SOCKS5 环境");
+  fireEvent.click(radio("代理方式", "自定义代理"));
+  fireEvent.change(screen.getByLabelText("代理类型"), { target: { value: "socks5" } });
+  fireEvent.change(screen.getByPlaceholderText("192.168.100.1"), { target: { value: "exit.example" } });
+  fireEvent.change(screen.getByPlaceholderText("1090"), { target: { value: "1080" } });
+  fireEvent.change(screen.getByLabelText("SOCKS5 连接方式"), { target: { value: "relay" } });
+  await screen.findByRole("option", { name: "美国中转" });
+  fireEvent.change(screen.getByLabelText("中转服务器"), { target: { value: "relay-us" } });
+  fireEvent.click(screen.getByRole("button", { name: "对比直连与中转" }));
+  await screen.findByText(/检测耗时包含出口信息查询/);
+  const calls = fetchMock.mock.calls.filter(([url]) => String(url) === "/api/proxy/test").map(([, init]) => JSON.parse(String(init?.body)));
+  expect(calls).toEqual([{ proxy: "socks5://exit.example:1080" }, { proxy: "socks5://exit.example:1080", proxy_connection_mode: "relay", relay_id: "relay-us" }]);
+  const payload = await create(fetchMock);
+  expect(payload.proxy).toBe("socks5://exit.example:1080");
+  expect(payload.proxy_connection_mode).toBe("relay");
+  expect(payload.relay_id).toBe("relay-us");
+});
+
 describe("proxy mode", () => {
   it("creates a direct profile without a proxy value", async () => {
     const { fetchMock } = await openEditor("/profiles/new", "windows");

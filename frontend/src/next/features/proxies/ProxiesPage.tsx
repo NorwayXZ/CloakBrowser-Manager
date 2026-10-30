@@ -30,6 +30,8 @@ import {
 import { editorApi, editorKeys, useProxyPresets } from "../editor/api";
 import { IpQualityPanel } from "../editor/sections/ProxySection";
 import type { ProxyPreset, ProxyTestResult } from "../editor/types";
+import { RelayNodesPanel } from "./RelayNodesPanel";
+import { RelayRouteFields } from "./RelayRouteFields";
 import { formatDateTime } from "../profiles/format";
 import { buildDirectProxyUrl, isDirectProxyMode, LINK_PROXY_MODES, parseProxyBatchLine, type ProxyMode } from "./proxyInput";
 
@@ -57,6 +59,14 @@ function message(error: unknown) {
 }
 
 export function ProxiesPage() {
+  const [tab, setTab] = useState("proxies");
+  return <div className="p-4"><Tabs label="代理分类" value={tab} onValueChange={setTab} tabs={[
+    { value: "proxies", label: "出口代理", content: <ExitProxiesPage /> },
+    { value: "relays", label: "中转服务器", content: <RelayNodesPanel /> },
+  ]} /></div>;
+}
+
+function ExitProxiesPage() {
   const presets = useProxyPresets();
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -347,6 +357,8 @@ function BatchForm() {
 }
 
 function TestDialog({ preset, onClose }: { preset: SavedPreset; onClose: () => void }) {
+  const [routeMode, setRouteMode] = useState<"direct" | "relay">("direct");
+  const [relayId, setRelayId] = useState<string | null>(null);
   const [result, setResult] = useState<ProxyTestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
@@ -356,7 +368,7 @@ function TestDialog({ preset, onClose }: { preset: SavedPreset; onClose: () => v
     setError(null);
     setResult(null);
     try {
-      setResult(await editorApi.testProxy(preset.proxy));
+      setResult(await editorApi.testProxy(preset.proxy, routeMode === "relay" ? { proxy_connection_mode: "relay", relay_id: relayId } : undefined));
     } catch (err) {
       setError(message(err));
     } finally {
@@ -379,6 +391,7 @@ function TestDialog({ preset, onClose }: { preset: SavedPreset; onClose: () => v
         </>
       }
     >
+      <fieldset disabled={running}><RelayRouteFields mode={routeMode} relayId={relayId} isSocks={preset.proxy.startsWith("socks5://")} onMode={value => { setRouteMode(value); setResult(null); }} onRelay={value => { setRelayId(value); setResult(null); }} /></fieldset>
       <div className="flex flex-col gap-3">
         <p className="break-all font-mono text-xs text-fg-2">{maskProxy(preset.proxy)}</p>
         {error && <Banner tone="danger" title="连不通">{error}</Banner>}

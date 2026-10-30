@@ -19,6 +19,7 @@ import secrets
 import subprocess
 import shutil
 import time
+import sqlite3
 import uuid
 from datetime import datetime
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -74,6 +75,7 @@ from .rfb import _RFB_MSG_SIZE, _build_server_cut_text, _filter_rfb_client_messa
 from .updater import UpdateError, update_from_git
 from .xray_runtime import is_xray_link, start_xray_proxy
 from .models import (
+    RelayNodeCreate, RelayNodeResponse,
     ApplyDeviceTemplateRequest,
     AuthAccountUpdate,
     AutoBackupSettingsModel,
@@ -674,7 +676,10 @@ async def create_profile(req: ProfileCreate):
         data["tags"] = [t.model_dump() if hasattr(t, "model_dump") else t for t in tags]
     else:
         data["tags"] = []
-    return _profile_response(db.create_profile(**data))
+    try:
+        return _profile_response(db.create_profile(**data))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.post("/api/profiles/disposable", response_model=ProfileResponse, status_code=201)
@@ -803,7 +808,10 @@ async def update_profile(profile_id: str, req: ProfileUpdate):
     tags = data.pop("tags", None)
     if tags is not None:
         data["tags"] = [t.model_dump() if hasattr(t, "model_dump") else t for t in tags]
-    profile = db.update_profile(profile_id, **data)
+    try:
+        profile = db.update_profile(profile_id, **data)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not profile or profile.get("deleted_at"):
         raise HTTPException(status_code=404, detail="Profile not found")
     return _profile_response(profile)
@@ -1031,6 +1039,51 @@ async def delete_group(group_id: str):
 @app.get("/api/proxy-presets", response_model=list[ProxyPresetResponse])
 async def list_proxy_presets():
     return [ProxyPresetResponse(**preset) for preset in db.list_proxy_presets()]
+
+
+@app.get("/api/relay-nodes", response_model=list[RelayNodeResponse])
+async def list_relay_nodes():
+    return db.list_relay_nodes()
+
+
+@app.post("/api/relay-nodes", response_model=RelayNodeResponse, status_code=201)
+async def create_relay_node(req: RelayNodeCreate):
+    try:
+        return db.create_relay_node(req.name.strip(), req.proxy.strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.put("/api/relay-nodes/{relay_id}", response_model=RelayNodeResponse)
+async def update_relay_node(relay_id: str, req: RelayNodeCreate):
+    try:
+        item = db.update_relay_node(relay_id, req.name.strip(), req.proxy.strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(status_code=400, detail="中转服务器名称已存在") from exc
+    if item is None:
+        raise HTTPException(status_code=404, detail="中转服务器不存在")
+    return item
+
+
+@app.delete("/api/relay-nodes/{relay_id}")
+async def delete_relay_node(relay_id: str):
+    try:
+        deleted = db.delete_relay_node(relay_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail="中转服务器不存在")
+    return {"ok": True}
+
+
+@app.post("/api/relay-nodes/{relay_id}/test", response_model=ProxyTestResponse)
+async def test_relay_node(relay_id: str):
+    item = db.get_relay_node(relay_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="中转服务器不存在")
+    return await test_proxy(ProxyTestRequest(proxy=item["proxy"]))
 
 
 def _normalize_proxy_preset(raw_proxy: str, mode: str) -> str:
@@ -2051,7 +2104,7 @@ async def _evo_run_check(profile: dict) -> evolution.CheckOutcome:
 
 
 _CLONE_COPY_FIELDS = (
-    "browser_engine", "device_profile", "fingerprint_seed", "proxy", "timezone", "locale",
+    "browser_engine", "device_profile", "fingerprint_seed", "proxy", "proxy_connection_mode", "relay_id", "timezone", "locale",
     "platform", "user_agent", "screen_width", "screen_height", "gpu_vendor", "gpu_renderer",
     "hardware_concurrency", "device_memory", "humanize", "human_preset", "headless", "geoip",
     "clipboard_sync", "color_scheme", "group_name", "account_platform",
@@ -2066,6 +2119,7 @@ def _evo_make_clone(source: dict) -> dict:
     """A disposable twin of the source profile — same seed, same persona —
     so a clone experiment isolates the one knob being tested."""
     fields = {key: source.get(key) for key in _CLONE_COPY_FIELDS}
+    fields["proxy_connection_mode"] = source.get("proxy_connection_mode", "direct")
     fields["name"] = f"{source.get('name') or '画像'} · 进化实验"
     fields["disposable"] = 1
     fields["startup_urls"] = []
@@ -2973,6 +3027,7 @@ PROXY_TEST_SECONDS = 30.0
 
 @app.post("/api/proxy/test", response_model=ProxyTestResponse)
 async def test_proxy(req: ProxyTestRequest):
+    started_at = time.monotonic()
     raw_proxy = (req.proxy or "").strip()
     proxy = None
     if raw_proxy:
@@ -2982,12 +3037,22 @@ async def test_proxy(req: ProxyTestRequest):
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=f"代理格式无效：{exc}") from exc
 
+    try:
+        relay = db.validate_profile_route(proxy, req.proxy_connection_mode, req.relay_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     xray_process = None
     proxy_bridge = None
     effective_proxy = proxy
     test_dir = db.DATA_DIR / "proxy-tests" / secrets.token_hex(8)
     try:
-        if is_xray_link(proxy):
+        if relay:
+            xray_process = await start_xray_proxy(
+                proxy, user_data_dir=test_dir, data_dir=browser_mgr.runtime.data_dir,
+                relay_link=relay["proxy"],
+            )
+            effective_proxy = xray_process.browser_proxy
+        elif is_xray_link(proxy):
             xray_process = await start_xray_proxy(
                 proxy,
                 user_data_dir=test_dir,
@@ -3008,6 +3073,10 @@ async def test_proxy(req: ProxyTestRequest):
                 raise HTTPException(status_code=400, detail=f"代理不可用：{probe.message}")
         data = await asyncio.wait_for(fetch_proxy_geo(effective_proxy), PROXY_TEST_SECONDS)
         data["connection_mode"] = "proxy" if effective_proxy else "direct"
+        data["proxy_connection_mode"] = req.proxy_connection_mode
+        data["relay_name"] = relay["name"] if relay else None
+        data["elapsed_ms"] = round((time.monotonic() - started_at) * 1000)
+        data["handshake_ms"] = round(probe.seconds * 1000) if probe_target else None
         try:
             data["ip_quality"] = await check_ip_quality(effective_proxy, data.get("ip"))
         except Exception as exc:  # the geo result stands without it

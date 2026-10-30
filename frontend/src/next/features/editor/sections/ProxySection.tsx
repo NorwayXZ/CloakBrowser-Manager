@@ -1,5 +1,5 @@
 import { Globe, Wifi } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "../../../shared/lib/cn";
 import { maskProxy } from "../../../shared/lib/mask";
 import { Banner, Button, Checkbox, FormField, Hint, Input, Section, Segmented, Select, Textarea } from "../../../ui";
@@ -7,6 +7,8 @@ import { editorApi } from "../api";
 import { BROWSER_LANGUAGES, type ProxyKind, type ProxyScheme } from "../model";
 import type { IpQuality, IpQualityStatus, ProxyPreset } from "../types";
 import type { Editor } from "../useEditor";
+import type { ProxyTestResult } from "../types";
+import { RelayRouteFields } from "../../proxies/RelayRouteFields";
 
 const IP_QUALITY: Record<IpQualityStatus, { label: string; box: string }> = {
   flagged: { label: "已被标记", box: "border-danger/30 bg-danger-soft" },
@@ -45,6 +47,8 @@ export function IpQualityPanel({ quality }: { quality: IpQuality }) {
 export function ProxySection({ editor, presets }: { editor: Editor; presets: ProxyPreset[] }) {
   const { form, proxyParts, proxyTest, proxyTestError } = editor;
   const [testing, setTesting] = useState(false);
+  const [comparisons, setComparisons] = useState<{ name: string; result?: ProxyTestResult; error?: string }[]>([]);
+  useEffect(() => setComparisons([]), [form.proxy, form.proxy_connection_mode, form.relay_id]);
   const needsAddress = proxyParts.kind !== "none" && !form.proxy;
 
   const check = async () => {
@@ -54,7 +58,7 @@ export function ProxySection({ editor, presets }: { editor: Editor; presets: Pro
     }
     setTesting(true);
     try {
-      editor.proxyChecked(await editorApi.testProxy(form.proxy ?? null));
+      editor.proxyChecked(await editorApi.testProxy(form.proxy ?? null, form.proxy_connection_mode === "relay" ? { proxy_connection_mode: "relay", relay_id: form.relay_id } : undefined));
     } catch (error) {
       editor.proxyCheckFailed(error instanceof Error ? error.message : "代理测试失败");
     } finally {
@@ -62,9 +66,23 @@ export function ProxySection({ editor, presets }: { editor: Editor; presets: Pro
     }
   };
 
+  const compare = async () => {
+    if (!form.proxy || !form.relay_id) { editor.proxyCheckFailed("请先选择 SOCKS5 和中转服务器"); return; }
+    setTesting(true); setComparisons([]);
+    try {
+      const results = await Promise.allSettled([
+        editorApi.testProxy(form.proxy),
+        editorApi.testProxy(form.proxy, { proxy_connection_mode: "relay", relay_id: form.relay_id }),
+      ]);
+      setComparisons(results.map((item, i) => ({ name: i === 0 ? "直接连接 SOCKS5" : "通过中转服务器",
+        ...(item.status === "fulfilled" ? { result: item.value } : { error: item.reason instanceof Error ? item.reason.message : String(item.reason) }),
+      })));
+    } finally { setTesting(false); }
+  };
+
   return (
     <Section id="form-proxy" title="代理信息" description="直连使用这台电脑的网络，不启动代理或 Xray。HTTP / HTTPS / SOCKS5 填主机和端口；VLESS、VMess、Trojan、Shadowsocks 粘贴链接。">
-      <div className="grid max-w-form grid-cols-1 gap-4 md:grid-cols-2">
+      <fieldset disabled={testing} className="m-0 grid max-w-form grid-cols-1 gap-4 border-0 p-0 md:grid-cols-2">
         <FormField label="代理方式" className="md:col-span-2" description="自定义代理适合 HTTP/HTTPS/SOCKS5；Xray 链接会在本机启动内核，转成一个本机 SOCKS5。">
           <Segmented<ProxyKind>
             label="代理方式"
@@ -130,15 +148,23 @@ export function ProxySection({ editor, presets }: { editor: Editor; presets: Pro
           </>
         )}
 
+        <RelayRouteFields mode={form.proxy_connection_mode ?? "direct"} relayId={form.relay_id}
+          isSocks={proxyParts.kind === "custom" && proxyParts.scheme === "socks5"}
+          onMode={mode => { editor.setRouteMode(mode); setComparisons([]); }} onRelay={id => { editor.setRelay(id); setComparisons([]); }} />
         <div className="flex flex-col gap-2 md:col-span-2">
           <span className="text-sm font-medium text-fg">出口检测</span>
           <div className="flex flex-wrap items-center gap-2">
             <Button icon={<Wifi className="h-3.5 w-3.5" />} loading={testing} disabled={needsAddress} onClick={() => void check()}>
               {proxyParts.kind === "none" ? "检查直连出口" : "检查代理"}
             </Button>
+            {form.proxy_connection_mode === "relay" && <Button variant="secondary" loading={testing} disabled={needsAddress || !form.relay_id} onClick={() => void compare()}>对比直连与中转</Button>}
             <span className="min-w-0 break-all font-mono text-xs text-fg-3">{form.proxy ? maskProxy(form.proxy) : "用这台电脑的网络检测公网 IP、国家、时区和语言"}</span>
           </div>
           <p className="text-xs text-fg-3">保存前可以先查一次；启动时还会重新检测。时区、语言留空时会自动补全，开启“跟随出口 IP”时会覆盖手填的值。</p>
+          {comparisons.length > 0 && <div className="grid gap-3 sm:grid-cols-2">{comparisons.map(row => <div key={row.name} className="rounded-md border border-border p-3 text-sm">
+            <div className="font-medium">{row.name}</div>
+            {row.error ? <p className="mt-1 text-danger">{row.error}</p> : <p className="mt-1">出口 {row.result?.ip ?? "未知"}<br />链路握手 {row.result?.handshake_ms ?? "未知"} ms · 检测耗时 {row.result?.elapsed_ms ?? "未知"} ms</p>}
+          </div>)}<p className="text-xs text-fg-2 sm:col-span-2">检测耗时包含出口信息查询，不等于网页加载速度或下载带宽；最终效果以实际访问为准。</p></div>}
           {proxyTestError && <Banner tone="danger">{proxyTestError}</Banner>}
           {proxyTest && (
             <div className="rounded-md border border-success/30 bg-success-soft p-3 text-sm text-fg">
@@ -147,6 +173,9 @@ export function ProxySection({ editor, presets }: { editor: Editor; presets: Pro
                   出口 IP：<span className="font-mono">{proxyTest.ip ?? "未知"}</span>
                 </span>
                 <span>国家：{proxyTest.country ?? "未知"}</span>
+                {proxyTest.relay_name && <span>经中转：{proxyTest.relay_name}</span>}
+                {proxyTest.elapsed_ms != null && <span>检测耗时：{proxyTest.elapsed_ms} ms</span>}
+                {proxyTest.handshake_ms != null && <span>链路握手：{proxyTest.handshake_ms} ms</span>}
                 <span>时区：{proxyTest.timezone ?? "未知"}</span>
                 <span>建议语言：{proxyTest.suggested_locale ?? "未知"}</span>
               </div>
@@ -189,7 +218,7 @@ export function ProxySection({ editor, presets }: { editor: Editor; presets: Pro
             ))}
           </Select>
         </FormField>
-      </div>
+      </fieldset>
     </Section>
   );
 }
