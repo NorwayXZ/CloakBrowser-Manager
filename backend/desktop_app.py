@@ -205,19 +205,21 @@ def panel_url(environ: Mapping[str, str] | None = None) -> str:
 
 
 # The panel's page background in each theme (design/tokens.css, --c-canvas).
-PANEL_CANVAS = {"light": (246, 247, 250), "dark": (14, 17, 24)}
+PANEL_CANVAS = {"light": (245, 245, 247), "dark": (28, 28, 30)}
 
 
-def panel_look(theme: str | None) -> tuple[tuple[int, int, int] | None, str | None]:
+def panel_look(theme: str | None, resolved: str | None = None) -> tuple[tuple[int, int, int] | None, str | None]:
     """(window background RGB, native appearance) matching the panel's theme.
 
     An explicit "light" or "dark" fixes both, so the window and its title bar do
-    not flash the other colour before the page paints. "system" returns None
-    for both: the window then follows the operating system, as the panel does.
+    not flash the other colour before the page paints. "system" leaves the
+    appearance to the operating system, as the panel does; the background then
+    follows `resolved` (the theme the panel is actually showing, which only the
+    panel knows) and stays unset until the panel has said.
     """
-    if theme in PANEL_CANVAS:
-        return PANEL_CANVAS[theme], theme
-    return None, None
+    appearance = theme if theme in PANEL_CANVAS else None
+    shown = appearance or (resolved if resolved in PANEL_CANVAS else None)
+    return (PANEL_CANVAS[shown] if shown else None), appearance
 
 
 def saved_panel_theme(url: str, timeout: float = 0.5) -> str:

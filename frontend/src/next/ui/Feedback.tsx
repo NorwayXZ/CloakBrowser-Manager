@@ -16,7 +16,7 @@ const BADGE_TONES: Record<Tone, string> = {
 
 export function Badge({ tone = "neutral", children, className }: { tone?: Tone; children: ReactNode; className?: string }) {
   return (
-    <span className={cn("inline-flex h-5 items-center gap-1 whitespace-nowrap rounded-sm px-1.5 text-xs font-medium", BADGE_TONES[tone], className)}>
+    <span className={cn("inline-flex h-5 items-center gap-1 whitespace-nowrap rounded-full px-2 text-xs font-medium", BADGE_TONES[tone], className)}>
       {children}
     </span>
   );
@@ -27,7 +27,7 @@ export type Status = "running" | "stopped" | "busy" | "error";
 const STATUS: Record<Status, { dot: string; text: string }> = {
   running: { dot: "bg-success", text: "text-success" },
   stopped: { dot: "bg-fg-3", text: "text-fg-2" },
-  busy: { dot: "bg-accent animate-[cbm-pulse_1.2s_ease-in-out_infinite]", text: "text-accent" },
+  busy: { dot: "bg-accent-fill animate-[cbm-pulse_1.2s_ease-in-out_infinite]", text: "text-accent" },
   error: { dot: "bg-danger", text: "text-danger" },
 };
 
@@ -57,7 +57,7 @@ export function ProgressBar({ value, label }: { value: number | null; label: str
       className="h-1.5 w-full overflow-hidden rounded-full bg-surface-2"
     >
       <div
-        className={cn("h-full rounded-full bg-accent transition-[width] duration-base", pct === null && "w-1/3 animate-[cbm-pulse_1.2s_ease-in-out_infinite]")}
+        className={cn("h-full rounded-full bg-accent-fill transition-[width] duration-base", pct === null && "w-1/3 animate-[cbm-pulse_1.2s_ease-in-out_infinite]")}
         style={pct === null ? undefined : { width: `${pct}%` }}
       />
     </div>

@@ -25,12 +25,12 @@ export function Sidebar({
     <aside
       aria-label="主导航"
       className={cn(
-        "flex h-full shrink-0 flex-col border-r border-border bg-surface transition-[width] duration-base",
+        "flex h-full shrink-0 flex-col border-r border-border bg-sidebar transition-[width] duration-base",
         collapsed ? "w-sidebar-collapsed" : "w-sidebar",
       )}
     >
-      <div className={cn("flex h-toolbar shrink-0 items-center gap-2.5 border-b border-border", collapsed ? "justify-center px-0" : "px-4")}>
-        <div aria-hidden className="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-accent text-sm font-semibold text-accent-on">
+      <div className={cn("flex h-toolbar shrink-0 items-center gap-2.5", collapsed ? "justify-center px-0" : "px-4")}>
+        <div aria-hidden className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px] bg-gradient-to-b from-accent-fill to-accent-fill-hover text-sm font-semibold text-accent-on shadow-raised">
           C
         </div>
         {!collapsed && (
@@ -67,12 +67,12 @@ export function Sidebar({
                 // A plain string, not NavLink's function form: the tooltip's Slot would
                 // stringify a function. NavLink sets aria-current on the active link.
                 className={cn(
-                  "flex h-8 items-center gap-2.5 rounded text-sm text-fg-2 transition-colors duration-fast hover:bg-surface-2 hover:text-fg",
-                  "aria-[current=page]:bg-accent-soft aria-[current=page]:font-medium aria-[current=page]:text-accent",
+                  "group flex h-8 items-center gap-2.5 rounded text-sm text-fg transition-colors duration-fast hover:bg-fg/5",
+                  "aria-[current=page]:bg-fg/10 aria-[current=page]:font-medium",
                   collapsed ? "justify-center" : "px-2.5",
                 )}
               >
-                <item.icon className="h-4 w-4 shrink-0" aria-hidden />
+                <item.icon className="h-[18px] w-[18px] shrink-0 text-accent" aria-hidden />
                 {!collapsed && <span className="flex-1 truncate">{item.label}</span>}
                 {!collapsed && <span className="text-xs text-fg-3">{formatShortcut(`mod+${item.key}`)}</span>}
               </NavLink>
@@ -92,7 +92,7 @@ export function Sidebar({
         </ul>
       </nav>
 
-      <div className={cn("flex shrink-0 items-center gap-2 border-t border-border py-2", collapsed ? "flex-col px-2" : "px-3")}>
+      <div className={cn("flex shrink-0 items-center gap-2 py-2.5", collapsed ? "flex-col px-2" : "px-4")}>
         {!collapsed && (
           <div className="min-w-0 flex-1 text-xs leading-4 text-fg-3" aria-label="版本信息">
             <div className="truncate">Manager {appVersion}</div>

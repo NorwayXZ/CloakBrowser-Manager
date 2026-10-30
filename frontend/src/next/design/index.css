@@ -14,6 +14,7 @@
 
   body {
     margin: 0;
+    letter-spacing: -0.003em;
     background: rgb(var(--c-canvas));
     color: rgb(var(--c-fg));
     font-family: var(--font-sans);
@@ -32,14 +33,19 @@
     background: rgb(var(--c-accent) / 0.25);
   }
 
+  /* Thin, translucent scrollbars like macOS overlay scrollbars. */
   ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 12px;
+    height: 12px;
   }
   ::-webkit-scrollbar-thumb {
-    background: rgb(var(--c-border-strong));
+    background: rgb(var(--c-fg) / 0.28);
     border: 3px solid transparent;
     border-radius: 999px;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--c-fg) / 0.45);
     background-clip: padding-box;
   }
   ::-webkit-scrollbar-track {
@@ -80,6 +86,6 @@
 @keyframes cbm-pop-in {
   from {
     opacity: 0;
-    transform: translateY(4px) scale(0.98);
+    transform: translateY(6px) scale(0.97);
   }
 }

@@ -13,8 +13,8 @@ export function PageHeader({
   return (
     <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
       <div className="min-w-0">
-        <h1 className="text-lg font-semibold text-fg">{title}</h1>
-        {description && <p className="mt-0.5 text-sm text-fg-2">{description}</p>}
+        <h1 className="text-xl font-bold tracking-tight text-fg">{title}</h1>
+        {description && <p className="mt-1 text-sm text-fg-2">{description}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
@@ -22,7 +22,7 @@ export function PageHeader({
 }
 
 export function Card({ children, className, padded = true }: { children: ReactNode; className?: string; padded?: boolean }) {
-  return <div className={cn("min-w-0 rounded-md border border-border bg-surface", padded && "p-4", className)}>{children}</div>;
+  return <div className={cn("min-w-0 rounded-md border border-border bg-surface shadow-raised", padded && "p-4", className)}>{children}</div>;
 }
 
 /** A titled block inside a page: settings groups, form sections. */
@@ -43,17 +43,17 @@ export function Section({
 }) {
   const headingId = id ? `${id}-title` : undefined;
   return (
-    <section id={id} aria-labelledby={headingId} className={cn("min-w-0 rounded-md border border-border bg-surface", className)}>
-      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-3">
+    <section id={id} aria-labelledby={headingId} className={cn("min-w-0 rounded-md border border-border bg-surface shadow-raised", className)}>
+      <header className="flex flex-wrap items-start justify-between gap-3 px-5 pb-1 pt-4">
         <div className="min-w-0">
-          <h2 id={headingId} className="text-base font-semibold text-fg">
+          <h2 id={headingId} className="text-md font-semibold tracking-tight text-fg">
             {title}
           </h2>
           {description && <p className="mt-0.5 text-sm text-fg-2">{description}</p>}
         </div>
         {actions && <div className="flex items-center gap-2">{actions}</div>}
       </header>
-      <div className="p-4">{children}</div>
+      <div className="px-5 pb-5 pt-3">{children}</div>
     </section>
   );
 }

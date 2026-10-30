@@ -129,6 +129,9 @@ class PanelWindowController(NSObject):
             rect, style, NSBackingStoreBuffered, False
         )
         window.setTitle_(WINDOW_TITLE)
+        # The title bar takes the window's background colour, so it reads as part
+        # of the panel (as in Apple's own apps) instead of a separate gray strip.
+        window.setTitlebarAppearsTransparent_(True)
         window.setReleasedWhenClosed_(False)  # closing only hides; Dock click brings it back
         window.setContentMinSize_(MIN_SIZE)
         window.center()
@@ -147,9 +150,9 @@ class PanelWindowController(NSObject):
         self._apply_look(saved_panel_theme(self.url))
 
     @objc.python_method
-    def _apply_look(self, theme):
+    def _apply_look(self, theme, resolved=None):
         """Window background and appearance matching the panel's theme preference."""
-        rgb, appearance = panel_look(theme)
+        rgb, appearance = panel_look(theme, resolved)
         if appearance is None:
             self.window.setAppearance_(None)  # follow the system, as the panel does
         else:
@@ -166,8 +169,9 @@ class PanelWindowController(NSObject):
     def userContentController_didReceiveScriptMessage_(self, _controller, message):
         body = message.body()
         theme = body.get("theme") if hasattr(body, "get") else None
+        resolved = body.get("resolved") if hasattr(body, "get") else None
         if theme is not None:
-            self._apply_look(str(theme))
+            self._apply_look(str(theme), str(resolved) if resolved is not None else None)
 
     @objc.python_method
     def show(self):

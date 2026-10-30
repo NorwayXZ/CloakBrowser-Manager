@@ -1,41 +1,54 @@
 /*
- * Design tokens of the redesigned panel. Colors are RGB channels so Tailwind
- * can add alpha (bg-accent/10). Light values on :root, dark values under
- * [data-theme="dark"]; ThemeProvider always sets data-theme to the resolved
- * theme, so no rule needs prefers-color-scheme. tokens.test.ts checks the
- * text/background pairs below for WCAG contrast in both themes.
+ * Design tokens of the panel, in Apple's visual language: the system font,
+ * Apple's system colors (blue, green, orange, red), hairline separators,
+ * grouped white cards on a light gray canvas, a gray sidebar, and the dark
+ * appearance's elevated dark grays.
+ *
+ * Colors are RGB channels so Tailwind can add alpha (bg-accent/10). Light
+ * values on :root, dark values under [data-theme="dark"]; ThemeProvider always
+ * sets data-theme to the resolved theme, so no rule needs prefers-color-scheme.
+ * tokens.test.ts checks the text/background pairs below for WCAG contrast in
+ * both themes.
+ *
+ * Apple's own blue is too light to be both a text color and a button fill in
+ * the dark appearance, so there are two: --c-accent for text, icons and focus,
+ * --c-accent-fill for solid buttons, checked boxes and selected menu rows.
  */
 :root {
-  --c-canvas: 246 247 250;        /* #F6F7FA page background */
-  --c-surface: 255 255 255;       /* #FFFFFF cards, sidebar, toolbar */
-  --c-surface-2: 241 243 248;     /* #F1F3F8 hover, sunken fields */
-  --c-surface-3: 231 234 241;     /* #E7EAF1 pressed */
-  --c-border: 227 230 238;        /* #E3E6EE */
-  --c-border-strong: 133 141 161; /* #858DA1 input outlines, 3:1 on surface and canvas */
-  --c-fg: 21 27 44;               /* #151B2C body text */
-  --c-fg-2: 74 84 112;            /* #4A5470 secondary text */
-  --c-fg-3: 103 112 138;          /* #67708A captions, placeholders */
-  --c-accent: 53 84 240;          /* #3554F0 */
-  --c-accent-hover: 42 69 209;    /* #2A45D1 */
-  --c-accent-soft: 235 239 255;   /* #EBEFFF */
+  --c-canvas: 245 245 247;        /* #F5F5F7 page background */
+  --c-surface: 255 255 255;       /* #FFFFFF cards, toolbar, fields */
+  --c-surface-2: 242 242 247;     /* #F2F2F7 hover, sunken fields */
+  --c-surface-3: 229 229 234;     /* #E5E5EA pressed, segmented track */
+  --c-sidebar: 236 236 241;       /* #ECECF1 sidebar */
+  --c-border: 222 222 227;        /* #DEDEE3 hairlines */
+  --c-border-strong: 134 134 139; /* #86868B field outlines, 3:1 on surface and canvas */
+  --c-fg: 29 29 31;               /* #1D1D1F body text */
+  --c-fg-2: 85 85 90;             /* #55555A secondary text */
+  --c-fg-3: 110 110 115;          /* #6E6E73 captions, placeholders */
+  --c-accent: 0 102 204;          /* #0066CC Apple's link blue: 4.5:1 as text on canvas */
+  --c-accent-hover: 0 85 170;     /* #0055AA */
+  --c-accent-fill: 0 113 227;     /* #0071E3 */
+  --c-accent-fill-hover: 0 102 204; /* #0066CC */
+  --c-accent-soft: 232 242 253;   /* #E8F2FD */
   --c-on-accent: 255 255 255;
-  --c-success: 17 122 84;         /* #117A54 */
-  --c-success-soft: 227 244 236;  /* #E3F4EC */
-  --c-warning: 146 87 0;          /* #925700 */
-  --c-warning-soft: 251 240 220;  /* #FBF0DC */
-  --c-danger: 196 44 60;          /* #C42C3C */
-  --c-danger-hover: 168 34 49;    /* #A82231 */
-  --c-danger-soft: 251 231 233;   /* #FBE7E9 */
+  --c-switch-on: 52 199 89;       /* #34C759 Apple's green for switches */
+  --c-success: 30 125 55;         /* #1E7D37 */
+  --c-success-soft: 230 246 234;  /* #E6F6EA */
+  --c-warning: 168 80 0;          /* #A85000 */
+  --c-warning-soft: 255 243 224;  /* #FFF3E0 */
+  --c-danger: 215 0 21;           /* #D70015 */
+  --c-danger-hover: 179 0 18;     /* #B30012 */
+  --c-danger-soft: 255 236 237;   /* #FFECED */
   --c-on-danger: 255 255 255;
-  --c-info: 30 106 181;           /* #1E6AB5 */
-  --c-info-soft: 228 240 251;     /* #E4F0FB */
-  --c-backdrop: 15 20 33;
+  --c-info: 0 98 204;             /* #0062CC */
+  --c-info-soft: 230 241 252;     /* #E6F1FC */
+  --c-backdrop: 0 0 0;
 
-  --shadow-raised: 0 1px 2px rgb(21 27 44 / 0.06), 0 1px 3px rgb(21 27 44 / 0.08);
-  --shadow-popover: 0 4px 12px rgb(21 27 44 / 0.10), 0 1px 3px rgb(21 27 44 / 0.08);
-  --shadow-modal: 0 16px 48px rgb(21 27 44 / 0.18), 0 2px 6px rgb(21 27 44 / 0.08);
+  --shadow-raised: 0 0 0 0.5px rgb(0 0 0 / 0.04), 0 1px 2px rgb(0 0 0 / 0.05);
+  --shadow-popover: 0 8px 28px rgb(0 0 0 / 0.14), 0 0 0 0.5px rgb(0 0 0 / 0.1);
+  --shadow-modal: 0 24px 64px rgb(0 0 0 / 0.22), 0 0 0 0.5px rgb(0 0 0 / 0.12);
 
-  --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI",
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI",
     "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
   --font-mono: "SF Mono", ui-monospace, "Cascadia Mono", "Cascadia Code", Consolas, monospace;
 
@@ -43,34 +56,38 @@
 }
 
 :root[data-theme="dark"] {
-  --c-canvas: 14 17 24;           /* #0E1118 */
-  --c-surface: 22 26 36;          /* #161A24 */
-  --c-surface-2: 29 34 48;        /* #1D2230 */
-  --c-surface-3: 38 44 60;        /* #262C3C */
-  --c-border: 42 49 66;           /* #2A3142 */
-  --c-border-strong: 98 107 130;   /* #626B82 */
-  --c-fg: 232 235 243;            /* #E8EBF3 */
-  --c-fg-2: 169 177 197;          /* #A9B1C5 */
-  --c-fg-3: 128 137 160;          /* #8089A0 */
-  --c-accent: 123 143 255;        /* #7B8FFF */
-  --c-accent-hover: 149 165 255;  /* #95A5FF */
-  --c-accent-soft: 31 39 82;      /* #1F2752 */
-  --c-on-accent: 14 17 24;
-  --c-success: 70 201 143;        /* #46C98F */
-  --c-success-soft: 18 41 31;     /* #12291F */
-  --c-warning: 240 168 69;        /* #F0A845 */
-  --c-warning-soft: 45 34 15;     /* #2D220F */
-  --c-danger: 255 111 128;        /* #FF6F80 */
-  --c-danger-hover: 255 138 152;  /* #FF8A98 */
-  --c-danger-soft: 50 21 25;      /* #321519 */
-  --c-on-danger: 14 17 24;
-  --c-info: 90 169 240;           /* #5AA9F0 */
-  --c-info-soft: 16 35 58;        /* #10233A */
+  --c-canvas: 28 28 30;           /* #1C1C1E */
+  --c-surface: 44 44 46;          /* #2C2C2E */
+  --c-surface-2: 58 58 60;        /* #3A3A3C */
+  --c-surface-3: 72 72 74;        /* #48484A */
+  --c-sidebar: 36 36 38;          /* #242426 */
+  --c-border: 62 62 66;           /* #3E3E42 */
+  --c-border-strong: 130 130 136; /* #828288 */
+  --c-fg: 245 245 247;            /* #F5F5F7 */
+  --c-fg-2: 190 190 195;          /* #BEBEC3 */
+  --c-fg-3: 152 152 158;          /* #98989E */
+  --c-accent: 77 163 255;         /* #4DA3FF */
+  --c-accent-hover: 120 185 255;  /* #78B9FF */
+  --c-accent-fill: 10 111 234;    /* #0A6FEA */
+  --c-accent-fill-hover: 10 100 212; /* #0A64D4 */
+  --c-accent-soft: 12 38 74;      /* #0C264A */
+  --c-on-accent: 255 255 255;
+  --c-switch-on: 48 209 88;       /* #30D158 */
+  --c-success: 48 209 88;         /* #30D158 */
+  --c-success-soft: 16 48 28;     /* #10301C */
+  --c-warning: 255 159 10;        /* #FF9F0A */
+  --c-warning-soft: 56 38 8;      /* #382608 */
+  --c-danger: 255 105 97;         /* #FF6961 */
+  --c-danger-hover: 255 138 130;  /* #FF8A82 */
+  --c-danger-soft: 58 24 26;      /* #3A181A */
+  --c-on-danger: 28 28 30;
+  --c-info: 90 177 255;           /* #5AB1FF */
+  --c-info-soft: 14 36 62;        /* #0E243E */
   --c-backdrop: 0 0 0;
 
-  --shadow-raised: 0 1px 2px rgb(0 0 0 / 0.4);
-  --shadow-popover: 0 6px 16px rgb(0 0 0 / 0.45), 0 0 0 1px rgb(255 255 255 / 0.04);
-  --shadow-modal: 0 20px 56px rgb(0 0 0 / 0.55), 0 0 0 1px rgb(255 255 255 / 0.05);
+  --shadow-raised: 0 0 0 0.5px rgb(255 255 255 / 0.06), 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-popover: 0 10px 32px rgb(0 0 0 / 0.55), 0 0 0 0.5px rgb(255 255 255 / 0.1);
+  --shadow-modal: 0 28px 72px rgb(0 0 0 / 0.65), 0 0 0 0.5px rgb(255 255 255 / 0.12);
 
   color-scheme: dark;
 }
