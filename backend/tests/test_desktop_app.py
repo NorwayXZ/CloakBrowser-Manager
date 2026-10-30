@@ -291,9 +291,15 @@ def test_handle_existing_manager_outcomes():
 
 
 def test_panel_look_fixes_the_window_to_an_explicit_theme_and_follows_the_system_otherwise():
-    assert panel_look("dark") == ((14, 17, 24), "dark")
-    assert panel_look("light") == ((246, 247, 250), "light")
+    assert panel_look("dark") == ((28, 28, 30), "dark")
+    assert panel_look("light") == ((245, 245, 247), "light")
+    # An explicit choice wins over what the panel reports it is showing.
+    assert panel_look("dark", "light") == ((28, 28, 30), "dark")
     assert panel_look("system") == (None, None)
+    # "system" follows the system's appearance but takes the background from what the panel shows.
+    assert panel_look("system", "dark") == ((28, 28, 30), None)
+    assert panel_look("system", "light") == ((245, 245, 247), None)
+    assert panel_look("system", "sepia") == (None, None)
     assert panel_look(None) == (None, None)
     assert panel_look("sepia") == (None, None)
 

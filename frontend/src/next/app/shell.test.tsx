@@ -200,9 +200,9 @@ describe("theme", () => {
     try {
       mockFetch(shellRoutes());
       renderApp("/settings");
-      await waitFor(() => expect(postMessage).toHaveBeenCalledWith({ theme: "system" }));
+      await waitFor(() => expect(postMessage).toHaveBeenCalledWith({ theme: "system", resolved: "light" }));
       fireEvent.click(screen.getByRole("radio", { name: "深色" }));
-      await waitFor(() => expect(postMessage).toHaveBeenLastCalledWith({ theme: "dark" }));
+      await waitFor(() => expect(postMessage).toHaveBeenLastCalledWith({ theme: "dark", resolved: "dark" }));
       // A bridge that throws must not break the panel.
       postMessage.mockImplementation(() => {
         throw new Error("bridge gone");

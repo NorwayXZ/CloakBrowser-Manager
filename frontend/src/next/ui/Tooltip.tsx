@@ -22,7 +22,7 @@ export function Tooltip({
         <RadixTooltip.Content
           side={side}
           sideOffset={6}
-          className="z-50 flex max-w-xs items-center gap-2 rounded bg-fg px-2 py-1 text-xs text-canvas shadow-popover animate-[cbm-fade-in_120ms_ease-out]"
+          className="z-50 flex max-w-xs items-center gap-2 rounded-md bg-fg/90 px-2.5 py-1 text-xs text-canvas shadow-popover backdrop-blur-md animate-[cbm-fade-in_150ms_ease-out]"
         >
           {content}
           {shortcut && <Kbd tone="inverse">{shortcut}</Kbd>}

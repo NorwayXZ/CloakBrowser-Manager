@@ -51,9 +51,9 @@ declare global {
 }
 
 /** Tell the macOS app window which theme was chosen, so its own background and title bar match. */
-function reportThemeToWindow(theme: ThemePreference) {
+function reportThemeToWindow(theme: ThemePreference, resolved: ResolvedTheme) {
   try {
-    window.webkit?.messageHandlers?.cbmTheme?.postMessage({ theme });
+    window.webkit?.messageHandlers?.cbmTheme?.postMessage({ theme, resolved });
   } catch {
     // Not in the app window, or the bridge is gone: the panel works without it.
   }
@@ -147,7 +147,7 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
     writeCache({ theme, sidebar_collapsed: sidebarCollapsed });
   }, [theme, sidebarCollapsed]);
 
-  useEffect(() => reportThemeToWindow(theme), [theme]);
+  useEffect(() => reportThemeToWindow(theme, resolvedTheme), [theme, resolvedTheme]);
 
   const saving = mutation.isPending;
   const backendOutdated = query.isError && isApiError(query.error) && query.error.status === 404;

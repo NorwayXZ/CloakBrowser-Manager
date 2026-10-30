@@ -80,7 +80,7 @@ export function FormField({
 
 const control =
   "w-full min-w-0 rounded border border-border-strong bg-surface text-sm text-fg placeholder:text-fg-3 " +
-  "transition-colors duration-fast hover:border-fg-3 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25 " +
+  "transition-[border-color,box-shadow] duration-fast hover:border-fg-3 focus:border-accent focus:outline-none focus:ring-[3px] focus:ring-accent/25 " +
   "disabled:cursor-not-allowed disabled:bg-surface-2 disabled:text-fg-3 " +
   "aria-[invalid=true]:border-danger aria-[invalid=true]:focus:ring-danger/25";
 
@@ -154,14 +154,14 @@ export function Checkbox({
       aria-describedby={description ? `${boxId}-desc` : undefined}
       onCheckedChange={(value) => onCheckedChange(value === true)}
       className={cn(
-        "flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border border-border-strong bg-surface text-accent-on",
+        "flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] border border-border-strong bg-surface text-accent-on",
         "transition-colors duration-fast hover:border-fg-3 disabled:cursor-not-allowed disabled:opacity-50",
-        "data-[state=checked]:border-accent data-[state=checked]:bg-accent",
-        "data-[state=indeterminate]:border-accent data-[state=indeterminate]:bg-accent",
+        "data-[state=checked]:border-accent-fill data-[state=checked]:bg-accent-fill",
+        "data-[state=indeterminate]:border-accent-fill data-[state=indeterminate]:bg-accent-fill",
       )}
     >
       <RadixCheckbox.Indicator>
-        {checked === "indeterminate" ? <Minus className="h-3 w-3" strokeWidth={3} /> : <Check className="h-3 w-3" strokeWidth={3} />}
+        {checked === "indeterminate" ? <Minus className="h-3 w-3" strokeWidth={3} /> : <Check className="h-3 w-3" strokeWidth={3.5} />}
       </RadixCheckbox.Indicator>
     </RadixCheckbox.Root>
     </span>
@@ -218,7 +218,7 @@ export function Segmented<T extends string>({
     buttons?.[(index + delta + options.length) % options.length]?.focus();
   };
   return (
-    <div role="radiogroup" aria-label={label} className={cn("inline-flex max-w-full flex-wrap rounded border border-border-strong bg-surface-2 p-0.5", className)}>
+    <div role="radiogroup" aria-label={label} className={cn("inline-flex max-w-full flex-wrap gap-0.5 rounded-lg border border-border bg-surface-3/70 p-0.5", className)}>
       {options.map(([option, text]) => {
         const checked = value === option;
         return (
@@ -239,8 +239,8 @@ export function Segmented<T extends string>({
               }
             }}
             className={cn(
-              "h-7 rounded-sm px-3 text-sm transition-colors duration-fast",
-              checked ? "bg-surface font-medium text-accent shadow-raised" : "text-fg-2 hover:text-fg",
+              "h-7 rounded-[7px] px-3.5 text-sm transition-[background-color,color,box-shadow] duration-fast",
+              checked ? "bg-surface font-medium text-fg shadow-raised" : "text-fg-2 hover:text-fg",
             )}
           >
             {text}
@@ -301,11 +301,11 @@ export function Switch({
         onCheckedChange={onCheckedChange}
         aria-describedby={description ? `${id}-desc` : undefined}
         className={cn(
-          "relative mt-0.5 h-5 w-9 shrink-0 rounded-full bg-border-strong transition-colors duration-fast",
-          "data-[state=checked]:bg-accent disabled:cursor-not-allowed disabled:opacity-50",
+          "relative h-6 w-[42px] shrink-0 rounded-full bg-surface-3 ring-1 ring-inset ring-border-strong/60 transition-colors duration-base",
+          "data-[state=checked]:bg-switch-on data-[state=checked]:ring-0 disabled:cursor-not-allowed disabled:opacity-50",
         )}
       >
-        <RadixSwitch.Thumb className="block h-4 w-4 translate-x-0.5 rounded-full bg-surface shadow-raised transition-transform duration-fast data-[state=checked]:translate-x-[18px]" />
+        <RadixSwitch.Thumb className="block h-5 w-5 translate-x-0.5 rounded-full bg-white shadow-[0_2px_4px_rgb(0_0_0/0.28)] transition-transform duration-base data-[state=checked]:translate-x-[20px]" />
       </RadixSwitch.Root>
       </span>
     </div>

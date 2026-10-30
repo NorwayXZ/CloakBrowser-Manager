@@ -248,7 +248,7 @@ def run(base: str, work: Path) -> int:
 
     # ── The window looks right before the page has painted ────────────────
     check("window follows the saved dark theme before loading", appearance_name(window).endswith("DarkAqua"), appearance_name(window))
-    check("window background is the dark canvas", rgb_of(window.backgroundColor()) == (14, 17, 24), str(rgb_of(window.backgroundColor())))
+    check("window background is the dark canvas", rgb_of(window.backgroundColor()) == (28, 28, 30), str(rgb_of(window.backgroundColor())))
 
     # Behind every other window, without taking focus from whatever the user is doing.
     window.orderBack_(None)
@@ -286,13 +286,18 @@ def run(base: str, work: Path) -> int:
     panel.js("document.querySelector('input[name=theme][value=light]').click()")
     ok = wait_until(lambda: appearance_name(window).endswith("Aqua") and not appearance_name(window).endswith("DarkAqua"), 5)
     check("choosing light in the panel turns the window light", bool(ok), appearance_name(window))
-    check("window background is the light canvas", rgb_of(window.backgroundColor()) == (246, 247, 250), str(rgb_of(window.backgroundColor())))
+    check("window background is the light canvas", rgb_of(window.backgroundColor()) == (245, 245, 247), str(rgb_of(window.backgroundColor())))
     panel.js("document.querySelector('input[name=theme][value=dark]').click()")
     ok = wait_until(lambda: appearance_name(window).endswith("DarkAqua"), 5)
     check("choosing dark turns it dark again", bool(ok), appearance_name(window))
     panel.js("document.querySelector('input[name=theme][value=system]').click()")
     ok = wait_until(lambda: window.appearance() is None, 5)
     check("choosing system hands the window back to the system", bool(ok))
+    shown = str(panel.js("document.documentElement.dataset.theme"))
+    expected = {"light": (245, 245, 247), "dark": (28, 28, 30)}[shown]
+    ok = wait_until(lambda: rgb_of(window.backgroundColor()) == expected, 5)
+    check("with 'system' the window background matches the theme the panel shows", bool(ok), f"{shown}: {rgb_of(window.backgroundColor())}")
+    check("the title bar blends into the panel", bool(window.titlebarAppearsTransparent()))
 
     # ── Downloads ─────────────────────────────────────────────────────────
     panel.open(base, "/data", "text=备份记录")

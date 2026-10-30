@@ -16,8 +16,8 @@ export function Toolbar({ onShowShortcuts }: { onShowShortcuts: () => void }) {
   const title = navItemFor(location.pathname)?.label ?? "";
 
   return (
-    <header className="flex h-toolbar shrink-0 items-center gap-3 border-b border-border bg-surface px-4">
-      <div className="min-w-0 flex-1 truncate text-base font-semibold text-fg">{title}</div>
+    <header className="flex h-toolbar shrink-0 items-center gap-3 border-b border-border bg-surface/80 px-5 backdrop-blur-xl">
+      <div className="min-w-0 flex-1 truncate text-md font-semibold tracking-tight text-fg">{title}</div>
       <div className="flex shrink-0 items-center gap-1.5">
         <UpdateIndicator />
         <AutomationIndicator />
