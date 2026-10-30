@@ -14,6 +14,7 @@ import {
   proxyType,
   seedDeviceLabel,
 } from "./format";
+import { ProxyIpActions } from "../proxies/ProxyIpActions";
 import { NoteField } from "./NoteField";
 import type { RowActions } from "./ProfileTable";
 import type { Profile } from "./types";
@@ -135,6 +136,7 @@ export function ProfileDrawer({
         )}
 
         <div className="px-4 pb-4">
+          {profile.proxy?.toLowerCase().startsWith("socks5://") && <div className="mb-3"><ProxyIpActions profileId={profile.id} /></div>}
           <KeyValueList
             items={[
               { label: "出口", value: <span className="break-all font-mono text-xs">{proxyHost(profile)}</span> },

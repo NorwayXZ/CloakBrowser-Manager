@@ -1447,6 +1447,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/profiles/{profile_id}/proxy-capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Profile Proxy Capabilities */
+        get: operations["profile_proxy_capabilities_api_profiles__profile_id__proxy_capabilities_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/profiles/{profile_id}/purge": {
         parameters: {
             query?: never;
@@ -1681,6 +1698,109 @@ export interface paths {
         post?: never;
         /** Delete Proxy Preset */
         delete: operations["delete_proxy_preset_api_proxy_presets__preset_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/proxy-presets/{proxy_id}/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Proxy Capabilities */
+        get: operations["proxy_capabilities_api_proxy_presets__proxy_id__capabilities_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/proxy-presets/{proxy_id}/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Check Proxy Exit */
+        post: operations["check_proxy_exit_api_proxy_presets__proxy_id__check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/proxy-presets/{proxy_id}/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rotate Proxy */
+        post: operations["rotate_proxy_api_proxy_presets__proxy_id__rotate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/proxy-presets/{proxy_id}/rotation-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Rotation Settings */
+        get: operations["rotation_settings_api_proxy_presets__proxy_id__rotation_settings_get"];
+        /** Save Rotation Settings */
+        put: operations["save_rotation_settings_api_proxy_presets__proxy_id__rotation_settings_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/proxy-presets/{proxy_id}/rotations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Rotation History */
+        get: operations["rotation_history_api_proxy_presets__proxy_id__rotations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/proxy-rotations/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Rotation Result */
+        get: operations["rotation_result_api_proxy_rotations__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -3025,6 +3145,8 @@ export interface components {
              * @enum {string}
              */
             proxy_connection_mode: "direct" | "relay";
+            /** Proxy Id */
+            proxy_id?: string | null;
             /** Relay Id */
             relay_id?: string | null;
             /**
@@ -3181,6 +3303,8 @@ export interface components {
             proxy_geo?: {
                 [key: string]: unknown;
             } | null;
+            /** Proxy Id */
+            proxy_id?: string | null;
             /** Relay Id */
             relay_id?: string | null;
             /** Relay Name */
@@ -3339,6 +3463,8 @@ export interface components {
             proxy?: string | null;
             /** Proxy Connection Mode */
             proxy_connection_mode?: ("direct" | "relay") | null;
+            /** Proxy Id */
+            proxy_id?: string | null;
             /** Relay Id */
             relay_id?: string | null;
             /** Screen Height */
@@ -3362,6 +3488,11 @@ export interface components {
             /** Warmup Targets */
             warmup_targets?: string[] | null;
         };
+        /** ProxyExitCheckRequest */
+        ProxyExitCheckRequest: {
+            /** Profile Id */
+            profile_id?: string | null;
+        };
         /** ProxyPresetBulkCreate */
         ProxyPresetBulkCreate: {
             /** Items */
@@ -3378,6 +3509,11 @@ export interface components {
         };
         /** ProxyPresetResponse */
         ProxyPresetResponse: {
+            /**
+             * Can Rotate Ip
+             * @default false
+             */
+            can_rotate_ip: boolean;
             /** Created At */
             created_at: string;
             /** Id */
@@ -3390,6 +3526,45 @@ export interface components {
             proxy: string;
             /** Updated At */
             updated_at: string;
+        };
+        /** ProxyRotationRequest */
+        ProxyRotationRequest: {
+            /** Profile Id */
+            profile_id?: string | null;
+            /** Request Id */
+            request_id: string;
+        };
+        /** ProxyRotationSettings */
+        ProxyRotationSettings: {
+            /** Body */
+            body?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Cooldown Seconds
+             * @default 60
+             */
+            cooldown_seconds: number;
+            /** Headers */
+            headers?: {
+                [key: string]: string;
+            };
+            /**
+             * Method
+             * @default GET
+             * @enum {string}
+             */
+            method: "GET" | "POST";
+            /**
+             * Shared Group
+             * @default
+             */
+            shared_group: string;
+            /**
+             * Url
+             * @default
+             */
+            url: string;
         };
         /** ProxyTestRequest */
         ProxyTestRequest: {
@@ -6313,6 +6488,37 @@ export interface operations {
             };
         };
     };
+    profile_proxy_capabilities_api_profiles__profile_id__proxy_capabilities_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     purge_profile_api_profiles__profile_id__purge_delete: {
         parameters: {
             query?: never;
@@ -6748,6 +6954,235 @@ export interface operations {
             header?: never;
             path: {
                 preset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    proxy_capabilities_api_proxy_presets__proxy_id__capabilities_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proxy_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    check_proxy_exit_api_proxy_presets__proxy_id__check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proxy_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProxyExitCheckRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProxyTestResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rotate_proxy_api_proxy_presets__proxy_id__rotate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proxy_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProxyRotationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rotation_settings_api_proxy_presets__proxy_id__rotation_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proxy_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProxyRotationSettings"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_rotation_settings_api_proxy_presets__proxy_id__rotation_settings_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proxy_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProxyRotationSettings"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rotation_history_api_proxy_presets__proxy_id__rotations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proxy_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rotation_result_api_proxy_rotations__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
             };
             cookie?: never;
         };

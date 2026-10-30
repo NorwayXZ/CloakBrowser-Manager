@@ -22,6 +22,7 @@ function bodies(fetchMock: ReturnType<typeof mockFetch>, method: string, url: st
 }
 
 beforeEach(() => {
+  sessionStorage.clear();
   presets = PRESETS;
   resetConnectionForTests();
 });
@@ -49,6 +50,57 @@ describe("relay nodes", () => {
     expect(bodies(fetchMock, "POST", "/api/relay-nodes")[0]).toEqual({ name: "美国中转", proxy: "trojan://private-password@relay.example:443" });
     expect(bodies(fetchMock, "POST", "/api/proxy-presets")).toHaveLength(0);
   });
+});
+
+it("saves the refresh link without executing it and rotates through the Manager only", async () => {
+  let ready=false;
+  const { fetchMock }=await open([
+    {path:"/api/proxy-presets",respond:()=>[{...PRESETS[0],can_rotate_ip:ready}]},
+    {path:"/api/proxy-presets/p1/rotation-settings",respond:{url:"",method:"GET",cooldown_seconds:60,shared_group:"",headers:{},body:null}},
+    {method:"PUT",path:"/api/proxy-presets/p1/rotation-settings",respond:()=>{ready=true;return {ok:true};}},
+    {path:"/api/proxy-presets/p1/capabilities",respond:{proxy_id:"p1",can_rotate_ip:true,affected_profile_ids:["profile-a"]}},
+    {method:"POST",path:"/api/proxy-presets/p1/rotate",respond:{id:"job1",state:"queued"}},
+    {path:"/api/proxy-rotations/job1",respond:{id:"job1",state:"verified",before_ip:"203.0.113.1",after_ip:"203.0.113.2",requires_reconnect:true}},
+  ]);
+  fireEvent.click(await screen.findByRole("button",{name:"切换链接"}));
+  const dialog=await screen.findByRole("dialog",{name:"配置一键换 IP"});
+  await waitFor(()=>expect(within(dialog).getByRole("button",{name:"保存切换设置"})).not.toBeDisabled());
+  fireEvent.change(within(dialog).getByLabelText("换 IP 链接"),{target:{value:"https://supplier.example/refresh?token=PRIVATE_SECRET"}});
+  fireEvent.click(within(dialog).getByRole("button",{name:"保存切换设置"}));
+  await waitFor(()=>expect(screen.queryByRole("dialog",{name:"配置一键换 IP"})).not.toBeInTheDocument());
+  const rotate=screen.getByRole("button",{name:"一键切换 IP"});
+  await waitFor(()=>expect(rotate).not.toBeDisabled());
+  expect(bodies(fetchMock,"POST","/api/proxy-presets/p1/rotate")).toHaveLength(0);
+  fireEvent.click(rotate);
+  await screen.findByText("已确认换 IP",{}, {timeout:4500});
+  expect(screen.getByText(/203.0.113.1.*203.0.113.2/)).toBeInTheDocument();
+  expect(bodies(fetchMock,"POST","/api/proxy-presets/p1/rotate")).toHaveLength(1);
+  expect(fetchMock.mock.calls.every(([url])=>!String(url).includes("supplier.example"))).toBe(true);
+  expect(screen.queryByText(/PRIVATE_SECRET/)).not.toBeInTheDocument();
+});
+
+it("preserves the request id after a lost response instead of rotating again", async () => {
+  let calls=0;
+  const {fetchMock}=await open([
+    {path:"/api/proxy-presets",respond:()=>[{...PRESETS[0],can_rotate_ip:true}]},
+    {path:"/api/proxy-presets/p1/capabilities",respond:{proxy_id:"p1",can_rotate_ip:true}},
+    {method:"POST",path:"/api/proxy-presets/p1/rotate",respond:()=>{
+      calls++;
+      if(calls===1)throw new TypeError("lost response");
+      return {id:"job1",state:"verified",before_ip:"203.0.113.1",after_ip:"203.0.113.2"};
+    }},
+  ]);
+  fireEvent.click(await screen.findByRole("button",{name:"一键切换 IP"}));
+  await screen.findByText(/请求结果未知/);
+  const saved=sessionStorage.getItem("proxy-rotation:p1:");
+  expect(saved).toBeTruthy();
+  fireEvent.click(within(screen.getByRole("dialog",{name:"IP 切换结果"})).getByRole("button",{name:"查询本次请求"}));
+  await screen.findByText("已确认换 IP");
+  const requests=bodies(fetchMock,"POST","/api/proxy-presets/p1/rotate");
+  expect(requests).toHaveLength(2);
+  expect(requests[0].request_id).toBe(saved);
+  expect(requests[1].request_id).toBe(saved);
+  expect(sessionStorage.getItem("proxy-rotation:p1:")).toBeNull();
 });
 
 describe("saved proxies", () => {

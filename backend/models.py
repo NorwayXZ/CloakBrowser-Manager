@@ -120,6 +120,7 @@ class ProfileCreate(BaseModel):
     proxy: str | None = None  # "http://user:pass@host:port" or null
     proxy_connection_mode: Literal["direct", "relay"] = "direct"
     relay_id: str | None = None
+    proxy_id: str | None = None
     timezone: str | None = None  # "America/New_York"
     locale: str | None = None  # "en-US"
     platform: Literal["windows", "macos", "linux"] = "windows"
@@ -161,6 +162,7 @@ class ProfileUpdate(BaseModel):
     proxy: str | None = Field(default=None)
     proxy_connection_mode: Literal["direct", "relay"] | None = None
     relay_id: str | None = None
+    proxy_id: str | None = None
     timezone: str | None = Field(default=None)
     locale: str | None = Field(default=None)
     platform: Literal["windows", "macos", "linux"] | None = None
@@ -214,6 +216,7 @@ class ProfileResponse(BaseModel):
     proxy_connection_mode: Literal["direct", "relay"] = "direct"
     relay_id: str | None = None
     relay_name: str | None = None
+    proxy_id: str | None = None
     timezone: str | None = None
     locale: str | None = None
     platform: str = "windows"
@@ -612,6 +615,25 @@ class ProxyPresetResponse(BaseModel):
     mode: str
     created_at: str
     updated_at: str
+    can_rotate_ip: bool = False
+
+
+class ProxyRotationSettings(BaseModel):
+    url: str = Field(default="", max_length=8192)
+    method: Literal["GET", "POST"] = "GET"
+    cooldown_seconds: int = Field(default=60, ge=5, le=3600)
+    shared_group: str = Field(default="", max_length=64)
+    headers: dict[str, str] = Field(default_factory=dict)
+    body: dict | None = None
+
+
+class ProxyRotationRequest(BaseModel):
+    profile_id: str | None = None
+    request_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+class ProxyExitCheckRequest(BaseModel):
+    profile_id: str | None = None
 
 
 class ProfileStatusResponse(BaseModel):

@@ -51,6 +51,7 @@ from .cookie_formats import (
     to_cookie_editor_json,
     to_netscape,
 )
+from . import proxy_rotation
 from . import automation_window
 from . import evolution
 from . import kernel
@@ -75,7 +76,7 @@ from .rfb import _RFB_MSG_SIZE, _build_server_cut_text, _filter_rfb_client_messa
 from .updater import UpdateError, update_from_git
 from .xray_runtime import is_xray_link, start_xray_proxy
 from .models import (
-    RelayNodeCreate, RelayNodeResponse,
+    RelayNodeCreate, RelayNodeResponse, ProxyRotationSettings, ProxyRotationRequest, ProxyExitCheckRequest,
     ApplyDeviceTemplateRequest,
     AuthAccountUpdate,
     AutoBackupSettingsModel,
@@ -478,6 +479,7 @@ async def lifespan(app: FastAPI):
         backups.snapshot_database(db.DATA_DIR)
     except Exception:
         logger.exception("Automatic database snapshot failed")
+    proxy_rotation.recover()
     _ensure_auth_bootstrap()
     await browser_mgr.cleanup_stale()
     browser_mgr._auto_launch_task = asyncio.create_task(browser_mgr.auto_launch_all())
@@ -489,6 +491,9 @@ async def lifespan(app: FastAPI):
         if agent_http_mcp is not None:
             await stack.enter_async_context(agent_http_mcp.run())
         yield
+    pending_rotations = tuple(proxy_rotation.TASKS)
+    for task in pending_rotations: task.cancel()
+    if pending_rotations: await asyncio.gather(*pending_rotations,return_exceptions=True)
     logger.info("Shutting down — stopping all browsers...")
     auto_backup_task.cancel()
     warmup_task.cancel()
@@ -1128,15 +1133,91 @@ async def create_proxy_presets_bulk(req: ProxyPresetBulkCreate):
 
 @app.delete("/api/proxy-presets/{preset_id}")
 async def delete_proxy_preset(preset_id: str):
-    if not db.delete_proxy_preset(preset_id):
+    try:
+        deleted = db.delete_proxy_preset(preset_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not deleted:
         raise HTTPException(status_code=404, detail="Proxy preset not found")
     return {"ok": True}
+
+
+@app.get("/api/proxy-presets/{proxy_id}/rotation-settings", response_model=ProxyRotationSettings)
+async def rotation_settings(proxy_id: str):
+    if not db.get_proxy_preset(proxy_id): raise HTTPException(404,"代理不存在")
+    return db.get_proxy_rotation_settings(proxy_id) or {}
+
+
+@app.put("/api/proxy-presets/{proxy_id}/rotation-settings")
+async def save_rotation_settings(proxy_id: str, req: ProxyRotationSettings):
+    try:
+        preset = db.get_proxy_preset(proxy_id)
+        if not preset: raise HTTPException(404,"代理不存在")
+        if req.url and not preset["proxy"].lower().startswith("socks5://"): raise ValueError("目前仅 SOCKS5 支持 IP 切换链接")
+        db.save_proxy_rotation_settings(proxy_id,req.model_dump())
+        return {"ok":True,"configured":bool(req.url)}
+    except ValueError as exc: raise HTTPException(400,str(exc)) from exc
+
+
+@app.get("/api/proxy-presets/{proxy_id}/capabilities")
+async def proxy_capabilities(proxy_id: str):
+    try: return proxy_rotation.capabilities(proxy_id)
+    except ValueError as exc: raise HTTPException(400,str(exc)) from exc
+
+
+@app.get("/api/profiles/{profile_id}/proxy-capabilities")
+async def profile_proxy_capabilities(profile_id: str):
+    try: return proxy_rotation.profile_capabilities(profile_id)
+    except ValueError as exc: raise HTTPException(409,str(exc)) from exc
+
+
+@app.post("/api/proxy-presets/{proxy_id}/check", response_model=ProxyTestResponse)
+async def check_proxy_exit(proxy_id: str, req: ProxyExitCheckRequest):
+    try:
+        proxy_rotation.capabilities(proxy_id,req.profile_id)
+        preset = db.get_proxy_preset(proxy_id)
+        profile = db.get_profile(req.profile_id) if req.profile_id else None
+        return await _test_proxy(ProxyTestRequest(proxy=preset["proxy"],
+            proxy_connection_mode=profile.get("proxy_connection_mode","direct") if profile else "direct",
+            relay_id=profile.get("relay_id") if profile else None),include_quality=False)
+    except ValueError as exc: raise HTTPException(409,str(exc)) from exc
+
+
+@app.post("/api/proxy-presets/{proxy_id}/rotate", status_code=202)
+async def rotate_proxy(proxy_id: str, req: ProxyRotationRequest):
+    try:
+        job, created = proxy_rotation.reserve(proxy_id,req.request_id,req.profile_id)
+        if created:
+            async def probe(route): return await _test_proxy(ProxyTestRequest(**route),include_quality=False)
+            task = asyncio.create_task(proxy_rotation.execute(job["id"],probe))
+            proxy_rotation.TASKS.add(task)
+            task.add_done_callback(proxy_rotation.TASKS.discard)
+        return job
+    except ValueError as exc: raise HTTPException(409,str(exc)) from exc
+
+
+@app.get("/api/proxy-rotations/{job_id}")
+async def rotation_result(job_id: str):
+    job = db.get_rotation_job(job_id)
+    if not job: raise HTTPException(404,"切换记录不存在")
+    return job
+
+
+@app.get("/api/proxy-presets/{proxy_id}/rotations")
+async def rotation_history(proxy_id: str):
+    config = db.get_proxy_rotation_settings(proxy_id)
+    key = proxy_rotation.rotation_key(config) if config else ""
+    with db.get_db() as conn:
+        ids = conn.execute("SELECT id FROM proxy_rotation_jobs WHERE proxy_id=? OR rotation_key=? ORDER BY created_at DESC LIMIT 50",(proxy_id,key)).fetchall()
+    return [db.get_rotation_job(row[0]) for row in ids]
 
 
 # ── Full data backups ─────────────────────────────────────────────────────────
 
 
 def _require_no_running_browsers(action: str) -> None:
+    if proxy_rotation.TASKS:
+        raise HTTPException(status_code=409, detail=f"{action}前请等待 IP 切换任务结束")
     if browser_mgr.running:
         raise HTTPException(status_code=409, detail=f"{action}前请先关闭所有浏览器")
 
@@ -2104,7 +2185,7 @@ async def _evo_run_check(profile: dict) -> evolution.CheckOutcome:
 
 
 _CLONE_COPY_FIELDS = (
-    "browser_engine", "device_profile", "fingerprint_seed", "proxy", "proxy_connection_mode", "relay_id", "timezone", "locale",
+    "browser_engine", "device_profile", "fingerprint_seed", "proxy", "proxy_connection_mode", "relay_id", "proxy_id", "timezone", "locale",
     "platform", "user_agent", "screen_width", "screen_height", "gpu_vendor", "gpu_renderer",
     "hardware_concurrency", "device_memory", "humanize", "human_preset", "headless", "geoip",
     "clipboard_sync", "color_scheme", "group_name", "account_platform",
@@ -3027,6 +3108,10 @@ PROXY_TEST_SECONDS = 30.0
 
 @app.post("/api/proxy/test", response_model=ProxyTestResponse)
 async def test_proxy(req: ProxyTestRequest):
+    return await _test_proxy(req)
+
+
+async def _test_proxy(req: ProxyTestRequest, *, include_quality: bool = True):
     started_at = time.monotonic()
     raw_proxy = (req.proxy or "").strip()
     proxy = None
@@ -3078,7 +3163,7 @@ async def test_proxy(req: ProxyTestRequest):
         data["elapsed_ms"] = round((time.monotonic() - started_at) * 1000)
         data["handshake_ms"] = round(probe.seconds * 1000) if probe_target else None
         try:
-            data["ip_quality"] = await check_ip_quality(effective_proxy, data.get("ip"))
+            data["ip_quality"] = await check_ip_quality(effective_proxy, data.get("ip")) if include_quality else None
         except Exception as exc:  # the geo result stands without it
             logger.warning("IP quality check failed: %s", exc)
     except asyncio.TimeoutError as exc:

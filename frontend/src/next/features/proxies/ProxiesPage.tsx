@@ -30,6 +30,7 @@ import {
 import { editorApi, editorKeys, useProxyPresets } from "../editor/api";
 import { IpQualityPanel } from "../editor/sections/ProxySection";
 import type { ProxyPreset, ProxyTestResult } from "../editor/types";
+import { ProxyIpActions } from "./ProxyIpActions";
 import { RelayNodesPanel } from "./RelayNodesPanel";
 import { RelayRouteFields } from "./RelayRouteFields";
 import { formatDateTime } from "../profiles/format";
@@ -137,6 +138,7 @@ function ExitProxiesPage() {
                     </TD>
                     <TD className="truncate font-mono text-xs text-fg-2" title={maskProxy(preset.proxy)}>
                       {maskProxy(preset.proxy)}
+                      {preset.proxy.toLowerCase().startsWith("socks5://") && <ProxyIpActions proxyId={preset.id} configured={preset.can_rotate_ip} editable />}
                     </TD>
                     <TD className="text-fg-2">{formatDateTime(preset.created_at)}</TD>
                     <TD className="text-right">
@@ -391,7 +393,7 @@ function TestDialog({ preset, onClose }: { preset: SavedPreset; onClose: () => v
         </>
       }
     >
-      <fieldset disabled={running}><RelayRouteFields mode={routeMode} relayId={relayId} isSocks={preset.proxy.startsWith("socks5://")} onMode={value => { setRouteMode(value); setResult(null); }} onRelay={value => { setRelayId(value); setResult(null); }} /></fieldset>
+      <fieldset disabled={running}><RelayRouteFields mode={routeMode} relayId={relayId} isSocks={preset.proxy.toLowerCase().startsWith("socks5://")} onMode={value => { setRouteMode(value); setResult(null); }} onRelay={value => { setRelayId(value); setResult(null); }} /></fieldset>
       <div className="flex flex-col gap-3">
         <p className="break-all font-mono text-xs text-fg-2">{maskProxy(preset.proxy)}</p>
         {error && <Banner tone="danger" title="连不通">{error}</Banner>}

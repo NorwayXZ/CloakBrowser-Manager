@@ -100,7 +100,7 @@ export function ProxySection({ editor, presets }: { editor: Editor; presets: Pro
             value=""
             onChange={(event) => {
               const preset = presets.find((item) => item.id === event.target.value);
-              if (preset) editor.usePreset(preset.proxy);
+              if (preset) editor.usePreset(preset.proxy, preset.id);
             }}
           >
             <option value="">{presets.length ? "选择保存的代理…" : "还没有保存的代理"}</option>

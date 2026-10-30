@@ -128,6 +128,14 @@ EXPECTED_READ_TOOLS = {
         },
     },
     "get_kernel_info": NO_ARGS,
+    "list_proxies": NO_ARGS,
+    "get_proxy_capabilities": {"type":"object","properties":{
+        "proxy_id":{"type":"string","description":"list_proxies 返回的代理编号"},
+        "profile_id":{"type":"string","description":"可改用环境编号，检查该环境真实绑定的代理"}}},
+    "check_proxy_exit_ip": {"type":"object","properties":{
+        "proxy_id":{"type":"string","description":"list_proxies 返回的代理编号"},
+        "profile_id":{"type":"string","description":"可改用环境编号，检查该环境真实绑定的代理"}}},
+    "get_proxy_rotation_result": {"type":"object","properties":{"job_id":{"type":"string"}},"required":["job_id"]},
 }
 
 LAUNCH_PROFILE_ARGS = {
@@ -178,6 +186,10 @@ MAIL_LIST_ARGS = {
 
 EXPECTED_ACTION_TOOLS = {
     "launch_profile": LAUNCH_PROFILE_ARGS,
+    "rotate_proxy_ip": {"type":"object","properties":{
+        "proxy_id":{"type":"string"},"profile_id":{"type":"string"},
+        "request_id":{"type":"string","description":"同一意图重试须复用此编号，避免再次换 IP"},
+        "wait_seconds":{"type":"integer","default":90,"minimum":0,"maximum":105}},"required":["proxy_id"]},
     "stop_profile": PROFILE_ID_ARGS,
     "run_site_check": PROFILE_ID_ARGS,
     "run_warmup": PROFILE_ID_ARGS,

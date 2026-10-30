@@ -138,3 +138,9 @@ Codex 的配置见 [AGENT.md](AGENT.md#在-codex-里配置)（stdio 和 HTTP 两
 ## 与 Muse（自定义连接器）的关系
 
 上面是给通用 MCP 客户端（Claude Desktop / Muse）的接入方式。若要把 Manager 接进你自己的 Muse agent，那是另一条下游路径（自定义 connector 文档），不在本桥范围内；桥本身提供的 stdio 工具面就是那条路径将来要包的同一套能力。
+
+## SOCKS5 一键切换 IP
+
+共享工具注册表新增 `list_proxies`、`get_proxy_capabilities`、`check_proxy_exit_ip`、`get_proxy_rotation_result`（read 层）和 `rotate_proxy_ip`（action 层）。stdio MCP、HTTP MCP、REST Agent API 和 CLI 使用相同定义与审计，不需要各写一套换 IP 实现。
+
+先在代理页设置供应商刷新链接。Agent 不拿到该链接，仅用代理/环境编号调用操作。后台通过实际直连或中转路径核对前后 IP，持久化任务、请求编号和冷却状态。等待结果时继续读同一 job，不重新触发。共享链接/共享组共用锁，记录只验证操作发起路径。

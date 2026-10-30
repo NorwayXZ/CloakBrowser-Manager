@@ -321,3 +321,13 @@ MCP 客户端除了工具，还能读到：
 ## 审计
 
 每次工具调用都会记一条审计：`GET /api/mcp/audit`（时间、客户端名、工具、脱敏后的参数、结果、耗时）。被模式或 scope 闸门拒绝的调用也会记录。
+
+## 代理的一键换 IP 能力
+
+1. `list_proxies` 获取代理编号和能力，或用 `get_proxy_capabilities(profile_id=...)` 查环境的真实关联、冷却时间及受影响环境。端点不含账号密码，切换链接不返回给 Agent。
+2. `check_proxy_exit_ip` 建立新连接检测出口；提供环境编号时保留其直连/中转路径。
+3. 已有 full/automation 操作授权时，用 `rotate_proxy_ip` 切换。相同操作重试必须复用 `request_id`，不把刷新 URL 放进参数。
+4. `queued`/`running` 用 `get_proxy_rotation_result(job_id)` 查询。只有 `verified` 确认了发起路径的 IP 改变；共享组其他路径未逐一验证。HTTP 200、`accepted_unverified` 或 `unchanged` 都不能证明切换成功，不要盲目重复请求。
+5. `requires_reconnect` 表示旧网页连接可能仍持有旧 IP。不自动关闭浏览器，按用户任务需要重连。
+
+只读模式可发现能力、读取结果、检测出口；不会开放换 IP 动作。不增加每次操作的确认弹窗，继续遵守现有授权模式。

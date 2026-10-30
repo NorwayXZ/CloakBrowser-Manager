@@ -36,6 +36,7 @@ export interface EditorForm {
   proxy?: string | null;
   proxy_connection_mode?: "direct" | "relay";
   relay_id?: string | null;
+  proxy_id?: string | null;
   timezone?: string | null;
   locale?: string | null;
   platform?: string;
@@ -68,6 +69,7 @@ export interface EditorForm {
 }
 
 export interface ProxyPreset {
+  can_rotate_ip?: boolean;
   id: string;
   name: string;
   proxy: string;

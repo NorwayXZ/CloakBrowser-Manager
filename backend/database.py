@@ -26,10 +26,10 @@ CONFIGURATION_SCHEMA_VERSION = 1
 # idempotent ALTER TABLEs in init_db; this number only lets a program notice
 # that the data was last written by a newer one (a downgrade), whose layout it
 # cannot be sure to read. Raise it whenever a migration is added.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 SETTING_SCHEMA_VERSION = "db.schema_version"
 CONFIGURATION_PROFILE_FIELDS = (
-    "name", "browser_engine", "device_profile", "fingerprint_seed", "proxy", "proxy_connection_mode", "relay_id", "timezone", "locale", "platform",
+    "name", "browser_engine", "device_profile", "fingerprint_seed", "proxy", "proxy_connection_mode", "relay_id", "proxy_id", "timezone", "locale", "platform",
     "user_agent", "screen_width", "screen_height", "gpu_vendor", "gpu_renderer", "hardware_concurrency",
     "device_memory", "humanize", "human_preset", "headless", "geoip", "clipboard_sync", "auto_launch",
     "color_scheme", "group_name", "account_platform", "cookies_json", "startup_urls", "launch_args",
@@ -215,6 +215,28 @@ def init_db():
         if "launch_args" not in cols:
             conn.execute("ALTER TABLE profiles ADD COLUMN launch_args TEXT DEFAULT '[]'")
             conn.commit()
+        if "proxy_id" not in cols:
+            conn.execute("ALTER TABLE profiles ADD COLUMN proxy_id TEXT")
+            conn.commit()
+        preset_cols = {row["name"] for row in conn.execute("PRAGMA table_info(proxy_presets)")}
+        if "rotation_config" not in preset_cols:
+            conn.execute("ALTER TABLE proxy_presets ADD COLUMN rotation_config TEXT")
+            conn.commit()
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS proxy_rotation_jobs (
+                id TEXT PRIMARY KEY, proxy_id TEXT NOT NULL, profile_id TEXT,
+                rotation_key TEXT NOT NULL, request_id TEXT NOT NULL,
+                state TEXT NOT NULL, created_at REAL NOT NULL, attempted_at REAL,
+                result_json TEXT NOT NULL DEFAULT '{}',
+                UNIQUE(proxy_id, request_id)
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS active_proxy_rotation ON proxy_rotation_jobs(rotation_key)
+                WHERE state IN ('queued','running');
+            CREATE TABLE IF NOT EXISTS proxy_rotation_requests (
+                proxy_id TEXT NOT NULL, request_id TEXT NOT NULL, profile_id TEXT,
+                job_id TEXT NOT NULL, PRIMARY KEY(proxy_id, request_id)
+            );
+        """)
         if "proxy_connection_mode" not in cols:
             conn.execute("ALTER TABLE profiles ADD COLUMN proxy_connection_mode TEXT NOT NULL DEFAULT 'direct'")
             conn.commit()
@@ -481,7 +503,7 @@ def export_configuration() -> dict[str, Any]:
         "includes_browser_user_data": False,
         "profiles": profiles,
         "groups": list_groups(),
-        "proxy_presets": list_proxy_presets(),
+        "proxy_presets": [{**p, "rotation_settings": get_proxy_rotation_settings(p["id"])} for p in list_proxy_presets()],
         "relay_nodes": list_relay_nodes(),
     }
 
@@ -530,6 +552,7 @@ def import_configuration(payload: dict[str, Any]) -> dict[str, int]:
         imported_groups += 1
 
     imported_presets = 0
+    imported_proxy_ids = {}
     for item in presets:
         if not isinstance(item, dict):
             continue
@@ -538,7 +561,9 @@ def import_configuration(payload: dict[str, Any]) -> dict[str, int]:
         mode = str(item.get("mode") or "").strip()
         if not name or not proxy or not mode:
             continue
-        create_proxy_preset(name, proxy, mode)
+        preset = create_proxy_preset(name, proxy, mode)
+        if item.get("id"): imported_proxy_ids[item["id"]] = preset["id"]
+        if item.get("rotation_settings"): save_proxy_rotation_settings(preset["id"], item["rotation_settings"])
         imported_presets += 1
 
     imported_profiles = 0
@@ -550,6 +575,7 @@ def import_configuration(payload: dict[str, Any]) -> dict[str, int]:
         if not name:
             continue
         seed = values.pop("fingerprint_seed", None)
+        values["proxy_id"] = imported_proxy_ids.get(values.get("proxy_id"))
         if values.get("proxy_connection_mode") == "relay":
             values["relay_id"] = relay_ids[values["relay_id"]]
         created = create_profile(name=name, fingerprint_seed=seed, **values)
@@ -573,6 +599,7 @@ def create_profile(
     validate_profile_route(fields.get("proxy"), mode, fields.get("relay_id"))
     if mode == "direct":
         fields["relay_id"] = None
+    fields["proxy_id"] = resolve_proxy_binding(fields.get("proxy"), fields.get("proxy_id"))
     profile_id = str(uuid.uuid4())
     seed = fingerprint_seed if fingerprint_seed is not None else random.randint(10000, 99999)
     user_data_dir = str(DATA_DIR / "profiles" / profile_id)
@@ -582,7 +609,7 @@ def create_profile(
     with get_db() as conn:
         conn.execute(
             """INSERT INTO profiles (
-                id, name, browser_engine, device_profile, fingerprint_seed, proxy, proxy_connection_mode, relay_id, timezone, locale, platform,
+                id, name, browser_engine, device_profile, fingerprint_seed, proxy, proxy_connection_mode, relay_id, proxy_id, timezone, locale, platform,
                 user_agent, screen_width, screen_height, gpu_vendor, gpu_renderer,
                 hardware_concurrency, device_memory, humanize, human_preset, headless, geoip,
                 clipboard_sync, auto_launch, color_scheme, group_name, account_platform,
@@ -590,14 +617,14 @@ def create_profile(
                 warmup_enabled, warmup_daily_max, warmup_targets, warmup_persona,
                 evolution_enabled, evolution_interval_hours,
                 user_data_dir, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 profile_id, name,
                 fields.get("browser_engine", "auto"),
                 fields.get("device_profile"),
                 seed,
                 encrypt_value(fields.get("proxy")),
-                mode, fields.get("relay_id"),
+                mode, fields.get("relay_id"), fields.get("proxy_id"),
                 fields.get("timezone"),
                 fields.get("locale"),
                 fields.get("platform", "windows"),
@@ -709,6 +736,9 @@ def update_profile(profile_id: str, **fields: Any) -> dict[str, Any] | None:
     validate_profile_route(fields.get("proxy", existing.get("proxy")), mode, relay_id)
     if mode == "direct":
         fields["relay_id"] = None
+    if "proxy" in fields or "proxy_id" in fields:
+        binding = fields.get("proxy_id") if "proxy_id" in fields else (existing.get("proxy_id") if fields.get("proxy", existing["proxy"]) == existing["proxy"] else None)
+        fields["proxy_id"] = resolve_proxy_binding(fields.get("proxy", existing["proxy"]), binding)
     tags = fields.pop("tags", None)
 
     # Only update fields that were explicitly provided
@@ -736,7 +766,7 @@ def update_profile(profile_id: str, **fields: Any) -> dict[str, Any] | None:
         update_vals.append(None)
 
     for col in (
-        "name", "browser_engine", "device_profile", "fingerprint_seed", "proxy", "proxy_connection_mode", "relay_id", "timezone", "locale", "platform",
+        "name", "browser_engine", "device_profile", "fingerprint_seed", "proxy", "proxy_connection_mode", "relay_id", "proxy_id", "timezone", "locale", "platform",
         "user_agent", "screen_width", "screen_height", "gpu_vendor", "gpu_renderer",
         "hardware_concurrency", "device_memory", "humanize", "human_preset", "headless", "geoip",
         "clipboard_sync", "auto_launch", "color_scheme", "group_name", "account_platform", "cookies_json",
@@ -878,6 +908,7 @@ def list_proxy_presets() -> list[dict[str, Any]]:
         presets = [dict(row) for row in rows]
     for preset in presets:
         preset["proxy"] = decrypt_value(preset.get("proxy"))
+        preset["can_rotate_ip"] = bool(preset.pop("rotation_config", None))
     return presets
 
 
@@ -885,6 +916,10 @@ def create_proxy_preset(name: str, proxy: str, mode: str) -> dict[str, Any]:
     preset_id = str(uuid.uuid4())
     now = _now()
     with get_db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        old = conn.execute("SELECT id,proxy FROM proxy_presets WHERE name=?",(name,)).fetchone()
+        if old and conn.execute("SELECT 1 FROM proxy_rotation_jobs WHERE proxy_id=? AND state IN ('queued','running')",(old[0],)).fetchone():
+            raise ValueError("代理正在切换 IP，请稍后修改代理")
         conn.execute(
             """
             INSERT INTO proxy_presets (id, name, proxy, mode, created_at, updated_at)
@@ -896,6 +931,8 @@ def create_proxy_preset(name: str, proxy: str, mode: str) -> dict[str, Any]:
             """,
             (preset_id, name, encrypt_value(proxy), mode, now, now),
         )
+        if old and decrypt_value(old["proxy"]) != proxy:
+            conn.execute("UPDATE proxy_presets SET rotation_config=NULL WHERE id=?",(old["id"],))
         conn.commit()
         row = conn.execute(
             "SELECT * FROM proxy_presets WHERE name = ?",
@@ -903,14 +940,76 @@ def create_proxy_preset(name: str, proxy: str, mode: str) -> dict[str, Any]:
         ).fetchone()
         preset = dict(row)
     preset["proxy"] = decrypt_value(preset.get("proxy"))
+    preset["can_rotate_ip"] = bool(preset.pop("rotation_config", None))
     return preset
 
 
 def delete_proxy_preset(preset_id: str) -> bool:
     with get_db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        active = conn.execute("SELECT 1 FROM proxy_rotation_jobs WHERE proxy_id=? AND state IN ('queued','running')", (preset_id,)).fetchone()
+        if active:
+            raise ValueError("这个代理正在切换 IP，请等待本次操作结束")
+        conn.execute("UPDATE profiles SET proxy_id=NULL WHERE proxy_id=?", (preset_id,))
         cursor = conn.execute("DELETE FROM proxy_presets WHERE id = ?", (preset_id,))
         conn.commit()
         return cursor.rowcount > 0
+
+
+def get_proxy_preset(proxy_id: str) -> dict[str, Any] | None:
+    return next((p for p in list_proxy_presets() if p["id"] == proxy_id), None)
+
+
+def resolve_proxy_binding(proxy: str | None, proxy_id: str | None = None) -> str | None:
+    presets = list_proxy_presets()
+    if proxy_id:
+        item = next((p for p in presets if p["id"] == proxy_id), None)
+        if not item or item["proxy"] != proxy:
+            raise ValueError("代理关联与环境地址不一致，请重新选择已保存的代理")
+        return proxy_id
+    matches = [p["id"] for p in presets if proxy and p["proxy"] == proxy]
+    return matches[0] if len(matches) == 1 else None
+
+
+def get_proxy_rotation_settings(proxy_id: str) -> dict[str, Any] | None:
+    with get_db() as conn:
+        row = conn.execute("SELECT rotation_config FROM proxy_presets WHERE id=?", (proxy_id,)).fetchone()
+    return decrypt_json(row[0]) if row and row[0] else None
+
+
+def save_proxy_rotation_settings(proxy_id: str, settings: dict[str, Any]) -> bool:
+    from .proxy_rotation import validate_settings,rotation_key
+    from .models import ProxyRotationSettings
+    settings = ProxyRotationSettings.model_validate(settings).model_dump()
+    validate_settings(settings)
+    with get_db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        old = conn.execute("SELECT rotation_config FROM proxy_presets WHERE id=?",(proxy_id,)).fetchone()
+        previous = decrypt_json(old[0]) if old and old[0] else None
+        keys = [rotation_key(c) for c in (previous,settings) if c and c.get("url")]
+        placeholders = ','.join('?' for _ in keys) or "NULL"
+        if conn.execute(f"SELECT 1 FROM proxy_rotation_jobs WHERE (proxy_id=? OR rotation_key IN ({placeholders})) AND state IN ('queued','running')", (proxy_id,*keys)).fetchone():
+            raise ValueError("代理正在切换 IP，请稍后修改切换设置")
+        cursor = conn.execute("UPDATE proxy_presets SET rotation_config=?,updated_at=? WHERE id=?",
+            (encrypt_json(settings) if settings.get("url") else None, _now(), proxy_id))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def get_rotation_job(job_id: str) -> dict[str, Any] | None:
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM proxy_rotation_jobs WHERE id=?", (job_id,)).fetchone()
+    if not row: return None
+    item = dict(row)
+    result = json.loads(item.pop("result_json"))
+    item.pop("rotation_key", None)
+    return {**item, **result, "verification_proxy_id":item["proxy_id"], "verification_profile_id":item["profile_id"]}
+
+
+def finish_rotation_job(job_id: str, state: str, result: dict[str, Any]) -> None:
+    with get_db() as conn:
+        conn.execute("UPDATE proxy_rotation_jobs SET state=?,result_json=? WHERE id=?", (state,json.dumps(result),job_id))
+        conn.commit()
 
 
 def get_relay_node(relay_id: str) -> dict[str, Any] | None:

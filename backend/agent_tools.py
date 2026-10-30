@@ -31,6 +31,7 @@ Design (see MCP-PLAN.md):
 from __future__ import annotations
 
 import contextvars
+import asyncio
 import json
 import os
 import re
@@ -250,6 +251,7 @@ def sanitize_proxy(proxy: Any) -> str | None:
 # access paths and exit-IP details the agent does not need).
 PROFILE_FIELDS = (
     "id", "name", "browser_engine", "device_profile", "fingerprint_seed",
+    "proxy_id", "proxy_connection_mode", "relay_id", "relay_name",
     "timezone", "locale", "platform", "user_agent",
     "screen_width", "screen_height", "gpu_vendor", "gpu_renderer",
     "hardware_concurrency", "device_memory",
@@ -764,6 +766,58 @@ async def _get_kernel_info(client: RestClient, args: dict[str, Any]) -> dict[str
     return {"ok": True, "kernel": payload}
 
 
+PROXY_CAP_ARGS = {"type": "object", "properties": {
+    "proxy_id": {"type": "string", "description": "list_proxies 返回的代理编号"},
+    "profile_id": {"type": "string", "description": "可改用环境编号，检查该环境真实绑定的代理"},
+}}
+ROTATION_JOB_ARGS = {"type":"object","properties":{"job_id":{"type":"string"}},"required":["job_id"]}
+ROTATE_IP_ARGS = {"type":"object","properties":{
+    "proxy_id":{"type":"string"},"profile_id":{"type":"string"},
+    "request_id":{"type":"string","description":"同一意图重试须复用此编号，避免再次换 IP"},
+    "wait_seconds":{"type":"integer","default":90,"minimum":0,"maximum":105},
+},"required":["proxy_id"]}
+
+
+@register("list_proxies", "列出已保存代理及换 IP 能力；仅返回端点，不返回账号密码或刷新链接。", NO_ARGS, "read")
+async def _list_proxies(client, args):
+    payload, err = await _get_or_error(client,"/api/proxy-presets","list_proxies")
+    if err: return err
+    return {"ok":True,"proxies":[{"proxy_id":p["id"],"name":p["name"],"endpoint":sanitize_proxy(p.get("proxy")),
+        "capabilities":{"rotate_ip":bool(p.get("can_rotate_ip")),"check_exit_ip":True},"rotate_tool":"rotate_proxy_ip"} for p in payload]}
+
+
+@register("get_proxy_capabilities", "查看代理或环境是否支持一键换 IP、冷却时间及受影响环境。不会暴露切换链接。", PROXY_CAP_ARGS, "read")
+async def _get_proxy_capabilities(client,args):
+    if args.get("profile_id"): path=f'/api/profiles/{quote(str(args["profile_id"]),safe="")}/proxy-capabilities'
+    elif args.get("proxy_id"): path=f'/api/proxy-presets/{quote(str(args["proxy_id"]),safe="")}/capabilities'
+    else: return {"ok":False,"reason":"invalid_argument","detail":"请提供 proxy_id 或 profile_id"}
+    status,payload=await client.get(path)
+    if status>=300:return error_result(status,payload,tool="get_proxy_capabilities")
+    return {"ok":True,**payload}
+
+
+@register("check_proxy_exit_ip", "经代理/环境的实际直连或中转路径，建立新连接检测最终出口 IP；不触发换 IP，不代表旧网页连接已重连。", PROXY_CAP_ARGS, "read")
+async def _check_proxy_exit_ip(client,args):
+    proxy_id=str(args.get("proxy_id") or "")
+    if args.get("profile_id"):
+        status,caps=await client.get(f'/api/profiles/{quote(str(args["profile_id"]),safe="")}/proxy-capabilities')
+        if status>=300:return error_result(status,caps,tool="check_proxy_exit_ip")
+        proxy_id=str(caps.get("proxy_id") or "")
+    if not proxy_id:return {"ok":False,"reason":"invalid_argument","detail":"请提供明确的代理或已关联的环境"}
+    status,payload=await client.post(f'/api/proxy-presets/{quote(proxy_id,safe="")}/check',json_body={"profile_id":args.get("profile_id")},timeout=ACTION_TIMEOUT_S)
+    if status>=300:return error_result(status,payload,tool="check_proxy_exit_ip")
+    return {"ok":True,**payload}
+
+
+@register("get_proxy_rotation_result", "查看一次换 IP 操作的进度/结果。pending 时继续查询，不要重新触发切换。verified 才表示已确认改变。", ROTATION_JOB_ARGS, "read")
+async def _get_proxy_rotation_result(client,args):
+    job_id=str(args.get("job_id") or "")
+    if not job_id:return {"ok":False,"reason":"invalid_argument","detail":"缺少 job_id"}
+    status,payload=await client.get(f'/api/proxy-rotations/{quote(job_id,safe="")}')
+    if status>=300:return error_result(status,payload,tool="get_proxy_rotation_result")
+    return {"ok":True,"job":payload}
+
+
 # ── Tools: action layer (registered only when mcp.mode == "full") ────────────
 
 
@@ -912,6 +966,33 @@ async def _launch_profile(client: RestClient, args: dict[str, Any]) -> dict[str,
     if launch_mode == "debug":
         _with_cdp(result, await _cdp_endpoint_info(client, profile_id, tool="launch_profile"))
     return result
+
+
+@register("rotate_proxy_ip", "调用已配置的供应商链接切换 SOCKS5 IP，并经环境实际直连/中转路径验证。可能影响共享代理的其他环境；不会自动关闭浏览器。仅 verified 表示确认新 IP；其他结果不要盲目重试，用 job_id 查询，并复用 request_id。", ROTATE_IP_ARGS, "action")
+async def _rotate_proxy_ip(client,args):
+    proxy_id=str(args.get("proxy_id") or "")
+    if not proxy_id:return {"ok":False,"reason":"invalid_argument","detail":"缺少 proxy_id"}
+    request_id=str(args.get("request_id") or uuid.uuid4())
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}",request_id):
+        return {"ok":False,"reason":"invalid_argument","detail":"request_id 仅支持字母、数字、连字符和下划线"}
+    body={"request_id":request_id,"profile_id":args.get("profile_id")}
+    try:
+        status,payload=await client.post(f'/api/proxy-presets/{quote(proxy_id,safe="")}/rotate',json_body=body,timeout=ACTION_TIMEOUT_S)
+    except ManagerUnreachable:
+        return {"ok":False,"reason":"manager_unreachable","request_id":request_id,"do_not_retry":True,"detail":"请求结果未知；恢复后复用 request_id 查询，不要创建新的切换请求"}
+    if status>=300:return error_result(status,payload,tool="rotate_proxy_ip")
+    deadline=time.monotonic()+max(0,min(105,int(args.get("wait_seconds",90))))
+    while payload.get("state") in {"queued","running"} and time.monotonic()<deadline:
+        await asyncio.sleep(2)
+        try:
+            status,updated=await client.get(f'/api/proxy-rotations/{quote(payload["id"],safe="")}')
+        except ManagerUnreachable:
+            return {"ok":False,"reason":"manager_unreachable","request_id":request_id,"job":payload,
+                "verified":False,"do_not_retry":True,"detail":"读取结果中断；用 job.id 查询，不要重新切换"}
+        if status>=300:break
+        payload=updated
+    return {"ok":payload.get("state")!="failed","reason":"rotation_failed" if payload.get("state")=="failed" else None,"request_id":request_id,"job":payload,"verified":payload.get("state")=="verified" and payload.get("proxy_id")==proxy_id and payload.get("profile_id")==args.get("profile_id"),
+        "do_not_retry":True,"next_step":"查看 job.state；未完成用 get_proxy_rotation_result 查询。已打开的网页连接可能需要重连，未经用户要求不要自动关闭浏览器。"}
 
 
 @register("stop_profile", "关闭一个正在运行的画像浏览器。没在跑会回 not_running。", PROFILE_ID_ARGS, "action")
@@ -1521,6 +1602,11 @@ async def _browser_tabs(client: RestClient, args: dict[str, Any]) -> dict[str, A
 # ── English summaries (tool lists show "中文 | English") ──────────────────────
 
 TOOL_EN: dict[str, str] = {
+    "check_proxy_exit_ip": "Check a new connection through the selected proxy route without rotating its IP.",
+    "list_proxies": "List saved proxy endpoints and their rotation capabilities without credentials.",
+    "get_proxy_capabilities": "Discover IP rotation support, cooldown and affected profiles.",
+    "get_proxy_rotation_result": "Read a rotation job without triggering another refresh request.",
+    "rotate_proxy_ip": "Rotate a SOCKS5 exit via its configured supplier link and verify the actual route.",
     "manager_status": "Overview: versions, running browsers, profile count, active automation. Call this first.",
     "list_profiles": "List all profiles (id, name, platform, device, timezone/locale, fingerprint config, state). Proxy shown as endpoint only; no notes or cookies.",
     "get_profile": "One profile's full config (same field policy) plus live run state.",
@@ -1704,6 +1790,8 @@ INSTRUCTIONS = """\
 CloakBrowser Manager：管理「指纹浏览器画像」（profile）的本机服务。每个画像是一个独立的浏览器身份\
 （指纹、代理、Cookie、登录状态都隔离）。你通过这组工具看懂并启停画像；在 automation 档还能直接操作页面。
 CloakBrowser Manager runs isolated fingerprint-browser profiles on this machine. These tools inspect and start/stop them; in `automation` mode they also let you drive pages.
+
+代理换 IP：先 list_proxies / get_proxy_capabilities 查能力、关联和影响范围；用 rotate_proxy_ip 调用已配置的供应商链接。只有 verified 才表示所验证路径的 IP 已改变；queued/running 用 get_proxy_rotation_result 继续查，accepted_unverified/unchanged 不要反复请求刷新链接。同一意图复用 request_id。check_proxy_exit_ip 会按环境实际直连/中转路径新建连接检查。旧网页连接可能仍需重连，未经要求不要关闭浏览器。Proxy rotation: discover capabilities, invoke rotate_proxy_ip once, poll its job; never replay uncertain mutations.
 
 标准流程 / Standard flow:
 1. manager_status — 先打招呼：版本、运行数、是否有自动化在跑。
