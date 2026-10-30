@@ -299,7 +299,7 @@ Ctrl + C
 
 启动后的本地信息页会检查主页面、iframe 和 Worker 的语言、时区、UA、平台、CPU 和内存，还会检查 WebGL、Canvas/Audio 稳定性、字体基线、Cookie 和常见网页存储。报告只显示有证据的通过、警告或失败，不承诺任何网站都无法识别自动化。
 
-### SOCKS5 服务器中转（v0.9.0）
+### SOCKS5 服务器中转（v0.9.1）
 
 在「代理 → 中转服务器」添加 VLESS TLS/REALITY、Trojan、VMess TLS 或 Shadowsocks 加密入口；编辑环境的 SOCKS5 时，可选择「直接连接 SOCKS5」或「通过中转服务器」。多个环境可共用中转，各自保留最终 SOCKS5。旧环境默认直接连接。
 
