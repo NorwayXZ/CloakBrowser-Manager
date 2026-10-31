@@ -88,12 +88,15 @@ def _run_cocoa_app(url: str, server, server_thread: threading.Thread, *, backgro
     from AppKit import (
         NSAlert,
         NSApplication,
+        NSApplicationActivationPolicyAccessory,
         NSApplicationActivationPolicyRegular,
+        NSImage,
         NSMenu,
         NSMenuItem,
         NSAlertFirstButtonReturn,
         NSControlStateValueOff,
         NSControlStateValueOn,
+        NSStatusBar,
         NSTerminateLater,
         NSTerminateNow,
     )
@@ -106,13 +109,21 @@ def _run_cocoa_app(url: str, server, server_thread: threading.Thread, *, backgro
         from panel_window import PanelWindowController
 
         panel = PanelWindowController.alloc().initWithURL_(url)
+        panel.on_close = lambda: set_dock_visible(False)
     except Exception:  # WebKit bridge missing: fall back to a Chrome window
         logger.exception("Panel window unavailable; using the browser instead")
         panel = None
 
+    def set_dock_visible(visible: bool) -> None:
+        """Dock icon and menu bar only while the panel window is open."""
+        app.setActivationPolicy_(
+            NSApplicationActivationPolicyRegular if visible else NSApplicationActivationPolicyAccessory
+        )
+
     def show_panel() -> None:
         """Main thread only."""
         if panel is not None:
+            set_dock_visible(True)
             panel.show()
         else:
             threading.Thread(target=open_panel, args=(url,), daemon=True).start()
@@ -255,7 +266,11 @@ def _run_cocoa_app(url: str, server, server_thread: threading.Thread, *, backgro
                 return
             sender.setState_(NSControlStateValueOn if enabled else NSControlStateValueOff)
 
-    app.setActivationPolicy_(NSApplicationActivationPolicyRegular)
+    # Closing the window leaves the app in the menu bar with no Dock icon; with
+    # --background (login item) it starts that way.
+    app.setActivationPolicy_(
+        NSApplicationActivationPolicyAccessory if background and panel is not None else NSApplicationActivationPolicyRegular
+    )
     delegate = AppDelegate.alloc().init()
     app.setDelegate_(delegate)
 
@@ -314,6 +329,31 @@ def _run_cocoa_app(url: str, server, server_thread: threading.Thread, *, backgro
     app.setWindowsMenu_(window_menu)
 
     app.setMainMenu_(main_menu)
+
+    # Menu bar icon: stays after the window is closed. Its menu mirrors the app menu.
+    status_item = NSStatusBar.systemStatusBar().statusItemWithLength_(-1)  # variable length
+    button = status_item.button()
+    symbol = None
+    if hasattr(NSImage, "imageWithSystemSymbolName_accessibilityDescription_"):  # macOS 11+
+        symbol = NSImage.imageWithSystemSymbolName_accessibilityDescription_("shield.lefthalf.filled", APP_NAME)
+    if symbol is not None:
+        symbol.setTemplate_(True)
+        button.setImage_(symbol)
+    else:
+        button.setTitle_("C")
+    button.setToolTip_(APP_NAME)
+    status_menu = NSMenu.alloc().init()
+    add_item(status_menu, "打开管理面板", "openPanel:")
+    status_menu.addItem_(NSMenuItem.separatorItem())
+    status_version = add_item(status_menu, f"版本 {version or '开发版'}", None, target=None)
+    status_version.setEnabled_(False)
+    add_item(status_menu, "检查更新…", "checkForUpdates:")
+    add_item(status_menu, "打开画像数据目录", "openDataDir:")
+    add_item(status_menu, "打开日志目录", "openLogs:")
+    status_menu.addItem_(NSMenuItem.separatorItem())
+    add_item(status_menu, "退出（关闭所有浏览器）", "terminate:", target=app)
+    status_item.setMenu_(status_menu)
+    state["status_item"] = status_item  # keep it alive
 
     AppHelper.runEventLoop()
 

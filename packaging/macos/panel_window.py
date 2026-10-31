@@ -112,6 +112,7 @@ class PanelWindowController(NSObject):
         self.window = None
         self.webview = None
         self.loaded = False
+        self.on_close = None  # called when the window is closed (it only hides)
         return self
 
     # ── Window ───────────────────────────────────────────────────────────
@@ -184,6 +185,10 @@ class PanelWindowController(NSObject):
         self.window.makeKeyAndOrderFront_(None)
         NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
         logger.info("Panel window shown")
+
+    def windowWillClose_(self, _notification):
+        if self.on_close is not None:
+            self.on_close()
 
     @objc.python_method
     def reload(self):
