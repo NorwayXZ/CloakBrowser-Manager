@@ -73,7 +73,7 @@ export function locationText(profile: Pick<Profile, "proxy" | "proxy_geo">): str
 }
 
 export function engineLabel(profile: Pick<Profile, "browser_engine">): string {
-  return profile.browser_engine === "cloakbrowser" ? "伪装画像" : "稳定原生";
+  return profile.browser_engine === "cloakbrowser" ? "防检测浏览器" : "稳定原生";
 }
 
 export function hasLaunchFailure(profile: Pick<Profile, "status" | "last_exit_reason">): boolean {
@@ -82,7 +82,7 @@ export function hasLaunchFailure(profile: Pick<Profile, "status" | "last_exit_re
 }
 
 const EXIT_CODE_REASONS: Record<string, string> = {
-  "异常退出（代码 76）": "授权并发已满，请先关闭其他伪装画像",
+  "异常退出（代码 76）": "授权并发已满，请先关闭其他防检测浏览器",
   "异常退出（代码 77）": "CloakBrowser 授权无效或已过期",
   "异常退出（代码 78）": "CloakBrowser 授权服务器连接失败",
   "异常退出（代码 79）": "本地授权配置异常",

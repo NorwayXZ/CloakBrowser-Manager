@@ -18,7 +18,7 @@ export function Table({
   minWidth?: number;
 }) {
   return (
-    <div className={cn("min-w-0 overflow-auto rounded-md border border-border bg-surface shadow-raised", className)}>
+    <div className={cn("min-w-0 glass overflow-auto rounded-lg", className)}>
       <table aria-label={label} className="w-full table-fixed border-separate border-spacing-0 text-sm" style={minWidth ? { minWidth } : undefined}>
         {children}
       </table>
@@ -27,7 +27,7 @@ export function Table({
 }
 
 export function THead({ children }: { children: ReactNode }) {
-  return <thead className="sticky top-0 z-10 bg-surface-2/90 backdrop-blur-md">{children}</thead>;
+  return <thead className="sticky top-0 z-10 bg-surface-2/70 backdrop-blur-md">{children}</thead>;
 }
 
 export function TH({ className, children, ...rest }: ThHTMLAttributes<HTMLTableCellElement>) {

@@ -30,7 +30,7 @@ export function RelayNodesPanel() {
     try { await relayApi.remove(node.id); await cache.invalidateQueries({ queryKey: relayKey }); }
     catch (e) { setNotice({ error: true, text: e instanceof Error ? e.message : String(e) }); }
   };
-  return <div className="flex flex-col gap-5 p-6">
+  return <div className="flex flex-col gap-5 pb-8 pt-2">
     <PageHeader title="中转服务器" description="先连接这台服务器，再连接每个环境自己的 SOCKS5。多个环境可共用一台中转。" actions={<Button icon={<Plus className="h-4 w-4" />} onClick={() => setEditing("new")}>添加中转服务器</Button>} />
     <p className="text-sm text-fg-2">先在服务器或 Flux 面板创建一条加密代理入口，选择服务器自身 IP 出口，再把连接链接添加到这里。已有环境保持直接连接；修改中转后，正在运行的环境需关闭并重新打开才能应用。</p>
     {notice && <Banner tone={notice.error ? "danger" : "info"}>{notice.text}</Banner>}

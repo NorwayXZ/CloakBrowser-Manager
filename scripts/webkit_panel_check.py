@@ -56,7 +56,7 @@ from capture_next_ui import LAYOUT_CHECK  # noqa: E402
 OUT = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "build" / "webkit-check"
 
 PAGES = [
-    ("profiles", "/profiles", "tr[data-row]"),
+    ("profiles", "/profiles", "[data-row]"),
     ("editor", "/profiles/new", "#form-basic"),
     ("proxies", "/proxies", "text=美国 SOCKS5"),
     ("checks", "/checks", "text=检测哪些网站"),
@@ -262,7 +262,7 @@ def run(base: str, work: Path) -> int:
     controller.webview.configuration().userContentController().addUserScript_(errors_script)
 
     # ── Every main page in WebKit ─────────────────────────────────────────
-    panel.open(base, "/profiles", "tr[data-row]")
+    panel.open(base, "/profiles", "[data-row]")
     features = panel.js(
         "JSON.stringify({has: CSS.supports('selector(:has(a))'), mix: CSS.supports('color: color-mix(in srgb, red, blue)'),"
         " dvh: CSS.supports('height: 100dvh'), agent: navigator.userAgent})"

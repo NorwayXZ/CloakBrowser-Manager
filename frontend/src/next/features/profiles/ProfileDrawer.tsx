@@ -16,7 +16,7 @@ import {
 } from "./format";
 import { ProxyIpActions } from "../proxies/ProxyIpActions";
 import { NoteField } from "./NoteField";
-import type { RowActions } from "./ProfileTable";
+import type { RowActions } from "./ProfileCards";
 import type { Profile } from "./types";
 
 const FingerprintReportDialog = lazy(() => import("./FingerprintReportDialog").then((m) => ({ default: m.FingerprintReportDialog })));
@@ -62,8 +62,8 @@ export function ProfileDrawer({
         }
       }}
       className={cn(
-        "flex w-drawer max-w-full shrink-0 flex-col border-l border-border bg-surface",
-        overlay && "absolute inset-y-0 right-0 z-20 shadow-modal animate-[cbm-pop-in_160ms_ease-out]",
+        "glass-strong flex w-drawer max-w-full shrink-0 flex-col rounded-none border-y-0 border-r-0",
+        overlay && "absolute inset-y-0 right-0 z-20 animate-[cbm-pop-in_160ms_ease-out]",
       )}
     >
       <header className="flex items-start gap-2 border-b border-border px-4 py-3">
@@ -159,7 +159,7 @@ export function ProfileDrawer({
               ...(profile.seed_device?.applies
                 ? [{ label: "设备（按种子生成）", value: seedDeviceLabel(profile) ?? "首次打开后显示" }]
                 : profile.device_profile
-                  ? [{ label: "设备画像", value: <span className="break-all">{profile.device_profile}</span> }]
+                  ? [{ label: "设备型号", value: <span className="break-all">{profile.device_profile}</span> }]
                   : []),
               { label: "User-Agent", value: <span className="break-all text-xs">{profile.user_agent || "跟随真实浏览器"}</span> },
               { label: "最近打开", value: formatDateTime(profile.last_opened_at) },
@@ -183,7 +183,7 @@ export function ProfileDrawer({
         </Button>
         {profile.disposable && (
           <Button variant="danger-ghost" size="sm" icon={<Flame className="h-3.5 w-3.5" />} onClick={() => actions.burn(profile)}>
-            焚毁
+            永久删除
           </Button>
         )}
       </footer>

@@ -163,7 +163,7 @@ function KernelPanel({ info, refreshing, onRefresh }: { info: KernelOverview; re
       <Section
         id="kernel"
         title="浏览器内核"
-        description="只有“伪装画像”引擎使用这个内核；“稳定原生”用电脑上的 Google Chrome，跟着 Chrome 自己更新。更新后，已经打开的浏览器要关掉重开才会用上新内核。"
+        description="只有“防检测浏览器”引擎使用这个内核；“稳定原生”用电脑上的 Google Chrome，跟着 Chrome 自己更新。更新后，已经打开的浏览器要关掉重开才会用上新内核。"
       >
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-start justify-between gap-4">
@@ -250,7 +250,7 @@ function KernelPanel({ info, refreshing, onRefresh }: { info: KernelOverview; re
               )}
             </div>
           </form>
-          <p className="text-xs text-fg-3">密钥只保存在运行 Manager 的这台电脑上（CloakBrowser 密钥文件），不会显示在面板里，也不会写进画像或备份。</p>
+          <p className="text-xs text-fg-3">密钥只保存在运行 Manager 的这台电脑上（CloakBrowser 密钥文件），不会显示在面板里，也不会写进环境或备份。</p>
         </div>
       </Section>
 
@@ -303,7 +303,7 @@ function KernelPanel({ info, refreshing, onRefresh }: { info: KernelOverview; re
         }
       >
         {info.installed_kernels.length === 0 ? (
-          <p className="text-sm text-fg-2">还没有下载内核，第一次启动伪装画像时会自动下载。</p>
+          <p className="text-sm text-fg-2">还没有下载内核，第一次启动防检测浏览器时会自动下载。</p>
         ) : (
           <Table label="已下载的内核">
             <THead>

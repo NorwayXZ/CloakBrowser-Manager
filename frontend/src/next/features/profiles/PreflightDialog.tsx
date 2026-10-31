@@ -43,7 +43,7 @@ export function PreflightDialog({
       open
       onOpenChange={(open) => !open && onCancel()}
       size="lg"
-      title={entries.length > 1 ? `启动前检查（${entries.length} 个环境）` : "启动前检查"}
+      title={entries.length > 1 ? `打开前检查（${entries.length} 个环境）` : "打开前检查"}
       description="检查的是浏览器兼容性和配置一致性，不是“反检测分数”。系统时区仍然是本机的系统时区。"
       footer={
         <div className="flex w-full flex-wrap items-center justify-between gap-3">
@@ -67,7 +67,7 @@ export function PreflightDialog({
                 <div className="min-w-0">
                   <div className="truncate text-sm font-semibold text-fg">{profile.name}</div>
                   <div className="text-xs text-fg-3">
-                    {result.browser_engine === "cloakbrowser" ? "CloakBrowser 画像" : "系统 Chrome 原生"} ·{" "}
+                    {result.browser_engine === "cloakbrowser" ? "防检测浏览器" : "系统 Chrome 原生"} ·{" "}
                     {result.launch_mode === "manual" ? "日常模式，不开外部 CDP" : "调试模式"}
                   </div>
                 </div>
@@ -76,7 +76,7 @@ export function PreflightDialog({
               <dl className="grid grid-cols-2 gap-x-4 gap-y-2 border-b border-border px-3 py-2.5 text-xs sm:grid-cols-4">
                 {[
                   ["外部 CDP", caps.external_cdp ? "已开启" : "未开启"],
-                  ["画像参数", caps.fingerprint_args ? "CloakBrowser 底层" : "本机真实硬件"],
+                  ["设备参数", caps.fingerprint_args ? "CloakBrowser 底层" : "本机真实硬件"],
                   ["DNS 策略", caps.proxy_dns_policy === "proxy_host_resolver" ? "通过代理解析" : "直连"],
                   ["TLS", caps.tls_externally_verified ? "已外部验证" : "浏览器原生，未外部验证"],
                 ].map(([label, value]) => (

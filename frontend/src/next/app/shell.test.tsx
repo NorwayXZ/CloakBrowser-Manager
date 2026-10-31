@@ -31,7 +31,7 @@ function controllableMedia(initial: Record<string, boolean>) {
 }
 
 const DARK = "(prefers-color-scheme: dark)";
-const NARROW = "(max-width: 1179px)";
+const COMPACT = "(max-width: 899px)";
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -110,30 +110,26 @@ describe("app shell", () => {
     input.remove();
   });
 
-  it("collapses the sidebar and saves the choice", async () => {
-    controllableMedia({});
-    const fetchMock = mockFetch(shellRoutes());
-    renderApp("/settings");
-    fireEvent.click(screen.getByRole("button", { name: "收起侧栏" }));
-    expect(await screen.findByRole("button", { name: "展开侧栏" })).toBeInTheDocument();
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith("/api/settings/ui", expect.objectContaining({ method: "PUT", body: JSON.stringify({ theme: "system", sidebar_collapsed: true, interface: "new" }) })),
-    );
-    expect(window.localStorage.getItem("cbm.sidebar")).toBe("1");
-  });
-
-  it("forces icon-only sidebar in a narrow window, without a toggle", () => {
-    controllableMedia({ [NARROW]: true });
+  it("shows icon-only page links in a compact window", () => {
+    controllableMedia({ [COMPACT]: true });
     mockFetch(shellRoutes());
     renderApp("/settings");
-    expect(screen.queryByRole("button", { name: "收起侧栏" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "展开侧栏" })).not.toBeInTheDocument();
-    expect(screen.queryByText("Manager v0.7.2")).not.toBeInTheDocument();
+    expect(screen.queryByText("CloakBrowser")).not.toBeInTheDocument();
     const link = screen.getByRole("link", { name: "设置" });
     // The tooltip wrapper must not turn the link's class into function source.
-    expect(link.className).toContain("h-8");
+    expect(link.className).toContain("h-10");
     expect(link.className).not.toContain("=>");
     expect(link).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "环境" })).not.toHaveAttribute("aria-current");
+  });
+
+  it("shows the page names and the product mark in a wide window", () => {
+    controllableMedia({});
+    mockFetch(shellRoutes());
+    renderApp("/settings");
+    expect(screen.getByText("CloakBrowser")).toBeInTheDocument();
+    const nav = screen.getByRole("navigation", { name: "页面" });
+    expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual(["环境", "代理", "邮箱", "检测", "数据", "设置"]);
   });
 
   it("asks for a restart when the running Manager is older than the panel", async () => {
@@ -258,10 +254,10 @@ describe("connection banner", () => {
     await act(async () => {
       await client.refetchQueries();
     });
-    expect(await screen.findByText("连接不到 Manager 服务")).toBeInTheDocument();
+    expect(await screen.findByText("无法连接 Manager")).toBeInTheDocument();
     down = false;
     expect(await screen.findByText("已重新连接到 Manager", {}, { timeout: 3000 })).toBeInTheDocument();
-    expect(screen.queryByText("连接不到 Manager 服务")).not.toBeInTheDocument();
+    expect(screen.queryByText("无法连接 Manager")).not.toBeInTheDocument();
   });
 });
 
@@ -282,10 +278,10 @@ describe("route error boundary", () => {
         <MaybeBoom />
       </RouteErrorBoundary>,
     );
-    expect(screen.getByText("这一页出错了")).toBeInTheDocument();
+    expect(screen.getByText("这一页出了点问题")).toBeInTheDocument();
     expect(screen.getByText(/组件炸了/)).toBeInTheDocument();
     crash = false;
-    fireEvent.click(screen.getByRole("button", { name: "重新加载此页" }));
+    fireEvent.click(screen.getByRole("button", { name: "重新载入" }));
     expect(screen.getByText("恢复了")).toBeInTheDocument();
     consoleError.mockRestore();
   });

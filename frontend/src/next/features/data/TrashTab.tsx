@@ -62,7 +62,7 @@ export function TrashTab() {
     <div className="flex max-w-form flex-col gap-4">
       <Banner tone="info">删除的环境在回收站保留 7 天，到期自动清理；这期间可以恢复，也可以彻底删除。</Banner>
       {trash.data.length === 0 ? (
-        <div className="rounded-md border border-dashed border-border-strong bg-surface">
+        <div className="glass rounded-lg">
           <EmptyState icon={Trash2} title="回收站是空的" description="在环境列表里移到回收站的环境会出现在这里。" />
         </div>
       ) : (

@@ -105,7 +105,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     emitNetwork(false);
     throw timedOut
       ? new ApiError("timeout", "Manager 没有及时响应，请稍后再试")
-      : new ApiError("network", "连接不到 Manager 服务");
+      : new ApiError("network", "无法连接 Manager");
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener("abort", abortFromCaller);

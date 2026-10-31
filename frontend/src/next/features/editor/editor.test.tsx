@@ -332,9 +332,78 @@ describe("cookies", () => {
   });
 });
 
-describe("layout and summary", () => {
-  it("lists every form section in the section navigation", async () => {
+describe("new environment wizard", () => {
+  const stepBar = () => screen.getByRole("list", { name: "创建步骤" });
+  const folded = (id: string) => document.getElementById(`form-${id}`)!.parentElement as HTMLElement;
+
+  it("goes one question at a time and keeps every section's values", async () => {
+    const { fetchMock } = await openEditor("/profiles/new", "windows");
+    expect(within(stepBar()).getAllByRole("button").map((b) => b.textContent)).toEqual(["1名称", "2网络", "3设备", "4更多"]);
+    expect(within(stepBar()).getByRole("button", { name: /名称/ })).toHaveAttribute("aria-current", "step");
+    expect(screen.getByRole("heading", { name: "先给它起个名字" })).toBeInTheDocument();
+    expect(folded("basic")).not.toHaveAttribute("inert");
+    expect(folded("proxy")).toHaveAttribute("inert");
+    expect(folded("fingerprint")).toHaveAttribute("inert");
+
+    setName("向导创建");
+    fireEvent.click(screen.getByRole("button", { name: /^下一步/ }));
+    expect(screen.getByRole("heading", { name: "这个环境怎么上网？" })).toBeInTheDocument();
+    expect(folded("proxy")).not.toHaveAttribute("inert");
+    expect(folded("basic")).toHaveAttribute("inert");
+    fireEvent.click(radio("代理方式", "自定义代理"));
+
+    fireEvent.click(screen.getByRole("button", { name: /^下一步/ }));
+    expect(screen.getByRole("heading", { name: "它是一台什么设备？" })).toBeInTheDocument();
+    expect(folded("fingerprint")).not.toHaveAttribute("inert");
+    expect(folded("more-fingerprint")).not.toHaveAttribute("inert");
+
+    fireEvent.click(screen.getByRole("button", { name: /^下一步/ }));
+    expect(screen.getByRole("heading", { name: "最后看看这些" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^下一步/ })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^上一步/ }));
+    expect(screen.getByRole("heading", { name: "它是一台什么设备？" })).toBeInTheDocument();
+
+    const body = await create(fetchMock);
+    expect(body.name).toBe("向导创建");
+  });
+
+  it("asks for the name before leaving the first step", async () => {
     await openEditor("/profiles/new", "windows");
+    fireEvent.click(screen.getByRole("button", { name: /^下一步/ }));
+    expect(await screen.findByText("请填写名称")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: /^名称/ })).toHaveFocus();
+    expect(screen.getByRole("heading", { name: "先给它起个名字" })).toBeInTheDocument();
+    fireEvent.click(within(stepBar()).getByRole("button", { name: /设备/ }));
+    expect(screen.getByRole("heading", { name: "先给它起个名字" })).toBeInTheDocument();
+  });
+
+  it("can create from the first step: a name is all it needs", async () => {
+    const { fetchMock } = await openEditor("/profiles/new", "windows");
+    setName("只有名称");
+    expect((await create(fetchMock)).name).toBe("只有名称");
+  });
+
+  it("jumps back and forward through the step bar once the name is set", async () => {
+    await openEditor("/profiles/new", "windows");
+    setName("跳转");
+    fireEvent.click(within(stepBar()).getByRole("button", { name: /设备/ }));
+    expect(screen.getByRole("heading", { name: "它是一台什么设备？" })).toBeInTheDocument();
+    fireEvent.click(within(stepBar()).getByRole("button", { name: /名称/ }));
+    expect(screen.getByRole("heading", { name: "先给它起个名字" })).toBeInTheDocument();
+  });
+
+  it("editing keeps the single scrolling form without steps", async () => {
+    await openEditor("/profiles/profile-1/edit", "windows");
+    expect(screen.queryByRole("list", { name: "创建步骤" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^下一步/ })).not.toBeInTheDocument();
+    for (const id of ["basic", "proxy", "fingerprint", "more-fingerprint", "advanced"]) expect(document.getElementById(`form-${id}`)).toBeVisible();
+  });
+});
+
+describe("layout and summary", () => {
+  it("lists every form section in the section navigation when editing", async () => {
+    await openEditor("/profiles/profile-1/edit", "windows");
     const nav = screen.getByRole("navigation", { name: "表单分区" });
     expect(within(nav).getAllByRole("button").map((b) => b.textContent)).toEqual(["基础设置", "代理信息", "指纹配置", "更多指纹", "高级设置"]);
     for (const id of ["basic", "proxy", "fingerprint", "more-fingerprint", "advanced"]) expect(document.getElementById(`form-${id}`)).toBeInTheDocument();
@@ -352,9 +421,9 @@ describe("layout and summary", () => {
 
   it("swaps to another device of this computer's platform", async () => {
     await openEditor("/profiles/new");
-    const device = screen.getByLabelText("设备画像");
+    const device = screen.getByLabelText("设备型号");
     const before = (device as HTMLSelectElement).value;
-    fireEvent.click(screen.getByRole("button", { name: "随机设备画像" }));
+    fireEvent.click(screen.getByRole("button", { name: "随机设备型号" }));
     expect((device as HTMLSelectElement).value).not.toBe(before);
     expect(within(screen.getByRole("complementary", { name: "概要" })).getByText("macOS")).toBeInTheDocument();
   });
@@ -436,7 +505,7 @@ describe("saving and leaving", () => {
   it("saves with ⌘/Ctrl+S, then returns to the list with the profile open", async () => {
     const { fetchMock, router } = await openEditor("/profiles/profile-1/edit");
     setName("改过的名字");
-    expect(screen.getByText("有未保存的修改")).toBeInTheDocument();
+    expect(screen.getByText("有改动尚未保存")).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "s", ctrlKey: true, metaKey: true });
     await waitFor(() => expect(saved(fetchMock, "PUT")?.name).toBe("改过的名字"));
     await waitFor(() => expect(router.state.location.pathname).toBe("/profiles"));
@@ -489,7 +558,7 @@ describe("saving and leaving", () => {
     expect(screen.getByRole("textbox", { name: /^名称/ })).toHaveValue("Awscnn");
     fireEvent.click(screen.getByRole("button", { name: "恢复" }));
     expect(screen.getByRole("textbox", { name: /^名称/ })).toHaveValue("草稿名字");
-    expect(screen.getByText("有未保存的修改")).toBeInTheDocument();
+    expect(screen.getByText("有改动尚未保存")).toBeInTheDocument();
   });
 
   it("moves the profile to the trash from the editor", async () => {

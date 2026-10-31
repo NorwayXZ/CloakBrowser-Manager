@@ -20,9 +20,9 @@ export function ChecksPage() {
   ];
 
   return (
-    <div className="flex flex-col gap-5 p-6">
+    <div className="flex flex-col gap-5 px-6 pb-8 pt-2 lg:px-10">
       <PageHeader title="检测" description="用公开检测网站验收环境，在克隆上验证修复，找出会被关联到一起的环境。" />
-      <nav aria-label="检测分类" className="flex gap-1 overflow-x-auto border-b border-border">
+      <nav aria-label="检测分类" className="glass flex w-fit max-w-full gap-1 overflow-x-auto rounded-full p-1.5">
         {tabs.map((item) => (
           <NavLink
             key={item.id}
@@ -30,8 +30,8 @@ export function ChecksPage() {
             end
             aria-current={tab === item.id ? "page" : undefined}
             className={cn(
-              "-mb-px flex h-9 shrink-0 items-center gap-1.5 border-b-2 px-3 text-sm font-medium transition-colors duration-fast",
-              tab === item.id ? "border-accent text-fg" : "border-transparent text-fg-2 hover:text-fg",
+              "flex h-9 shrink-0 items-center gap-1.5 rounded-full px-5 text-sm font-medium transition-[background-color,color,box-shadow] duration-fast",
+              tab === item.id ? "bg-surface text-fg shadow-raised" : "text-fg-2 hover:text-fg",
             )}
           >
             {item.label}
@@ -39,7 +39,7 @@ export function ChecksPage() {
           </NavLink>
         ))}
       </nav>
-      <div className="max-w-[1200px]">{tab === "evolution" ? <EvolutionTab /> : tab === "links" ? <LinkabilityTab /> : <ReportsTab />}</div>
+      <div className="max-w-[1400px]">{tab === "evolution" ? <EvolutionTab /> : tab === "links" ? <LinkabilityTab /> : <ReportsTab />}</div>
     </div>
   );
 }
@@ -91,7 +91,7 @@ function LinkabilityTab() {
         .map((cluster) => {
           const risk = RISK[cluster.risk as keyof typeof RISK] ?? { label: cluster.risk, tone: "warning" as const };
           return (
-            <section key={cluster.id} aria-label={`${risk.label}：${cluster.profiles.length} 个环境`} className="rounded-md border border-border bg-surface p-4">
+            <section key={cluster.id} aria-label={`${risk.label}：${cluster.profiles.length} 个环境`} className="glass rounded-lg p-4">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge tone={risk.tone}>{risk.label}</Badge>
                 <h3 className="text-sm font-medium text-fg">{cluster.profiles.length} 个环境可能被关联成同一个人</h3>

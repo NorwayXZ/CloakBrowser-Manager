@@ -57,7 +57,7 @@ describe("locationText", () => {
 
 describe("launch state", () => {
   it("translates license exit codes 76–79", () => {
-    expect(launchFailureReason({ last_exit_reason: "异常退出（代码 76）" })).toBe("授权并发已满，请先关闭其他伪装画像");
+    expect(launchFailureReason({ last_exit_reason: "异常退出（代码 76）" })).toBe("授权并发已满，请先关闭其他防检测浏览器");
     expect(launchFailureReason({ last_exit_reason: "异常退出（代码 77）" })).toBe("CloakBrowser 授权无效或已过期");
     expect(launchFailureReason({ last_exit_reason: "异常退出（代码 78）" })).toBe("CloakBrowser 授权服务器连接失败");
     expect(launchFailureReason({ last_exit_reason: "异常退出（代码 79）" })).toBe("本地授权配置异常");

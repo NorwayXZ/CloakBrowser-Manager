@@ -36,7 +36,7 @@ const FAIL: Preflight = {
   ...PASS,
   status: "fail",
   can_launch: false,
-  issues: [{ severity: "error", code: "os", message: "当前电脑是 macos，不能启动 windows 设备画像。" }],
+  issues: [{ severity: "error", code: "os", message: "当前电脑是 macos，不能启动 windows 设备型号。" }],
 };
 
 const AMAZON = makeProfile({ id: "a", name: "Amazon Seller #1", group_name: "美国账号", proxy: "socks5://u:p@203.0.113.24:1080", notes: "主店铺" });
@@ -54,7 +54,7 @@ function routes(extra: MockRoute[] = []): MockRoute[] {
 }
 
 function row(name: string) {
-  return screen.getByRole("row", { name });
+  return screen.getByRole("article", { name });
 }
 
 function openMenu(button: HTMLElement) {
@@ -65,7 +65,7 @@ async function renderList(extra: MockRoute[] = [], path = "/profiles") {
   const fetchMock = mockFetch(routes(extra));
   const utils = renderApp(path);
   // hidden: a dialog opened from the URL hides the list from the accessibility tree.
-  if (profiles.length && !path.includes("/viewer")) await screen.findByRole("row", { name: profiles[0]!.name, hidden: true });
+  if (profiles.length && !path.includes("/viewer")) await screen.findByRole("article", { name: profiles[0]!.name, hidden: true });
   return { fetchMock, ...utils };
 }
 
@@ -105,32 +105,32 @@ describe("environment list", () => {
     await renderList();
     expect(within(row("失败号")).getByText("上次启动失败")).toBeInTheDocument();
     fireEvent.click(within(row("失败号")).getByText("失败号"));
-    expect(await screen.findByText("授权并发已满，请先关闭其他伪装画像")).toBeInTheDocument();
+    expect(await screen.findByText("授权并发已满，请先关闭其他防检测浏览器")).toBeInTheDocument();
   });
 
   it("searches notes, proxy and UA, and offers to clear a search that matches nothing", async () => {
     await renderList();
     const search = screen.getByRole("textbox", { name: "搜索环境" });
     fireEvent.change(search, { target: { value: "主店铺" } });
-    expect(screen.getByRole("row", { name: "Amazon Seller #1" })).toBeInTheDocument();
-    expect(screen.queryByRole("row", { name: "Etsy UK" })).not.toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "Amazon Seller #1" })).toBeInTheDocument();
+    expect(screen.queryByRole("article", { name: "Etsy UK" })).not.toBeInTheDocument();
     fireEvent.change(search, { target: { value: "special" } });
-    expect(screen.getByRole("row", { name: "Etsy UK" })).toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "Etsy UK" })).toBeInTheDocument();
     fireEvent.change(search, { target: { value: "没有这个" } });
     expect(screen.getByText("没有匹配的环境")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "清除筛选" }));
-    expect(screen.getByRole("row", { name: "Etsy UK" })).toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "Etsy UK" })).toBeInTheDocument();
   });
 
   it("filters by group, including 未分组", async () => {
     await renderList();
     const rail = screen.getByRole("navigation", { name: "分组" });
     fireEvent.click(within(rail).getByRole("button", { name: /^美国账号/ }));
-    expect(screen.queryByRole("row", { name: "Etsy UK" })).not.toBeInTheDocument();
-    expect(screen.getByRole("row", { name: "Amazon Seller #1" })).toBeInTheDocument();
+    expect(screen.queryByRole("article", { name: "Etsy UK" })).not.toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "Amazon Seller #1" })).toBeInTheDocument();
     fireEvent.click(within(rail).getByRole("button", { name: /^未分组/ }));
-    expect(screen.getByRole("row", { name: "Etsy UK" })).toBeInTheDocument();
-    expect(screen.queryByRole("row", { name: "Amazon Seller #1" })).not.toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "Etsy UK" })).toBeInTheDocument();
+    expect(screen.queryByRole("article", { name: "Amazon Seller #1" })).not.toBeInTheDocument();
   });
 
   it("creates and deletes groups; deleting says the environments go back to 未分组", async () => {
@@ -167,7 +167,7 @@ describe("environment list", () => {
     fail = false;
     mockFetch(routes());
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
-    expect(await screen.findByRole("row", { name: "Amazon Seller #1" })).toBeInTheDocument();
+    expect(await screen.findByRole("article", { name: "Amazon Seller #1" })).toBeInTheDocument();
   });
 
   it("has no accessibility violations, with the details panel open", async () => {
@@ -253,7 +253,7 @@ describe("launching", () => {
       } },
     ]);
     fireEvent.click(screen.getByRole("button", { name: "打开「Etsy UK」" }));
-    const dialog = await screen.findByRole("dialog", { name: "启动前检查" });
+    const dialog = await screen.findByRole("dialog", { name: "打开前检查" });
     expect(String(calls(fetchMock, "GET", /preflight/)[0]?.[0])).toContain("launch_mode=manual");
     expect(dialog).toHaveTextContent("还没有保存的代理 GeoIP 结果");
     expect(dialog).toHaveTextContent("1 项提示不会阻止启动");
@@ -267,8 +267,8 @@ describe("launching", () => {
   it("will not continue when the check fails", async () => {
     const { fetchMock } = await renderList([{ path: /\/api\/profiles\/d1\/preflight/, respond: FAIL }]);
     fireEvent.click(screen.getByRole("button", { name: "打开「临时甲」" }));
-    const dialog = await screen.findByRole("dialog", { name: "启动前检查" });
-    expect(dialog).toHaveTextContent("不能启动 windows 设备画像");
+    const dialog = await screen.findByRole("dialog", { name: "打开前检查" });
+    expect(dialog).toHaveTextContent("不能启动 windows 设备型号");
     expect(within(dialog).getByRole("button", { name: "继续启动" })).toBeDisabled();
     fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
     expect(calls(fetchMock, "POST", /launch$/)).toHaveLength(0);
@@ -282,7 +282,7 @@ describe("launching", () => {
     openMenu(screen.getByRole("button", { name: "「Etsy UK」的更多操作" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "调试启动（开启 CDP）" }));
     await waitFor(() => expect(String(calls(fetchMock, "GET", /preflight/)[0]?.[0])).toContain("launch_mode=debug"));
-    fireEvent.click(within(await screen.findByRole("dialog", { name: "启动前检查" })).getByRole("button", { name: "继续启动" }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "打开前检查" })).getByRole("button", { name: "继续启动" }));
     await waitFor(() => expect(bodyOf(calls(fetchMock, "POST", /\/e\/launch$/)[0])).toEqual({ launch_mode: "debug" }));
   });
 
@@ -295,7 +295,7 @@ describe("launching", () => {
       } },
     ]);
     fireEvent.click(screen.getByRole("button", { name: "打开「Etsy UK」" }));
-    fireEvent.click(within(await screen.findByRole("dialog", { name: "启动前检查" })).getByRole("button", { name: "继续启动" }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "打开前检查" })).getByRole("button", { name: "继续启动" }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/profiles/e/viewer"));
     expect(await screen.findByRole("button", { name: "关闭浏览器" })).toBeInTheDocument();
   });
@@ -319,7 +319,7 @@ describe("launching", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "选择「Amazon Seller #1」" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "选择「Etsy UK」" }));
     fireEvent.click(within(screen.getByRole("toolbar", { name: "批量操作" })).getByRole("button", { name: /打开/ }));
-    const dialog = await screen.findByRole("dialog", { name: "启动前检查（2 个环境）" });
+    const dialog = await screen.findByRole("dialog", { name: "打开前检查（2 个环境）" });
     fireEvent.click(within(dialog).getByRole("button", { name: "继续启动" }));
     await waitFor(() => expect(calls(fetchMock, "POST", /launch$/)).toHaveLength(2));
     expect(await screen.findByText("已打开 2 个浏览器")).toBeInTheDocument();
@@ -332,7 +332,7 @@ describe("launching", () => {
       { method: "POST", path: "/api/profiles/e/launch", status: 409, respond: { detail: "CloakBrowser 授权服务器连接失败" } },
     ]);
     fireEvent.click(screen.getByRole("button", { name: "打开「Etsy UK」" }));
-    fireEvent.click(within(await screen.findByRole("dialog", { name: "启动前检查" })).getByRole("button", { name: "继续启动" }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "打开前检查" })).getByRole("button", { name: "继续启动" }));
     expect(await screen.findByText("「Etsy UK」没能打开")).toBeInTheDocument();
     expect(screen.getByText("CloakBrowser 授权服务器连接失败")).toBeInTheDocument();
   });
@@ -494,15 +494,15 @@ describe("trash and burn", () => {
   it("burns a disposable identity only after confirmation", async () => {
     const { fetchMock } = await renderList([{ method: "POST", path: "/api/profiles/d1/burn", respond: { ok: true, profile_id: "d1", user_data_dir: "", files_removed: 3, was_running: false } }]);
     openMenu(screen.getByRole("button", { name: "「临时甲」的更多操作" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "焚毁（彻底删除）" }));
-    const dialog = await screen.findByRole("dialog", { name: "焚毁「临时甲」？" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "永久删除" }));
+    const dialog = await screen.findByRole("dialog", { name: "永久删除「临时甲」？" });
     fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(calls(fetchMock, "POST", /burn$/)).toHaveLength(0);
 
     openMenu(screen.getByRole("button", { name: "「临时甲」的更多操作" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "焚毁（彻底删除）" }));
-    fireEvent.click(within(await screen.findByRole("dialog", { name: "焚毁「临时甲」？" })).getByRole("button", { name: "焚毁" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "永久删除" }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "永久删除「临时甲」？" })).getByRole("button", { name: "永久删除" }));
     await waitFor(() => expect(bodyOf(calls(fetchMock, "POST", /\/d1\/burn$/)[0])).toEqual({ confirm: true }));
   });
 
@@ -510,7 +510,7 @@ describe("trash and burn", () => {
     await renderList();
     openMenu(screen.getByRole("button", { name: "「Etsy UK」的更多操作" }));
     expect(await screen.findByRole("menuitem", { name: "移到回收站" })).toBeInTheDocument();
-    expect(screen.queryByRole("menuitem", { name: "焚毁（彻底删除）" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "永久删除" })).not.toBeInTheDocument();
   });
 });
 

@@ -73,7 +73,7 @@ describe("detection reports", () => {
   it("will not check a profile whose browser is open", async () => {
     profiles = [makeProfile({ id: "p1", name: "win", status: "running" })];
     await open();
-    expect(await screen.findByRole("button", { name: "开始一键检测" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "开始检测" })).toBeDisabled();
     expect(screen.getByText(/请先关闭它/)).toBeInTheDocument();
   });
 
@@ -85,8 +85,8 @@ describe("detection reports", () => {
       } },
     ]);
     await screen.findByText("CreepJS");
-    fireEvent.click(screen.getByRole("button", { name: "开始一键检测" }));
-    fireEvent.click(within(await screen.findByRole("dialog", { name: "对「win」生成一键检测报告？" })).getByRole("button", { name: "开始检测" }));
+    fireEvent.click(screen.getByRole("button", { name: "开始检测" }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "对「win」开始检测？" })).getByRole("button", { name: "开始检测" }));
     await waitFor(() => expect(calls(fetchMock, "POST", "/api/profiles/p1/site-check")).toHaveLength(1));
     expect(await screen.findByText("正在检测「win」：Pixelscan（2/2）")).toBeInTheDocument();
     expect(screen.getByRole("progressbar", { name: "检测进度" })).toHaveAttribute("aria-valuenow", "100");
@@ -99,7 +99,7 @@ describe("detection reports", () => {
 
   it("explains a check that could not start", async () => {
     await open("/checks", [{ method: "POST", path: "/api/profiles/p1/site-check", status: 409, respond: { detail: "已经有一项检测在进行" } }]);
-    fireEvent.click(await screen.findByRole("button", { name: "开始一键检测" }));
+    fireEvent.click(await screen.findByRole("button", { name: "开始检测" }));
     fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "开始检测" }));
     expect(await screen.findByText("已经有一项检测在进行")).toBeInTheDocument();
   });
@@ -128,7 +128,7 @@ describe("detection reports", () => {
       summary: { pass: 1, warn: 1, fail: 1, unknown: 0, error: 0, total: 3 },
       egress_note: "本次 direct 出口 1.2.3.4（JP）。标注「IP 信誉」的条目结论受出口 IP 影响。",
       results: [
-        { site: "local_gpu", name: "GPU / WebGL", criteria: "与画像配置一致", status: "pass", summary: "ANGLE (NVIDIA)", details: [], screenshot: null, source: "local" },
+        { site: "local_gpu", name: "GPU / WebGL", criteria: "与设备型号配置一致", status: "pass", summary: "ANGLE (NVIDIA)", details: [], screenshot: null, source: "local" },
         { site: "fingerprint", name: "Fingerprint.com", criteria: "不是机器人", status: "warn", summary: "浏览器没被认出，但 IP 被认出", details: [], screenshot: null, source: "site", ip_note: "这一项的结论受出口 IP 信誉影响" },
         REPORT.results[1]!,
       ],
@@ -239,7 +239,7 @@ describe("evolution", () => {
     const { fetchMock } = await open("/checks/evolution", evolutionRoutes([], [], [{ method: "POST", path: "/api/profiles/p1/evolution/run", respond: { ok: true, started: true } }]));
     expect(await screen.findByText(/暂无待批准提案/)).toBeInTheDocument();
     expect(screen.getByText("还没有进化记录")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "立即进化一次" }));
+    fireEvent.click(screen.getByRole("button", { name: "现在运行一次" }));
     fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "开始" }));
     await waitFor(() => expect(calls(fetchMock, "POST", "/api/profiles/p1/evolution/run")).toHaveLength(1));
   });
@@ -258,7 +258,7 @@ describe("linkability", () => {
     clusters: [
       {
         id: "c1", risk: "high", profiles: [{ id: "a", name: "出口甲" }, { id: "b", name: "出口乙" }],
-        links: [{ a_id: "a", b_id: "b", a_name: "出口甲", b_name: "出口乙", score: 55, level: "strong", reasons: ["共用同一代理出口 203.0.113.9"], suggestions: ["给其中一个画像换一个独立的代理出口"] }],
+        links: [{ a_id: "a", b_id: "b", a_name: "出口甲", b_name: "出口乙", score: 55, level: "strong", reasons: ["共用同一代理出口 203.0.113.9"], suggestions: ["给其中一个设备型号换一个独立的代理出口"] }],
       },
     ],
   };
@@ -267,7 +267,7 @@ describe("linkability", () => {
     await open("/checks/links", [{ path: "/api/linkability", respond: RESULT }]);
     expect(await screen.findByText("高风险")).toBeInTheDocument();
     expect(screen.getByText(/共用同一代理出口/)).toBeInTheDocument();
-    expect(screen.getByText(/建议：给其中一个画像换一个独立的代理出口/)).toBeInTheDocument();
+    expect(screen.getByText(/建议：给其中一个设备型号换一个独立的代理出口/)).toBeInTheDocument();
     expect(screen.getByText(/强关联 · 55 分/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "出口甲" })).toHaveAttribute("href", "/profiles?p=a");
     expect(screen.getByText(/其中 2 个落在 1 组关联里/)).toBeInTheDocument();

@@ -45,7 +45,7 @@ export function FingerprintReportDialog({ profileId, profileName, onClose }: { p
       description={
         report
           ? `${STATUS[report.analysis.status].label} · 错误 ${report.analysis.error_count} · 警告 ${report.analysis.warning_count}`
-          : "检查主页面、iframe 和 Worker 的语言、时区和基础画像是否一致。"
+          : "检查主页面、iframe 和 Worker 的语言、时区和基础信息是否一致。"
       }
       footer={
         <>
@@ -125,7 +125,7 @@ function ReportBody({ report }: { report: FingerprintReport }) {
       <p className="text-xs text-fg-3">“预期语言 / 时区”是浏览器层的值；系统时区仍然是本机的系统时区，Manager 不会修改它。</p>
 
       {report.analysis.issues.length === 0 ? (
-        <Banner tone="success">本地自检没有发现主页面、iframe、Worker 之间的语言、时区或基础画像不一致。</Banner>
+        <Banner tone="success">本地自检没有发现主页面、iframe、Worker 之间的语言、时区或基础信息不一致。</Banner>
       ) : (
         <ul className="flex flex-col gap-2" aria-label="发现的问题">
           {report.analysis.issues.map((issue, index) => (

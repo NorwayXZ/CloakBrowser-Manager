@@ -25,7 +25,7 @@ export function FingerprintSection({ editor, hostOS, hostScreen, isEdit }: { edi
   const preview = fingerprintPreviewRows({ form, proxyParts: editor.proxyParts, proxyTest: editor.proxyTest, hostOS, hostScreen, isEdit });
 
   return (
-    <Section id="form-fingerprint" title="指纹配置" description="设备画像决定屏幕、CPU、GPU 这些看得见的参数；稳定种子只决定同一画像里 Canvas、Audio 等细节。改完要保存并重新打开浏览器才生效。">
+    <Section id="form-fingerprint" title="指纹配置" description="设备型号决定屏幕、CPU、GPU 这些看得见的参数；稳定种子只决定同一设备型号里 Canvas、Audio 等细节。改完要保存并重新打开浏览器才生效。">
       <div className="mb-5 max-w-form rounded-md border border-border bg-surface-2 p-3">
         <KeyValueList items={preview.map(([label, value]) => ({ label, value }))} />
       </div>
@@ -34,7 +34,7 @@ export function FingerprintSection({ editor, hostOS, hostScreen, isEdit }: { edi
           label="稳定种子"
           description={
             engine === "cloakbrowser"
-              ? "不改变设备画像、CPU、GPU 或分辨率，只让同一套画像的细节输出保持稳定。想换整套画像，用“概要”里的“随机设备画像”。"
+              ? "不改变设备型号、CPU、GPU 或分辨率，只让同一套设备型号的细节输出保持稳定。想换整套设备型号，用“概要”里的“随机设备型号”。"
               : "稳定原生使用真实 Chrome 和真实硬件，这个值主要用于记录。"
           }
         >
@@ -91,10 +91,10 @@ export function FingerprintSection({ editor, hostOS, hostScreen, isEdit }: { edi
             </FormField>
           </div>
         )}
-        <FormField label="CPU 线程" description="留空表示稳定原生用真实 CPU；伪装画像按当前画像推荐线程数。">
-          <Input type="number" inputMode="numeric" value={form.hardware_concurrency ?? ""} placeholder="按画像或真实设备" onChange={(event) => set("hardware_concurrency", numberOrNull(event.target.value))} />
+        <FormField label="CPU 线程" description="留空表示稳定原生用真实 CPU；防检测浏览器按当前设备型号推荐线程数。">
+          <Input type="number" inputMode="numeric" value={form.hardware_concurrency ?? ""} placeholder="按设备型号或真实设备" onChange={(event) => set("hardware_concurrency", numberOrNull(event.target.value))} />
         </FormField>
-        <FormField label="浏览器内存" description="navigator.deviceMemory 只给出粗略值，最高 8 GB；画像默认 8，不虚构更大的值。">
+        <FormField label="浏览器内存" description="navigator.deviceMemory 只给出粗略值，最高 8 GB；设备型号默认 8，不虚构更大的值。">
           <Select value={form.device_memory ?? ""} onChange={(event) => set("device_memory", numberOrNull(event.target.value))}>
             <option value="">按真实设备</option>
             <option value="2">2 GB</option>
@@ -118,11 +118,11 @@ export function FingerprintSection({ editor, hostOS, hostScreen, isEdit }: { edi
             ))}
           </Select>
         </FormField>
-        <FormField label="GPU 厂商" className="md:col-span-2" description="通常不用改；只有用伪装画像并且明确知道目标设备时才填。">
-          <Input value={form.gpu_vendor ?? ""} placeholder="按画像或真实设备" onChange={(event) => set("gpu_vendor", event.target.value || null)} />
+        <FormField label="GPU 厂商" className="md:col-span-2" description="通常不用改；只有用防检测浏览器并且明确知道目标设备时才填。">
+          <Input value={form.gpu_vendor ?? ""} placeholder="按设备型号或真实设备" onChange={(event) => set("gpu_vendor", event.target.value || null)} />
         </FormField>
-        <FormField label="GPU 渲染器" className="md:col-span-2" description="WebGL 元数据里最显眼的硬件信息，必须和当前画像一致。">
-          <Input value={form.gpu_renderer ?? ""} placeholder="按画像或真实设备" onChange={(event) => set("gpu_renderer", event.target.value || null)} />
+        <FormField label="GPU 渲染器" className="md:col-span-2" description="WebGL 元数据里最显眼的硬件信息，必须和当前设备型号一致。">
+          <Input value={form.gpu_renderer ?? ""} placeholder="按设备型号或真实设备" onChange={(event) => set("gpu_renderer", event.target.value || null)} />
         </FormField>
       </div>
     </Section>
@@ -138,7 +138,7 @@ export function MoreFingerprintSection({ editor, hostOS }: { editor: Editor; hos
   if (engine !== "cloakbrowser") {
     return (
       <Section id="form-more-fingerprint" title="更多指纹">
-        <p className="text-sm text-fg-2">“稳定原生”使用电脑上的 Google Chrome 和真实硬件，不支持浏览器品牌、WebRTC IP 等额外伪装项；需要时把浏览器切换为“伪装画像”。</p>
+        <p className="text-sm text-fg-2">“稳定原生”使用电脑上的 Google Chrome 和真实硬件，不支持浏览器品牌、WebRTC IP 等额外伪装项；需要时把浏览器切换为“防检测浏览器”。</p>
       </Section>
     );
   }
@@ -205,7 +205,7 @@ export function MoreFingerprintSection({ editor, hostOS }: { editor: Editor; hos
             )}
           </div>
         </FormField>
-        <FormField label="指纹噪声" className="md:col-span-2" description={<Hint>噪声让每个画像的 Canvas、WebGL、音频输出各不相同。实测多数现代检测器对噪声净扣分，新建画像默认关闭；想回到内核默认可以切回“自动”；macOS 画像默认关闭。</Hint>}>
+        <FormField label="指纹噪声" className="md:col-span-2" description={<Hint>噪声让每个环境的 Canvas、WebGL、音频输出各不相同。实测多数现代检测器对噪声净扣分，新建环境默认关闭；想回到内核默认可以切回“自动”；macOS 设备型号默认关闭。</Hint>}>
           <Segmented
             label="指纹噪声"
             value={options.noise == null ? "auto" : options.noise ? "on" : "off"}
@@ -213,7 +213,7 @@ export function MoreFingerprintSection({ editor, hostOS }: { editor: Editor; hos
             onChange={(value) => setOption("noise", value === "auto" ? null : value === "on")}
           />
         </FormField>
-        <FormField label="存储配额" description={<Hint>navigator.storage.estimate() 报告的磁盘配额（MB）。真实电脑通常几十 GB 以上；新建画像默认 50000（约 50 GB），实测可以消除 BrowserScan 的无痕模式扣分。</Hint>}>
+        <FormField label="存储配额" description={<Hint>navigator.storage.estimate() 报告的磁盘配额（MB）。真实电脑通常几十 GB 以上；新建环境默认 50000（约 50 GB），实测可以消除 BrowserScan 的无痕模式扣分。</Hint>}>
           <div className="flex flex-wrap items-center gap-2">
             <Segmented
               label="存储配额"

@@ -45,9 +45,9 @@ export function DataPage() {
   ];
 
   return (
-    <div className="flex flex-col gap-5 p-6">
+    <div className="flex flex-col gap-5 px-6 pb-8 pt-2 lg:px-10">
       <PageHeader title="数据" description="备份、恢复、导出配置，以及 7 天内删除的环境。" />
-      <nav aria-label="数据分类" className="flex gap-1 border-b border-border">
+      <nav aria-label="数据分类" className="glass flex w-fit max-w-full gap-1 overflow-x-auto rounded-full p-1.5">
         {tabs.map((tab) => (
           <NavLink
             key={tab.to}
@@ -55,8 +55,8 @@ export function DataPage() {
             end
             aria-current={tab.active ? "page" : undefined}
             className={cn(
-              "-mb-px flex h-9 items-center gap-1.5 border-b-2 px-3 text-sm font-medium transition-colors duration-fast",
-              tab.active ? "border-accent text-fg" : "border-transparent text-fg-2 hover:text-fg",
+              "flex h-9 items-center gap-1.5 rounded-full px-5 text-sm font-medium transition-[background-color,color,box-shadow] duration-fast",
+              tab.active ? "bg-surface text-fg shadow-raised" : "text-fg-2 hover:text-fg",
             )}
           >
             {tab.label}

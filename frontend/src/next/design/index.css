@@ -15,11 +15,11 @@
   body {
     margin: 0;
     letter-spacing: -0.003em;
-    background: rgb(var(--c-canvas));
+    background: rgb(var(--c-canvas)) var(--page-gradient) fixed;
     color: rgb(var(--c-fg));
     font-family: var(--font-sans);
-    font-size: 13px;
-    line-height: 20px;
+    font-size: 14px;
+    line-height: 21px;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -59,6 +59,25 @@
       animation-duration: 0.01ms !important;
       transition-duration: 0.01ms !important;
     }
+  }
+}
+
+@layer components {
+  /* A translucent card: the page's gradient shows through, blurred. */
+  .glass {
+    background: rgb(var(--c-surface) / var(--glass-alpha));
+    border: 1px solid rgb(var(--c-glass-border) / var(--glass-border-alpha));
+    box-shadow: var(--shadow-card);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    backdrop-filter: blur(24px) saturate(160%);
+  }
+  /* Same, for floating layers (menus, popovers, the top bar). */
+  .glass-strong {
+    background: rgb(var(--c-surface) / calc(var(--glass-alpha) + 0.14));
+    border: 1px solid rgb(var(--c-glass-border) / var(--glass-border-alpha));
+    box-shadow: var(--shadow-popover);
+    -webkit-backdrop-filter: blur(28px) saturate(170%);
+    backdrop-filter: blur(28px) saturate(170%);
   }
 }
 

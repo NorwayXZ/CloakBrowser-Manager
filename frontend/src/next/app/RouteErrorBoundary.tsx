@@ -4,7 +4,7 @@ import { ErrorState } from "../ui";
 
 /**
  * A crash inside one page stays inside that page: the sidebar and toolbar keep
- * working, the error goes to manager.log, and "重新加载此页" re-mounts it.
+ * working, the error goes to manager.log, and "重新载入" re-mounts it.
  * The shell keys this boundary by path, so navigating away also clears it.
  */
 export class RouteErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
@@ -23,9 +23,9 @@ export class RouteErrorBoundary extends Component<{ children: ReactNode }, { err
     return (
       <div className="flex h-full items-center justify-center">
         <ErrorState
-          title="这一页出错了"
+          title="这一页出了点问题"
           message={`${this.state.error.message || "未知错误"}。错误已写入日志。`}
-          retryLabel="重新加载此页"
+          retryLabel="重新载入"
           onRetry={() => this.setState({ error: null })}
         />
       </div>

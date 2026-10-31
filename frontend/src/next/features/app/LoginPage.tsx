@@ -25,14 +25,14 @@ export function LoginPage({ initialUsername }: { initialUsername: string | null 
       void queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] !== "auth" });
     } catch (err) {
       setPassword("");
-      setError(isApiError(err) && err.kind !== "http" ? "连接不到 Manager 服务，请确认它正在运行。" : err instanceof Error ? err.message : String(err));
+      setError(isApiError(err) && err.kind !== "http" ? "无法连接 Manager，请确认它正在运行。" : err instanceof Error ? err.message : String(err));
       setLoading(false);
     }
   };
 
   return (
-    <main className="flex h-full items-center justify-center overflow-auto bg-canvas p-4">
-      <div className="w-full max-w-sm rounded-lg border border-border bg-surface p-6 shadow-raised">
+    <main className="flex h-full items-center justify-center overflow-auto p-4">
+      <div className="glass-strong w-full max-w-sm rounded-xl p-7">
         <div className="mb-6 flex flex-col items-center text-center">
           <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-md bg-accent-soft text-accent">
             <Lock className="h-5 w-5" aria-hidden />

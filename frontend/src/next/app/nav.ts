@@ -27,5 +27,8 @@ export const APP_BASENAME = "/";
 /** The previous panel, kept for one release as a way back. */
 export const LEGACY_PANEL_URL = "/legacy/";
 
-/** Below this width the sidebar only shows icons and side panels collapse. */
+/** Below this width the top bar's page switcher shows icons only. */
+export const COMPACT_QUERY = "(max-width: 899px)";
+
+/** Below this width side panels float over the content instead of docking. */
 export const NARROW_QUERY = "(max-width: 1179px)";

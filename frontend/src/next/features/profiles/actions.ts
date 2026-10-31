@@ -95,18 +95,18 @@ export function useProfileActions() {
   const burn = useCallback(
     async (profile: Profile): Promise<boolean> => {
       const ok = await confirm({
-        title: `焚毁「${profile.name}」？`,
-        description: "焚毁会永久删除这个一次性身份的全部数据（Cookie、登录状态、历史记录和本地文件），不进回收站，不能恢复。",
-        confirmLabel: "焚毁",
+        title: `永久删除「${profile.name}」？`,
+        description: "永久删除会永久删除这个一次性身份的全部数据（Cookie、登录状态、历史记录和本地文件），不进回收站，不能恢复。",
+        confirmLabel: "永久删除",
         danger: true,
       });
       if (!ok) return false;
       try {
         await profilesApi.burn(profile.id);
-        toast.show({ tone: "success", title: `「${profile.name}」已焚毁` });
+        toast.show({ tone: "success", title: `「${profile.name}」已永久删除` });
         return true;
       } catch (error) {
-        toast.show({ tone: "error", title: "焚毁没有完成", description: message(error) });
+        toast.show({ tone: "error", title: "永久删除没有完成", description: message(error) });
         return false;
       } finally {
         await invalidate();

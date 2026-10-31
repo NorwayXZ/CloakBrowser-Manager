@@ -34,7 +34,7 @@ export const BasicSection = forwardRef<HTMLInputElement, {
   const seedDerived = hostOS === "macos" && platform === "macos" && engine === "cloakbrowser";
 
   return (
-    <Section id="form-basic" title="基础设置" description="名称、分组、账号平台只用于管理；浏览器、设备画像、User-Agent、Cookie 和启动页面会影响实际打开的浏览器。">
+    <Section id="form-basic" title="基础设置" description="名称、分组、账号平台只用于管理；浏览器、设备型号、User-Agent、Cookie 和启动页面会影响实际打开的浏览器。">
       <div className="grid max-w-form grid-cols-1 gap-4 md:grid-cols-2">
         <FormField label="名称" required error={nameError ?? undefined} description="只用于你自己识别这个环境，不会写进网页指纹。" className="md:col-span-2">
           <Input
@@ -77,21 +77,21 @@ export const BasicSection = forwardRef<HTMLInputElement, {
         >
           <Select value={engine} onChange={(event) => editor.changeEngine(event.target.value as "system_chrome" | "cloakbrowser")}>
             <option value="system_chrome">稳定原生（系统 Chrome）</option>
-            <option value="cloakbrowser">伪装画像（CloakBrowser）</option>
+            <option value="cloakbrowser">防检测浏览器（CloakBrowser）</option>
           </Select>
         </FormField>
         <div className="flex flex-col gap-1.5">
           <span className="text-sm font-medium text-fg">操作系统</span>
           <span className="inline-flex h-8 w-fit items-center rounded border border-border bg-surface-2 px-2.5 text-sm text-fg">{platformLabel(platform)}</span>
-          <span className="text-xs text-fg-3">按当前电脑锁定：只提供同系统的设备画像，避免跨系统画像互相矛盾。</span>
+          <span className="text-xs text-fg-3">按当前电脑锁定：只提供同系统的设备型号，避免跨系统设备型号互相矛盾。</span>
         </div>
         <FormField
-          label="设备画像"
+          label="设备型号"
           className="md:col-span-2"
           description={
             seedDerived
               ? `在这台 Mac 上，内核按稳定种子生成整套 Apple 设备（GPU、核心数、内存），这里的选择只作记录、不会生效。网站实际看到：${seedDeviceLabel ?? "首次打开后显示"}。`
-              : "一键套用同平台的屏幕、CPU、GPU 组合；稳定原生下主要用作记录，伪装画像会写入可控参数。"
+              : "一键套用同平台的屏幕、CPU、GPU 组合；稳定原生下主要用作记录，防检测浏览器会写入可控参数。"
           }
         >
           <Select value={device.id} onChange={(event) => editor.changeDevice(event.target.value)}>

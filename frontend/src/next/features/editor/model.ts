@@ -331,7 +331,7 @@ export function changeDevice(form: EditorForm, id: string, hostOS?: HostOS | nul
   return applyDeviceProfile(form, next);
 }
 
-/** A different device of this host's platform, with a new seed ("随机设备画像"). */
+/** A different device of this host's platform, with a new seed ("随机设备型号"). */
 export function randomizeDevice(form: EditorForm, hostOS?: HostOS | null, random: () => number = Math.random): EditorForm {
   const allowed = getDevicePlatformForHost(hostOS);
   const defaultId = getDefaultDeviceProfileId(allowed);
@@ -415,12 +415,12 @@ function cpuGpu({ form }: SummaryContext) {
   const engine = normalizeFormEngine(form.browser_engine);
   const rendererName = form.gpu_renderer?.split("Renderer: ")[1] ?? form.gpu_renderer;
   return {
-    cpu: engine === "system_chrome" ? "真实设备" : form.hardware_concurrency ? `${form.hardware_concurrency} 线程` : "按画像",
+    cpu: engine === "system_chrome" ? "真实设备" : form.hardware_concurrency ? `${form.hardware_concurrency} 线程` : "按设备型号",
     gpu:
       engine === "system_chrome"
         ? "真实设备"
         : form.gpu_renderer?.includes("Renderer: ")
-          ? rendererName?.replace(", Unspecified Version)", ")") ?? "按画像"
+          ? rendererName?.replace(", Unspecified Version)", ")") ?? "按设备型号"
           : form.gpu_renderer ?? "真实设备",
   };
 }
@@ -457,7 +457,7 @@ export function summaryRows(ctx: SummaryContext): [string, string][] {
   return [
     ["浏览器", engine === "system_chrome" ? "Google Chrome 原生" : "CloakBrowser / Chromium"],
     ["系统", platformLabel(getDevicePlatformForHost(hostOS))],
-    ["画像", device.name],
+    ["设备型号", device.name],
     ["账号平台", form.account_platform || "未设置"],
     ["User-Agent", form.user_agent || "跟随真实浏览器"],
     ["代理", form.proxy ? `${proxyLabel(proxyParts)} · 已配置` : "直连 · 本地网络"],
@@ -466,8 +466,8 @@ export function summaryRows(ctx: SummaryContext): [string, string][] {
     ["时区", timezone],
     ["语言", locale],
     ["分辨率", screenLabel(ctx)],
-    ["Canvas", engine === "system_chrome" ? "真实" : "按画像"],
-    ["WebGL 图像", engine === "system_chrome" ? "真实" : "按画像"],
+    ["Canvas", engine === "system_chrome" ? "真实" : "按设备型号"],
+    ["WebGL 图像", engine === "system_chrome" ? "真实" : "按设备型号"],
     ["WebGL 元数据", gpu],
     ["CPU", cpu],
     ...cloakOnly,
@@ -483,14 +483,14 @@ export function fingerprintPreviewRows(ctx: SummaryContext): [string, string][] 
   const { cpu, gpu } = cpuGpu(ctx);
   const { timezone, locale } = timezoneLocale(ctx);
   return [
-    ["运行模式", engine === "system_chrome" ? "系统 Chrome 原生" : "CloakBrowser 画像"],
+    ["运行模式", engine === "system_chrome" ? "系统 Chrome 原生" : "防检测浏览器"],
     ["操作系统", platformLabel(getDevicePlatformForHost(hostOS))],
-    ["设备画像", device.name],
+    ["设备型号", device.name],
     ["CPU / 芯片", device.chip],
     ["屏幕", screenFollowsDisplay(form, hostScreen) ? screenLabel(ctx) : `${form.screen_width ?? device.screen_width} × ${form.screen_height ?? device.screen_height}`],
     ["CPU", cpu],
     ["GPU", gpu],
     ["语言/时区", `${locale} / ${timezone}`],
-    ["Canvas / Audio", engine === "system_chrome" ? "真实浏览器输出" : "按同一画像稳定输出"],
+    ["Canvas / Audio", engine === "system_chrome" ? "真实浏览器输出" : "按同一设备型号稳定输出"],
   ];
 }

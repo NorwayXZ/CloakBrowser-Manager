@@ -79,7 +79,7 @@ export function FormField({
 }
 
 const control =
-  "w-full min-w-0 rounded border border-border-strong bg-surface text-sm text-fg placeholder:text-fg-3 " +
+  "w-full min-w-0 rounded border border-border-strong/70 bg-surface/80 text-sm text-fg placeholder:text-fg-3 " +
   "transition-[border-color,box-shadow] duration-fast hover:border-fg-3 focus:border-accent focus:outline-none focus:ring-[3px] focus:ring-accent/25 " +
   "disabled:cursor-not-allowed disabled:bg-surface-2 disabled:text-fg-3 " +
   "aria-[invalid=true]:border-danger aria-[invalid=true]:focus:ring-danger/25";
@@ -87,7 +87,7 @@ const control =
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement> & { mono?: boolean }>(
   function Input({ className, id, mono, "aria-invalid": invalid, "aria-describedby": describedBy, ...rest }, ref) {
     const field = useField(id, invalid === true || invalid === "true" ? true : undefined, describedBy);
-    return <input ref={ref} {...field} className={cn(control, "h-8 px-2.5", mono && "font-mono", className)} {...rest} />;
+    return <input ref={ref} {...field} className={cn(control, "h-10 px-3.5", mono && "font-mono", className)} {...rest} />;
   },
 );
 
@@ -99,7 +99,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<H
         ref={ref}
         rows={rows}
         {...field}
-        className={cn(control, "px-2.5 py-1.5 leading-5", mono && "font-mono", className)}
+        className={cn(control, "px-3.5 py-2 leading-5", mono && "font-mono", className)}
         {...rest}
       />
     );
@@ -114,10 +114,10 @@ export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSel
   const field = useField(id, invalid === true || invalid === "true" ? true : undefined, describedBy);
   return (
     <div className={cn("relative min-w-0", className)}>
-      <select ref={ref} {...field} className={cn(control, "h-8 cursor-pointer appearance-none pl-2.5 pr-8")} {...rest}>
+      <select ref={ref} {...field} className={cn(control, "h-10 cursor-pointer appearance-none pl-3.5 pr-9")} {...rest}>
         {children}
       </select>
-      <ChevronDown aria-hidden className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-3" />
+      <ChevronDown aria-hidden className="pointer-events-none absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-3" />
     </div>
   );
 });
@@ -154,7 +154,7 @@ export function Checkbox({
       aria-describedby={description ? `${boxId}-desc` : undefined}
       onCheckedChange={(value) => onCheckedChange(value === true)}
       className={cn(
-        "flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] border border-border-strong bg-surface text-accent-on",
+        "flex h-5 w-5 shrink-0 items-center justify-center rounded-[7px] border border-border-strong bg-surface text-accent-on",
         "transition-colors duration-fast hover:border-fg-3 disabled:cursor-not-allowed disabled:opacity-50",
         "data-[state=checked]:border-accent-fill data-[state=checked]:bg-accent-fill",
         "data-[state=indeterminate]:border-accent-fill data-[state=indeterminate]:bg-accent-fill",
@@ -218,7 +218,7 @@ export function Segmented<T extends string>({
     buttons?.[(index + delta + options.length) % options.length]?.focus();
   };
   return (
-    <div role="radiogroup" aria-label={label} className={cn("inline-flex max-w-full flex-wrap gap-0.5 rounded-lg border border-border bg-surface-3/70 p-0.5", className)}>
+    <div role="radiogroup" aria-label={label} className={cn("inline-flex max-w-full flex-wrap gap-0.5 rounded-full border border-border/70 bg-surface-3/60 p-1", className)}>
       {options.map(([option, text]) => {
         const checked = value === option;
         return (
@@ -239,7 +239,7 @@ export function Segmented<T extends string>({
               }
             }}
             className={cn(
-              "h-7 rounded-[7px] px-3.5 text-sm transition-[background-color,color,box-shadow] duration-fast",
+              "h-8 rounded-full px-4 text-sm transition-[background-color,color,box-shadow] duration-fast",
               checked ? "bg-surface font-medium text-fg shadow-raised" : "text-fg-2 hover:text-fg",
             )}
           >
@@ -301,11 +301,11 @@ export function Switch({
         onCheckedChange={onCheckedChange}
         aria-describedby={description ? `${id}-desc` : undefined}
         className={cn(
-          "relative h-6 w-[42px] shrink-0 rounded-full bg-surface-3 ring-1 ring-inset ring-border-strong/60 transition-colors duration-base",
+          "relative h-[30px] w-[52px] shrink-0 rounded-full bg-surface-3 ring-1 ring-inset ring-border-strong/60 transition-colors duration-base",
           "data-[state=checked]:bg-switch-on data-[state=checked]:ring-0 disabled:cursor-not-allowed disabled:opacity-50",
         )}
       >
-        <RadixSwitch.Thumb className="block h-5 w-5 translate-x-0.5 rounded-full bg-white shadow-[0_2px_4px_rgb(0_0_0/0.28)] transition-transform duration-base data-[state=checked]:translate-x-[20px]" />
+        <RadixSwitch.Thumb className="block h-6 w-6 translate-x-[3px] rounded-full bg-white shadow-[0_2px_5px_rgb(0_0_0/0.3)] transition-transform duration-base data-[state=checked]:translate-x-[25px]" />
       </RadixSwitch.Root>
       </span>
     </div>

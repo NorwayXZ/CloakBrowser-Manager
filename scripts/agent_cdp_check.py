@@ -177,9 +177,9 @@ async def main_async(args: argparse.Namespace) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--profile", required=True, help="画像 id 或名称")
+    parser.add_argument("--profile", required=True, help="设备型号 id 或名称")
     parser.add_argument("--external-cdp", action="store_true", help="再用一个外部 Playwright 客户端探测一遍")
-    parser.add_argument("--keep", action="store_true", help="测完不关闭画像")
+    parser.add_argument("--keep", action="store_true", help="测完不关闭设备型号")
     raise SystemExit(asyncio.run(main_async(parser.parse_args())))
 
 

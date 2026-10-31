@@ -97,7 +97,7 @@ def main() -> int:
         "# Windows 检测成绩单（GitHub Actions windows-latest）",
         "",
         f"- 总评：**{report.get('overall')}**",
-        f"- 画像：{env.get('profile_name')} / 内核 {env.get('kernel_version')} / "
+        f"- 设备型号：{env.get('profile_name')} / 内核 {env.get('kernel_version')} / "
         f"宿主 {env.get('host_os')}（{env.get('host_os_version')}）",
         f"- 出口：{env.get('proxy_type')} {env.get('exit_ip') or ''} "
         f"{env.get('exit_country') or ''}",

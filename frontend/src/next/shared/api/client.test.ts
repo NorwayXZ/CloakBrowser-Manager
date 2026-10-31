@@ -65,7 +65,7 @@ describe("request", () => {
     const off = onNetworkState((ok) => states.push(ok));
     const error = await request("/api/x").catch((e) => e);
     off();
-    expect(error).toMatchObject({ kind: "network", message: "连接不到 Manager 服务" });
+    expect(error).toMatchObject({ kind: "network", message: "无法连接 Manager" });
     expect(error.retryable).toBe(true);
     expect(states).toEqual([false]);
   });

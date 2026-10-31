@@ -44,7 +44,7 @@ export function MailPage() {
   const configured = settings.data?.configured === true;
 
   return (
-    <div className="flex flex-col gap-6 p-6">
+    <div className="flex flex-col gap-6 px-6 pb-8 pt-2 lg:px-10">
       <PageHeader
         title="邮箱"
         description={PAGE_DESCRIPTION}
@@ -253,7 +253,7 @@ function Mailboxes({ selected, onSelect, onCreate }: { selected: string | null; 
   if (addresses.isError) return <ErrorState title="地址列表没有读出来" message={addresses.error.message} onRetry={() => void addresses.refetch()} retrying={addresses.isFetching} />;
   if (list.length === 0) {
     return (
-      <div className="rounded-md border border-dashed border-border-strong bg-surface">
+      <div className="glass rounded-lg">
         <EmptyState
           icon={Mail}
           title="还没有地址"
@@ -369,7 +369,7 @@ function InboxPanel({ address }: { address: string }) {
 
 function MessageItem({ item, handed }: { item: MailMessage; handed: boolean }) {
   return (
-    <li className="min-w-0 rounded-md border border-border bg-surface px-3 py-2.5">
+    <li className="min-w-0 glass rounded-lg px-3 py-2.5">
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="truncate text-sm font-medium text-fg" title={item.subject}>

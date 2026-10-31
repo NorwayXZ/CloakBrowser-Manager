@@ -1,23 +1,62 @@
 import { Keyboard, Monitor, Moon, Sun } from "lucide-react";
 import { useState } from "react";
-import { Link, useLocation } from "react-router";
+import { Link, NavLink } from "react-router";
 import { useAutomationStatus, useManagerStatus, useRunningProfiles } from "../features/app/api";
 import { APP_UPDATE_ACTIVE, useUpdateCheck } from "../features/settings/api";
 import { THEME_OPTIONS, usePreferences, type ThemePreference } from "../features/settings/preferences";
 import { useAppUpdateWatcher } from "../features/settings/updateWatcher";
-import { formatShortcut } from "../shared/lib/hotkeys";
-import { Badge, IconButton, Menu, MenuRadioGroup, Popover, Skeleton, Spinner, StatusDot } from "../ui";
-import { navItemFor } from "./nav";
+import { cn } from "../shared/lib/cn";
+import { formatShortcut, useMediaQuery } from "../shared/lib/hotkeys";
+import { Badge, IconButton, Menu, MenuRadioGroup, Popover, Skeleton, Spinner, StatusDot, Tooltip } from "../ui";
+import { COMPACT_QUERY, NAV_ITEMS } from "./nav";
 
 const THEME_ICONS: Record<ThemePreference, typeof Sun> = { system: Monitor, light: Sun, dark: Moon };
 
+/**
+ * The one bar at the top of every page: the product mark, the page switcher as
+ * a floating pill, and the status indicators (update, automation, running
+ * browsers, appearance, shortcuts). Below 900 px the pill shows icons only.
+ */
 export function Toolbar({ onShowShortcuts }: { onShowShortcuts: () => void }) {
-  const location = useLocation();
-  const title = navItemFor(location.pathname)?.label ?? "";
+  const compact = useMediaQuery(COMPACT_QUERY);
 
   return (
-    <header className="flex h-toolbar shrink-0 items-center gap-3 border-b border-border bg-surface/80 px-5 backdrop-blur-xl">
-      <div className="min-w-0 flex-1 truncate text-md font-semibold tracking-tight text-fg">{title}</div>
+    <header className="flex h-20 shrink-0 items-center gap-4 px-6 lg:px-10">
+      <div className="flex min-w-0 shrink-0 items-center gap-2.5">
+        <div aria-hidden className="flex h-9 w-9 items-center justify-center rounded-[12px] bg-gradient-to-br from-accent-fill to-accent-fill-2 text-md font-bold text-accent-on shadow-raised">
+          C
+        </div>
+        {!compact && <span className="text-md font-semibold tracking-tight text-fg">CloakBrowser</span>}
+      </div>
+
+      <nav aria-label="页面" className="glass-strong mx-auto flex min-w-0 items-center gap-1 rounded-full p-1.5">
+        {NAV_ITEMS.map((item) => {
+          const link = (
+            <NavLink
+              to={item.path}
+              aria-label={compact ? item.label : undefined}
+              // A plain string, not NavLink's function form: the tooltip's Slot would
+              // stringify a function. NavLink sets aria-current on the active link.
+              className={cn(
+                "flex h-10 items-center justify-center gap-2 rounded-full text-sm font-medium text-fg-2 transition-[background-color,color,box-shadow] duration-fast hover:text-fg",
+                "aria-[current=page]:bg-surface aria-[current=page]:font-semibold aria-[current=page]:text-fg aria-[current=page]:shadow-raised",
+                compact ? "w-10" : "px-5",
+              )}
+            >
+              {compact && <item.icon className="h-[18px] w-[18px]" aria-hidden />}
+              {!compact && <span>{item.label}</span>}
+            </NavLink>
+          );
+          return compact ? (
+            <Tooltip key={item.path} content={item.label} shortcut={formatShortcut(`mod+${item.key}`)}>
+              {link}
+            </Tooltip>
+          ) : (
+            <span key={item.path}>{link}</span>
+          );
+        })}
+      </nav>
+
       <div className="flex shrink-0 items-center gap-1.5">
         <UpdateIndicator />
         <AutomationIndicator />

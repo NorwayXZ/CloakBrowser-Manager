@@ -60,7 +60,7 @@ def main() -> int:
             cdp = page.context.new_cdp_session(page)
             cdp.send("Performance.enable")
             page.goto(base + "/profiles")
-            page.wait_for_selector("tr[data-row]")
+            page.wait_for_selector("[data-row]")
             deadline = time.monotonic() + minutes * 60
             next_sample = time.monotonic() + SAMPLE_EVERY
             while time.monotonic() < deadline:

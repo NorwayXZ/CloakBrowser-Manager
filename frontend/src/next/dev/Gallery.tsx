@@ -116,7 +116,7 @@ export function Gallery() {
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center gap-2">
             <Badge>中性</Badge>
-            <Badge tone="accent">伪装画像</Badge>
+            <Badge tone="accent">防检测浏览器</Badge>
             <Badge tone="success">通过</Badge>
             <Badge tone="warning">有提示</Badge>
             <Badge tone="danger">未通过</Badge>
@@ -130,7 +130,7 @@ export function Gallery() {
           </div>
           <Banner tone="info" title="提示">下次启动浏览器时生效。</Banner>
           <Banner tone="success" title="备份完成">CloakBrowser-backup-20261024-120000.zip，39 MB。</Banner>
-          <Banner tone="warning" title="授权并发已满">请先关闭其他伪装画像，再打开这个环境。</Banner>
+          <Banner tone="warning" title="授权并发已满">请先关闭其他防检测浏览器，再打开这个环境。</Banner>
           <Banner tone="danger" title="恢复没有完成" action={<Button size="sm">重试</Button>}>
             备份文件格式不正确。当前数据没有改动。
           </Banner>
@@ -228,14 +228,14 @@ export function Gallery() {
           <EmptyState icon={Inbox} title="还没有环境" description="新建第一个环境，或者从备份恢复。" action={<Button variant="primary">新建环境</Button>} />
         </Card>
         <Card padded={false}>
-          <ErrorState message="连接不到 Manager 服务。" onRetry={() => undefined} />
+          <ErrorState message="无法连接 Manager。" onRetry={() => undefined} />
         </Card>
       </div>
 
       <Dialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
-        title="启动前检查"
+        title="打开前检查"
         description="检查的是配置一致性，不是“反检测分数”。"
         footer={
           <>
