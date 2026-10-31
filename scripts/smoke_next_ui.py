@@ -106,13 +106,16 @@ def run(page: Page, base: str) -> None:
     page.goto(base + "/profiles/new")
     page.get_by_role("textbox", name="名称").fill("编辑器创建的环境")
     page.get_by_label("分组").select_option("冒烟测试组")
+    page.get_by_label("备注").fill("由新编辑页创建")
+    # A new environment is a wizard: name, network, device, more.
+    page.get_by_role("button", name="下一步").click()
+    expect(page.get_by_role("heading", name="这个环境怎么上网？")).to_be_visible()
     page.get_by_role("radiogroup", name="代理方式").get_by_role("radio", name="自定义代理").click()
     page.get_by_label("代理类型").select_option("socks5")
     page.get_by_placeholder("192.168.100.1").fill("203.0.113.77")
     page.get_by_placeholder("1090").fill("1080")
     page.get_by_label("代理账号").fill("smoke")
     page.get_by_label("代理密码").fill("p@ss word")
-    page.get_by_label("备注").fill("由新编辑页创建")
     page.get_by_role("button", name="创建").click()
     expect(page.get_by_role("complementary", name="编辑器创建的环境")).to_be_visible()
     made = profiles_by_name(base)["编辑器创建的环境"]

@@ -242,11 +242,11 @@ function ReportDetail({ id, onClose }: { id: string; onClose: () => void }) {
 
   return (
     <section aria-label="报告详情" className="min-w-0 glass rounded-lg">
-      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-3">
+      <header className="flex flex-wrap items-start justify-between gap-3 px-6 pb-2 pt-5">
         <div className="flex min-w-0 items-start gap-2">
           {data.overall === "pass" ? <CheckCircle2 className="mt-0.5 h-5 w-5 text-success" aria-hidden /> : <XCircle className={cn("mt-0.5 h-5 w-5", data.overall === "warn" ? "text-warning" : "text-danger")} aria-hidden />}
           <div className="min-w-0">
-            <h2 className="text-base font-semibold text-fg">
+            <h2 className="text-lg font-semibold tracking-tight text-fg">
               {String(env.profile_name ?? "")}：{OVERALL_LABEL[data.overall]}
             </h2>
             <p className="text-xs text-fg-3">
@@ -269,12 +269,18 @@ function ReportDetail({ id, onClose }: { id: string; onClose: () => void }) {
           </Button>
         </div>
       </header>
-      <div className="flex flex-col gap-2 border-b border-border px-4 py-3 text-sm text-fg-2">
+      <div className="flex flex-col gap-3 px-6 pb-3 pt-2 text-sm text-fg-2">
+        <div className="flex flex-wrap items-center gap-5">
+          <div aria-hidden className="flex items-baseline gap-1.5">
+            <span className={cn("text-[56px] font-bold leading-none tracking-tight", counts.fail > 0 || counts.error > 0 ? "text-danger" : counts.warn > 0 || counts.unknown > 0 ? "text-warning" : "text-success")}>{counts.pass}</span>
+            <span className="text-lg font-semibold text-fg-3">/ {counts.total} 通过</span>
+          </div>
         <p>
           共 {counts.total} 项：通过 {counts.pass} · 警告 {counts.warn} · 未通过 {counts.fail}
           {counts.unknown > 0 && <> · 未读到结论 {counts.unknown}</>}
           {counts.error > 0 && <> · 出错 {counts.error}</>}
         </p>
+        </div>
         {data.egress_note && <p className="text-warning">{data.egress_note}</p>}
         {data.diff &&
           (data.diff.changes.length === 0 ? (
@@ -296,13 +302,13 @@ function ReportDetail({ id, onClose }: { id: string; onClose: () => void }) {
             </div>
           ))}
       </div>
-      <ul className="divide-y divide-border">
+      <ul className="m-0 grid list-none grid-cols-1 gap-4 p-6 pt-3 2xl:grid-cols-2">
         {data.results.map((result) => (
-          <li key={result.site} data-changed={changed.has(result.site) || undefined} className={cn("grid grid-cols-1 gap-3 px-4 py-3 sm:grid-cols-[140px_minmax(0,1fr)_auto]", changed.has(result.site) && "bg-warning-soft")}>
-            <div className="flex flex-col items-start gap-1">
-              <span className="font-medium text-fg">{result.name}</span>
-              {result.source === "local" && <Badge tone="info">本地自检</Badge>}
+          <li key={result.site} data-changed={changed.has(result.site) || undefined} className={cn("flex min-w-0 flex-col gap-3 rounded-md border border-border/60 bg-surface/60 p-4", changed.has(result.site) && "border-warning/60 bg-warning-soft")}>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-md font-semibold tracking-tight text-fg">{result.name}</span>
               <StatusBadge status={result.status} />
+              {result.source === "local" && <Badge tone="info">本地自检</Badge>}
               {changed.has(result.site) && <Badge tone="warning">和上次不同</Badge>}
             </div>
             <div className="min-w-0 text-sm">
@@ -322,7 +328,7 @@ function ReportDetail({ id, onClose }: { id: string; onClose: () => void }) {
             {result.screenshot && (
               <button
                 type="button"
-                className="h-20 w-32 overflow-hidden rounded border border-border"
+                className="h-24 w-full overflow-hidden rounded-md border border-border/60"
                 title="查看大图"
                 onClick={() => setPreview({ url: checksApi.fileUrl(data.id, result.screenshot!), title: result.name })}
               >

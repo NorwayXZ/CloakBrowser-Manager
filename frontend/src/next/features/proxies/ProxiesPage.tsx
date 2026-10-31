@@ -97,7 +97,7 @@ function ExitProxiesPage() {
   const list = (presets.data ?? []) as SavedPreset[];
 
   return (
-    <div className="flex flex-col gap-6 p-6">
+    <div className="flex flex-col gap-6 px-6 pb-8 pt-2 lg:px-10">
       <PageHeader title="代理" description={presets.isSuccess ? `共 ${list.length} 个保存的代理。新建或编辑环境时可以直接选用。` : "保存常用代理，新建或编辑环境时直接选用。"} />
       <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="min-w-0">

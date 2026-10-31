@@ -197,9 +197,20 @@ def screens(page: Page, base: str):
     yield "02d-editor-fingerprint", section("指纹配置"), False
     yield "02e-editor-more", section("更多指纹"), False
     yield "02f-editor-advanced", with_action("/profiles/new", "#form-basic", lambda: (
-        page.get_by_role("navigation", name="表单分区").get_by_role("button", name="高级设置").click(),
+        page.get_by_role("textbox", name="名称").fill("向导示例"),
+        page.get_by_role("list", name="创建步骤").get_by_role("button", name="更多").click(),
         page.get_by_role("checkbox", name="养号（定时自动浏览养护）").click(),
         page.wait_for_timeout(600))), False
+    yield "02h-wizard-network", with_action("/profiles/new", "#form-basic", lambda: (
+        page.get_by_role("textbox", name="名称").fill("向导示例"),
+        page.get_by_role("button", name="下一步").click(),
+        page.wait_for_selector("text=这个环境怎么上网？"),
+        page.wait_for_timeout(500))), False
+    yield "02i-wizard-device", with_action("/profiles/new", "#form-basic", lambda: (
+        page.get_by_role("textbox", name="名称").fill("向导示例"),
+        page.get_by_role("list", name="创建步骤").get_by_role("button", name="设备").click(),
+        page.wait_for_selector("text=它是一台什么设备？"),
+        page.wait_for_timeout(500))), False
     yield "02g-editor-leave", with_action("/profiles/new", "#form-basic", lambda: (
         page.get_by_role("textbox", name="名称").fill("没保存的环境"),
         page.get_by_role("button", name="取消").click(),
