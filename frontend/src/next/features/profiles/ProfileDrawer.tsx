@@ -16,7 +16,7 @@ import {
 } from "./format";
 import { ProxyIpActions } from "../proxies/ProxyIpActions";
 import { NoteField } from "./NoteField";
-import type { RowActions } from "./ProfileCards";
+import type { RowActions } from "./ProfileTable";
 import type { Profile } from "./types";
 
 const FingerprintReportDialog = lazy(() => import("./FingerprintReportDialog").then((m) => ({ default: m.FingerprintReportDialog })));

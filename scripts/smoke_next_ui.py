@@ -31,11 +31,11 @@ def step(name: str):
 
 def run(page: Page, base: str) -> None:
     page.goto(base + "/profiles")
-    expect(page.get_by_role("article", name="Amazon Seller #1")).to_be_visible()
+    expect(page.get_by_role("row", name="Amazon Seller #1")).to_be_visible()
 
     step("search narrows the list and can be cleared")
     page.get_by_role("textbox", name="搜索环境").fill("主店铺")
-    expect(page.get_by_role("article", name="Etsy UK")).to_have_count(0)
+    expect(page.get_by_role("row", name="Etsy UK")).to_have_count(0)
     page.get_by_role("textbox", name="搜索环境").fill("")
 
     step("create a group from the rail")
@@ -46,7 +46,7 @@ def run(page: Page, base: str) -> None:
     assert any(g["name"] == "冒烟测试组" for g in call(base, "GET", "/api/groups"))
 
     step("save a note from the details panel")
-    page.get_by_role("article", name="Etsy UK").get_by_text("Etsy UK", exact=True).click()
+    page.get_by_role("row", name="Etsy UK").locator("td").nth(2).click()
     panel = page.get_by_role("complementary", name="Etsy UK")
     note = panel.get_by_role("textbox", name="「Etsy UK」的备注")
     note.fill("冒烟测试备注")
@@ -59,7 +59,7 @@ def run(page: Page, base: str) -> None:
     step("copy an environment")
     page.get_by_role("button", name="「Etsy UK」的更多操作").click()
     page.get_by_role("menuitem", name="复制").click()
-    expect(page.get_by_role("article", name="Etsy UK 副本")).to_be_visible()
+    expect(page.get_by_role("row", name="Etsy UK 副本")).to_be_visible()
     copy = profiles_by_name(base)["Etsy UK 副本"]
     original = profiles_by_name(base)["Etsy UK"]
     assert copy["proxy"] == original["proxy"] and copy["fingerprint_seed"] != original["fingerprint_seed"]
@@ -67,10 +67,10 @@ def run(page: Page, base: str) -> None:
     step("move to the trash, then undo")
     page.get_by_role("button", name="「Etsy UK 副本」的更多操作").click()
     page.get_by_role("menuitem", name="移到回收站").click()
-    expect(page.get_by_role("article", name="Etsy UK 副本")).to_have_count(0)
+    expect(page.get_by_role("row", name="Etsy UK 副本")).to_have_count(0)
     assert "Etsy UK 副本" not in profiles_by_name(base)
     page.get_by_role("button", name="撤销").click()
-    expect(page.get_by_role("article", name="Etsy UK 副本")).to_be_visible()
+    expect(page.get_by_role("row", name="Etsy UK 副本")).to_be_visible()
 
     step("one-sentence profile with the keyword parser (no AI configured)")
     page.get_by_role("button", name="新建", exact=True).click()
@@ -98,7 +98,7 @@ def run(page: Page, base: str) -> None:
     assert profiles_by_name(base)[name]["timezone"] == "Europe/London"
     panel.get_by_role("button", name="永久删除").click()
     page.get_by_role("dialog", name=f"永久删除「{name}」？").get_by_role("button", name="永久删除").click()
-    expect(page.get_by_role("article", name=name)).to_have_count(0)
+    expect(page.get_by_role("row", name=name)).to_have_count(0)
     assert name not in profiles_by_name(base)
     assert name not in {p["name"] for p in call(base, "GET", "/api/profiles/trash")}
 
@@ -107,9 +107,6 @@ def run(page: Page, base: str) -> None:
     page.get_by_role("textbox", name="名称").fill("编辑器创建的环境")
     page.get_by_label("分组").select_option("冒烟测试组")
     page.get_by_label("备注").fill("由新编辑页创建")
-    # A new environment is a wizard: name, network, device, more.
-    page.get_by_role("button", name="下一步").click()
-    expect(page.get_by_role("heading", name="这个环境怎么上网？")).to_be_visible()
     page.get_by_role("radiogroup", name="代理方式").get_by_role("radio", name="自定义代理").click()
     page.get_by_label("代理类型").select_option("socks5")
     page.get_by_placeholder("192.168.100.1").fill("203.0.113.77")
