@@ -158,16 +158,16 @@ def screens(page: Page, base: str):
             page.wait_for_timeout(500)
         return run
 
-    first_row = lambda: page.locator("[data-row]").first
-    yield "01-profiles", go("/profiles", "[data-row]"), False
-    yield "01b-profiles-drawer", with_action("/profiles", "[data-row]",
-                                             lambda: first_row().locator("div.truncate").first.click()), False
-    yield "01c-profiles-batch", with_action("/profiles", "[data-row]", lambda: (
+    first_row = lambda: page.locator("tr[data-row]").first
+    yield "01-profiles", go("/profiles", "tr[data-row]"), False
+    yield "01b-profiles-drawer", with_action("/profiles", "tr[data-row]",
+                                             lambda: first_row().locator("td").nth(2).click()), False
+    yield "01c-profiles-batch", with_action("/profiles", "tr[data-row]", lambda: (
         page.get_by_role("checkbox", name="全选当前列表").click())), False
-    yield "01d-profiles-row-menu", with_action("/profiles", "[data-row]",
+    yield "01d-profiles-row-menu", with_action("/profiles", "tr[data-row]",
                                                lambda: page.get_by_role("button", name="的更多操作").first.click()), False
-    yield "01e-preflight", with_action("/profiles", "[data-row]", lambda: (
-        page.locator("[data-row]", has_text="Etsy UK").get_by_role("button", name="打开「Etsy UK」").click(),
+    yield "01e-preflight", with_action("/profiles", "tr[data-row]", lambda: (
+        page.locator("tr[data-row]", has_text="Etsy UK").get_by_role("button", name="打开「Etsy UK」").click(),
         page.wait_for_selector("text=打开前检查"))), False
     yield "01f-sentence", go("/profiles?create=sentence", "text=一句话描述"), False
     yield "01f2-sentence-preview", with_action("/profiles?create=sentence", "text=一句话描述", lambda: (
@@ -178,7 +178,7 @@ def screens(page: Page, base: str):
     yield "01h-no-match", go("/profiles?q=zzzz", "text=没有匹配的环境"), False
     def edit_first():
         page.goto(base + "/profiles")
-        page.wait_for_selector("[data-row]")
+        page.wait_for_selector("tr[data-row]")
         page.get_by_role("button", name="「Amazon Seller #1」的更多操作").click()
         page.get_by_role("menuitem", name="编辑").click()
         page.wait_for_selector("#form-basic")
@@ -197,20 +197,11 @@ def screens(page: Page, base: str):
     yield "02d-editor-fingerprint", section("指纹配置"), False
     yield "02e-editor-more", section("更多指纹"), False
     yield "02f-editor-advanced", with_action("/profiles/new", "#form-basic", lambda: (
-        page.get_by_role("textbox", name="名称").fill("向导示例"),
-        page.get_by_role("list", name="创建步骤").get_by_role("button", name="更多").click(),
+        page.get_by_role("navigation", name="表单分区").get_by_role("button", name="高级设置").click(),
         page.get_by_role("checkbox", name="养号（定时自动浏览养护）").click(),
         page.wait_for_timeout(600))), False
-    yield "02h-wizard-network", with_action("/profiles/new", "#form-basic", lambda: (
-        page.get_by_role("textbox", name="名称").fill("向导示例"),
-        page.get_by_role("button", name="下一步").click(),
-        page.wait_for_selector("text=这个环境怎么上网？"),
-        page.wait_for_timeout(500))), False
-    yield "02i-wizard-device", with_action("/profiles/new", "#form-basic", lambda: (
-        page.get_by_role("textbox", name="名称").fill("向导示例"),
-        page.get_by_role("list", name="创建步骤").get_by_role("button", name="设备").click(),
-        page.wait_for_selector("text=它是一台什么设备？"),
-        page.wait_for_timeout(500))), False
+
+
     yield "02g-editor-leave", with_action("/profiles/new", "#form-basic", lambda: (
         page.get_by_role("textbox", name="名称").fill("没保存的环境"),
         page.get_by_role("button", name="取消").click(),
