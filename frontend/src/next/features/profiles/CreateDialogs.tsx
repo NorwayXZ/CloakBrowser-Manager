@@ -27,7 +27,7 @@ export function DisposableDialog({ onClose, onCreated }: { onClose: () => void; 
     try {
       const profile = await profilesApi.createDisposable(region);
       await invalidate();
-      toast.show({ tone: "success", title: `已创建「${profile.name}」`, description: "用完可以在详情里焚毁。" });
+      toast.show({ tone: "success", title: `已创建「${profile.name}」`, description: "用完可以在详情里永久删除。" });
       onCreated(profile.id);
     } catch (err) {
       setError(message(err));
@@ -43,7 +43,7 @@ export function DisposableDialog({ onClose, onCreated }: { onClose: () => void; 
       dismissible={!busy}
       size="sm"
       title="新建一次性身份"
-      description="全新的独立设备画像，时区和语言按地区配好。用完可以焚毁，不进回收站。"
+      description="全新的独立身份，时区和语言按地区配好。用完可以永久删除，不进回收站。"
       footer={
         <>
           <Button onClick={onClose} disabled={busy}>
@@ -416,7 +416,7 @@ function SentencePreview({
         <FormField label="备注" description="原句会存进这里，可以删改。">
           <Textarea rows={2} value={notes} onChange={(event) => setNotes(event.target.value)} />
         </FormField>
-        <Checkbox checked={disposable} onCheckedChange={setDisposable} label="一次性身份（用完可焚毁，不进回收站）" />
+        <Checkbox checked={disposable} onCheckedChange={setDisposable} label="一次性身份（用完可永久删除，不进回收站）" />
         {countryOption && (
           <p className="text-xs text-fg-3">
             国家默认：{countryOption.timezone ?? "—"} · {countryOption.locale ?? "—"}（城市和手动选择优先）

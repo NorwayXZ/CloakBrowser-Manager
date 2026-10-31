@@ -193,7 +193,7 @@ export function ProfileCards({
                   </MenuItem>
                   {profile.disposable && (
                     <MenuItem icon={<Flame className="h-4 w-4" />} onSelect={() => actions.burn(profile)} danger>
-                      焚毁（彻底删除）
+                      永久删除
                     </MenuItem>
                   )}
                 </Menu>

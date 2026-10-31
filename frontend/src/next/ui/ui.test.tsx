@@ -193,8 +193,8 @@ describe("Toast", () => {
 describe("feedback states", () => {
   it("ErrorState offers a retry", () => {
     const onRetry = vi.fn();
-    render(<ErrorState message="连接不到 Manager 服务" onRetry={onRetry} />);
-    expect(screen.getByRole("alert")).toHaveTextContent("连接不到 Manager 服务");
+    render(<ErrorState message="无法连接 Manager" onRetry={onRetry} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("无法连接 Manager");
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
     expect(onRetry).toHaveBeenCalled();
   });

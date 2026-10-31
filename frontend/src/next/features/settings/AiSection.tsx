@@ -73,7 +73,7 @@ function AiForm({ status }: { status: LlmSettings }) {
     <Section
       id="ai"
       title="AI 接口"
-      description="自备密钥：填任意 OpenAI 兼容接口（OpenAI、DeepSeek、本地 Ollama 的兼容端点等）。没有配置时所有 AI 入口自动隐藏，其他功能不受影响。目前用于“AI 养号编排”：按画像人格离线生成一周的浏览剧本，人工批准后才生效。"
+      description="自备密钥：填任意 OpenAI 兼容接口（OpenAI、DeepSeek、本地 Ollama 的兼容端点等）。没有配置时所有 AI 入口自动隐藏，其他功能不受影响。目前用于“AI 养号编排”：按人设离线生成一周的浏览剧本，人工批准后才生效。"
       actions={status.configured ? <Badge tone="success">已配置</Badge> : <Badge>未配置</Badge>}
     >
       <form

@@ -139,13 +139,13 @@ def screens(page: Page, base: str):
     def preflight():
         home()
         page.locator("tbody").get_by_role("button", name="打开", exact=True).first.click()
-        page.wait_for_selector("text=启动前检查")
+        page.wait_for_selector("text=打开前检查")
         settle(page, 600)
 
     def sentence():
         home()
         page.get_by_label("一句话建号").fill("建个美国号，西雅图，喜欢露营摄影")
-        page.get_by_title("用一句话解析出完整画像：先预览、可修改，确认后才创建").click()
+        page.get_by_title("用一句话解析出完整设备型号：先预览、可修改，确认后才创建").click()
         page.wait_for_selector("text=一句话建号预览")
         settle(page, 600)
 

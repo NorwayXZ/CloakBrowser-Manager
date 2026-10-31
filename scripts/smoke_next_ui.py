@@ -96,8 +96,8 @@ def run(page: Page, base: str) -> None:
     expect(panel.get_by_text("一次性", exact=True)).to_be_visible()
     name = panel.locator("#profile-drawer-title").inner_text()
     assert profiles_by_name(base)[name]["timezone"] == "Europe/London"
-    panel.get_by_role("button", name="焚毁").click()
-    page.get_by_role("dialog", name=f"焚毁「{name}」？").get_by_role("button", name="焚毁").click()
+    panel.get_by_role("button", name="永久删除").click()
+    page.get_by_role("dialog", name=f"永久删除「{name}」？").get_by_role("button", name="永久删除").click()
     expect(page.get_by_role("article", name=name)).to_have_count(0)
     assert name not in profiles_by_name(base)
     assert name not in {p["name"] for p in call(base, "GET", "/api/profiles/trash")}
@@ -230,7 +230,7 @@ def run(page: Page, base: str) -> None:
     step("checks: reports start empty; evolution switch saves; linkability analyses saved profiles")
     page.goto(base + "/checks")
     expect(page.get_by_text("还没有检测报告")).to_be_visible()
-    expect(page.get_by_role("button", name="开始一键检测")).to_be_enabled()
+    expect(page.get_by_role("button", name="开始检测")).to_be_enabled()
     page.goto(base + "/checks/evolution")
     expect(page.get_by_label("进化的环境")).not_to_have_value("")
     target = page.get_by_label("进化的环境").input_value()
@@ -301,7 +301,7 @@ def run(page: Page, base: str) -> None:
     step("preflight opens and cancels without launching")
     page.goto(base + "/profiles")
     page.get_by_role("button", name="打开「Etsy UK」").first.click()
-    page.get_by_role("dialog", name="启动前检查").get_by_role("button", name="取消").click()
+    page.get_by_role("dialog", name="打开前检查").get_by_role("button", name="取消").click()
     assert profiles_by_name(base)["Etsy UK"]["status"] != "running"
 
 

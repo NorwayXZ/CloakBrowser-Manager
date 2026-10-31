@@ -350,7 +350,7 @@ function Editor({
       <div className="glass-strong mx-4 mb-2 flex shrink-0 flex-wrap items-center justify-end gap-3 rounded-full px-5 py-2.5 lg:mx-10">
         <span className={cn("mr-auto flex items-center gap-2 text-sm", editor.dirty ? "text-fg" : "text-fg-3")} aria-live="polite">
           {editor.dirty && <span aria-hidden className="h-2 w-2 rounded-full bg-warning" />}
-          {editor.dirty ? "有未保存的修改" : isEdit ? "没有修改" : "填好名称即可创建，其余都有默认值"}
+          {editor.dirty ? "有改动尚未保存" : isEdit ? "没有修改" : "填好名称即可创建，其余都有默认值"}
         </span>
         <Button onClick={() => navigate("/profiles")}>取消</Button>
         {wizard && step > 0 && (

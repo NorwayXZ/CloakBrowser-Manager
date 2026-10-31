@@ -159,7 +159,7 @@ export function ProfileDrawer({
               ...(profile.seed_device?.applies
                 ? [{ label: "设备（按种子生成）", value: seedDeviceLabel(profile) ?? "首次打开后显示" }]
                 : profile.device_profile
-                  ? [{ label: "设备画像", value: <span className="break-all">{profile.device_profile}</span> }]
+                  ? [{ label: "设备型号", value: <span className="break-all">{profile.device_profile}</span> }]
                   : []),
               { label: "User-Agent", value: <span className="break-all text-xs">{profile.user_agent || "跟随真实浏览器"}</span> },
               { label: "最近打开", value: formatDateTime(profile.last_opened_at) },
@@ -183,7 +183,7 @@ export function ProfileDrawer({
         </Button>
         {profile.disposable && (
           <Button variant="danger-ghost" size="sm" icon={<Flame className="h-3.5 w-3.5" />} onClick={() => actions.burn(profile)}>
-            焚毁
+            永久删除
           </Button>
         )}
       </footer>

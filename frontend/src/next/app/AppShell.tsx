@@ -110,8 +110,8 @@ function ConnectionBanner() {
   if (state === "online") return null;
   return (
     <div className="shrink-0 px-6 pb-2 lg:px-10">
-      <Banner tone="warning" title="连接不到 Manager 服务" action={<Spinner className="h-4 w-4 text-warning" label="正在重新连接" />}>
-        正在自动重新连接。恢复前，保存、启动等操作暂时不可用；已经打开的浏览器不受影响。
+      <Banner tone="warning" title="无法连接 Manager" action={<Spinner className="h-4 w-4 text-warning" label="正在重新连接" />}>
+        正在重新连接。期间不能保存或打开环境，已打开的浏览器不受影响。
       </Banner>
     </div>
   );

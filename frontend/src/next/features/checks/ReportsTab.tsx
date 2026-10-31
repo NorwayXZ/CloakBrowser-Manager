@@ -65,7 +65,7 @@ export function ReportsTab() {
   const start = async () => {
     if (!candidate) return;
     const ok = await confirm({
-      title: `对「${candidate.name}」生成一键检测报告？`,
+      title: `对「${candidate.name}」开始检测？`,
       description: `会在后台用调试模式打开这个环境（不弹窗），先做本地一致性自检，再依次访问 ${sites.data?.length || 7} 个检测网站，大约需要 5 分钟，测完自动关闭。期间不要操作这个环境。`,
       confirmLabel: "开始检测",
     });
@@ -106,7 +106,7 @@ export function ReportsTab() {
     <div className="flex flex-col gap-5">
       <Section
         id="site-check"
-        title="一键检测报告"
+        title="检测一个环境"
         description="在后台无头打开环境（报告会注明无头运行），先用 Manager 自带探针逐项核对 UA、平台、GPU、时区、语言、CPU、内存、WebGL、Canvas、Audio、字体、WebRTC 和出口 IP，再依次访问下面的网站，读出每个网站的结论并截图。"
       >
         <div className="flex flex-col gap-4">
@@ -132,7 +132,7 @@ export function ReportsTab() {
               </Select>
             </FormField>
             <Button variant="primary" icon={<Play className="h-4 w-4" />} loading={starting} disabled={active || !candidate || candidateRunning} title={candidateRunning ? "请先关闭这个环境的浏览器" : undefined} onClick={() => void start()}>
-              开始一键检测
+              开始检测
             </Button>
           </div>
           {candidateRunning && <p className="text-xs text-warning">这个环境的浏览器正在运行，请先关闭它。</p>}
@@ -179,7 +179,7 @@ export function ReportsTab() {
           ) : reports.isError ? (
             <ErrorState message={reports.error.message} onRetry={() => void reports.refetch()} />
           ) : reports.data.length === 0 ? (
-            <EmptyState icon={ShieldCheck} title="还没有检测报告" description="选一个环境，点“开始一键检测”。" />
+            <EmptyState icon={ShieldCheck} title="还没有检测报告" description="选一个环境，点“开始检测”。" />
           ) : (
             <ul className="-mx-2 flex flex-col gap-0.5" aria-label="报告">
               {reports.data.map((report) => (

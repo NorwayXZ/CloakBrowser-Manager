@@ -198,14 +198,14 @@ export function Tabs({
 }) {
   return (
     <RadixTabs.Root value={value} onValueChange={onValueChange} className="min-w-0">
-      <RadixTabs.List aria-label={label} className="flex gap-1 overflow-x-auto border-b border-border">
+      <RadixTabs.List aria-label={label} className="glass flex w-fit max-w-full gap-1 overflow-x-auto rounded-full p-1.5">
         {tabs.map((tab) => (
           <RadixTabs.Trigger
             key={tab.value}
             value={tab.value}
             className={cn(
-              "-mb-px h-10 shrink-0 whitespace-nowrap border-b-2 border-transparent px-4 text-sm font-medium text-fg-2",
-              "transition-colors duration-fast hover:text-fg data-[state=active]:border-accent data-[state=active]:text-fg",
+              "h-9 shrink-0 whitespace-nowrap rounded-full px-5 text-sm font-medium text-fg-2",
+              "transition-[background-color,color,box-shadow] duration-fast hover:text-fg data-[state=active]:bg-surface data-[state=active]:text-fg data-[state=active]:shadow-raised",
             )}
           >
             {tab.label}

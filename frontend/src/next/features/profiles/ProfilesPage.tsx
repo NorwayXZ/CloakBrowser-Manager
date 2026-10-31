@@ -199,7 +199,7 @@ export function ProfilesPage() {
                 <EmptyState
                   icon={Inbox}
                   title="还没有环境"
-                  description="每个环境是一个独立的浏览器身份：设备画像、代理、时区语言和 Cookie 都各自独立。"
+                  description="每个环境是一个独立的浏览器身份：设备型号、代理、时区语言和 Cookie 都各自独立。"
                   action={
                     <>
                       <Button variant="primary" icon={<Pencil className="h-4 w-4" />} onClick={() => navigate("/profiles/new")}>

@@ -254,10 +254,10 @@ describe("connection banner", () => {
     await act(async () => {
       await client.refetchQueries();
     });
-    expect(await screen.findByText("连接不到 Manager 服务")).toBeInTheDocument();
+    expect(await screen.findByText("无法连接 Manager")).toBeInTheDocument();
     down = false;
     expect(await screen.findByText("已重新连接到 Manager", {}, { timeout: 3000 })).toBeInTheDocument();
-    expect(screen.queryByText("连接不到 Manager 服务")).not.toBeInTheDocument();
+    expect(screen.queryByText("无法连接 Manager")).not.toBeInTheDocument();
   });
 });
 
@@ -278,10 +278,10 @@ describe("route error boundary", () => {
         <MaybeBoom />
       </RouteErrorBoundary>,
     );
-    expect(screen.getByText("这一页出错了")).toBeInTheDocument();
+    expect(screen.getByText("这一页出了点问题")).toBeInTheDocument();
     expect(screen.getByText(/组件炸了/)).toBeInTheDocument();
     crash = false;
-    fireEvent.click(screen.getByRole("button", { name: "重新加载此页" }));
+    fireEvent.click(screen.getByRole("button", { name: "重新载入" }));
     expect(screen.getByText("恢复了")).toBeInTheDocument();
     consoleError.mockRestore();
   });

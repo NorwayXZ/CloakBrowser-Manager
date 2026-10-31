@@ -25,7 +25,7 @@ export function LoginPage({ initialUsername }: { initialUsername: string | null 
       void queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] !== "auth" });
     } catch (err) {
       setPassword("");
-      setError(isApiError(err) && err.kind !== "http" ? "连接不到 Manager 服务，请确认它正在运行。" : err instanceof Error ? err.message : String(err));
+      setError(isApiError(err) && err.kind !== "http" ? "无法连接 Manager，请确认它正在运行。" : err instanceof Error ? err.message : String(err));
       setLoading(false);
     }
   };

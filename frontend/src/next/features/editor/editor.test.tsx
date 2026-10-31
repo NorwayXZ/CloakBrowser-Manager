@@ -421,9 +421,9 @@ describe("layout and summary", () => {
 
   it("swaps to another device of this computer's platform", async () => {
     await openEditor("/profiles/new");
-    const device = screen.getByLabelText("设备画像");
+    const device = screen.getByLabelText("设备型号");
     const before = (device as HTMLSelectElement).value;
-    fireEvent.click(screen.getByRole("button", { name: "随机设备画像" }));
+    fireEvent.click(screen.getByRole("button", { name: "随机设备型号" }));
     expect((device as HTMLSelectElement).value).not.toBe(before);
     expect(within(screen.getByRole("complementary", { name: "概要" })).getByText("macOS")).toBeInTheDocument();
   });
@@ -505,7 +505,7 @@ describe("saving and leaving", () => {
   it("saves with ⌘/Ctrl+S, then returns to the list with the profile open", async () => {
     const { fetchMock, router } = await openEditor("/profiles/profile-1/edit");
     setName("改过的名字");
-    expect(screen.getByText("有未保存的修改")).toBeInTheDocument();
+    expect(screen.getByText("有改动尚未保存")).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "s", ctrlKey: true, metaKey: true });
     await waitFor(() => expect(saved(fetchMock, "PUT")?.name).toBe("改过的名字"));
     await waitFor(() => expect(router.state.location.pathname).toBe("/profiles"));
@@ -558,7 +558,7 @@ describe("saving and leaving", () => {
     expect(screen.getByRole("textbox", { name: /^名称/ })).toHaveValue("Awscnn");
     fireEvent.click(screen.getByRole("button", { name: "恢复" }));
     expect(screen.getByRole("textbox", { name: /^名称/ })).toHaveValue("草稿名字");
-    expect(screen.getByText("有未保存的修改")).toBeInTheDocument();
+    expect(screen.getByText("有改动尚未保存")).toBeInTheDocument();
   });
 
   it("moves the profile to the trash from the editor", async () => {

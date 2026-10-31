@@ -168,7 +168,7 @@ def screens(page: Page, base: str):
                                                lambda: page.get_by_role("button", name="的更多操作").first.click()), False
     yield "01e-preflight", with_action("/profiles", "[data-row]", lambda: (
         page.locator("[data-row]", has_text="Etsy UK").get_by_role("button", name="打开「Etsy UK」").click(),
-        page.wait_for_selector("text=启动前检查"))), False
+        page.wait_for_selector("text=打开前检查"))), False
     yield "01f-sentence", go("/profiles?create=sentence", "text=一句话描述"), False
     yield "01f2-sentence-preview", with_action("/profiles?create=sentence", "text=一句话描述", lambda: (
         page.get_by_role("textbox", name="一句话描述").fill("建个美国号，西雅图，喜欢露营摄影"),

@@ -61,7 +61,7 @@ function message(error: unknown) {
 
 export function ProxiesPage() {
   const [tab, setTab] = useState("proxies");
-  return <div className="p-4"><Tabs label="代理分类" value={tab} onValueChange={setTab} tabs={[
+  return <div className="px-6 pt-2 lg:px-10"><Tabs label="代理分类" value={tab} onValueChange={setTab} tabs={[
     { value: "proxies", label: "出口代理", content: <ExitProxiesPage /> },
     { value: "relays", label: "中转服务器", content: <RelayNodesPanel /> },
   ]} /></div>;
@@ -97,7 +97,7 @@ function ExitProxiesPage() {
   const list = (presets.data ?? []) as SavedPreset[];
 
   return (
-    <div className="flex flex-col gap-6 px-6 pb-8 pt-2 lg:px-10">
+    <div className="flex flex-col gap-6 pb-8 pt-2">
       <PageHeader title="代理" description={presets.isSuccess ? `共 ${list.length} 个保存的代理。新建或编辑环境时可以直接选用。` : "保存常用代理，新建或编辑环境时直接选用。"} />
       <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="min-w-0">

@@ -144,7 +144,7 @@ function WarmupPanel({ editor, profileId }: { editor: Editor; profileId: string 
           ))}
         </Select>
       </FormField>
-      <FormField label="画像人格（可选）" description="一句话描述这个环境的人设；AI 养号会按它编写一周剧本的主题和搜索词，不填则按地区和语言生成通用剧本。">
+      <FormField label="人设（可选）" description="一句话描述这个环境的人设；AI 养号会按它编写一周剧本的主题和搜索词，不填则按地区和语言生成通用剧本。">
         <Input maxLength={200} value={form.warmup_persona ?? ""} placeholder="如：32 岁，台北，喜欢摄影和手冲咖啡" onChange={(event) => set("warmup_persona", event.target.value)} />
       </FormField>
       <fieldset>
@@ -264,7 +264,7 @@ function WarmupScripts({ profileId }: { profileId: string }) {
       <p className="text-xs text-fg-3">
         {info.llm_configured
           ? "剧本由 AI 离线编写，只包含访问和搜索意图，网址仍由 Manager 按平台目录生成；批准一批后，养号按天轮换其中的剧本，没有生效剧本时继续用随机计划。"
-          : "还没有配置 AI 接口：在“设置 › AI 接口”填好接口地址、模型和密钥后，这里可以按画像人格生成一周的养号剧本，批准后自动按天轮换执行。"}
+          : "还没有配置 AI 接口：在“设置 › AI 接口”填好接口地址、模型和密钥后，这里可以按人设生成一周的养号剧本，批准后自动按天轮换执行。"}
       </p>
       {info.last_generation?.status === "error" && <Banner tone="danger">上次生成失败：{info.last_generation.error}</Banner>}
       {error && <Banner tone="danger">{error.message}</Banner>}

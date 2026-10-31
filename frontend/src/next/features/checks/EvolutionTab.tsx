@@ -112,7 +112,7 @@ export function EvolutionTab() {
     if (!selected) return;
     const ok = await confirm({
       title: `对「${selected.name}」立即跑一轮进化？`,
-      description: "先做一键检测，再把候选修复逐个放到一次性克隆上验证；源环境不会被直接修改，有效的修复会生成待批准提案。整个过程可能要十几分钟。",
+      description: "先做检测，再把候选修复逐个放到一次性克隆上验证；源环境不会被直接修改，有效的修复会生成待批准提案。整个过程可能要十几分钟。",
       confirmLabel: "开始",
     });
     if (!ok) return;
@@ -155,7 +155,7 @@ export function EvolutionTab() {
       <Section
         id="evolution"
         title="进化（自对抗闭环）"
-        description="检测发现的问题先归因到配置层成因，再逐个放到一次性克隆上实测验证，克隆用完即焚毁。只有实测有效的修复才会变成提案，你批准后才改到源环境上；出口 IP 信誉、内核层信号这类配置改不了的问题会如实标注，不生成假修复。"
+        description="检测发现的问题先归因到配置层成因，再逐个放到一次性克隆上实测验证，克隆用完即永久删除。只有实测有效的修复才会变成提案，你批准后才改到源环境上；出口 IP 信誉、内核层信号这类配置改不了的问题会如实标注，不生成假修复。"
       >
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-end gap-3">
@@ -179,7 +179,7 @@ export function EvolutionTab() {
               </Select>
             </FormField>
             <Button variant="primary" icon={<Play className="h-4 w-4" />} loading={starting} disabled={busy || !selected || running} title={running ? "请先关闭这个环境的浏览器" : undefined} onClick={() => void runNow()}>
-              立即进化一次
+              现在运行一次
             </Button>
           </div>
           <div className="max-w-md">
@@ -258,7 +258,7 @@ export function EvolutionTab() {
         ) : logs.isError ? (
           <ErrorState message={logs.error.message} onRetry={() => void logs.refetch()} />
         ) : logs.data.length === 0 ? (
-          <EmptyState icon={Dna} title="还没有进化记录" description="开启自动进化，或点“立即进化一次”。" />
+          <EmptyState icon={Dna} title="还没有进化记录" description="开启自动进化，或点“现在运行一次”。" />
         ) : (
           <ul className="flex flex-col gap-1.5">
             {logs.data.map((entry) => (

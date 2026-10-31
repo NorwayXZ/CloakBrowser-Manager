@@ -27,7 +27,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return (
       <div className="flex h-full items-center justify-center">
         <ErrorState
-          title="连接不到 Manager 服务"
+          title="无法连接 Manager"
           message={isApiError(auth.error) && auth.error.kind !== "http" ? "请确认 CloakBrowser Manager 正在运行，然后重试。" : auth.error.message}
           onRetry={() => void auth.refetch()}
           retrying={auth.isFetching}

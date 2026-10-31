@@ -527,7 +527,7 @@ describe("settings › automation", () => {
       await screen.findByRole("heading", { name: "检测" });
       if (outside) expect(await screen.findByText(/当前不在自动化时段（09-18）内/)).toBeInTheDocument();
       else {
-        await screen.findByText("一键检测报告");
+        await screen.findByText("检测一个环境");
         expect(screen.queryByText(/当前不在自动化时段/)).not.toBeInTheDocument();
       }
       unmount();
@@ -719,7 +719,7 @@ describe("settings › about and update", () => {
     after: "0.8.0",
     branch: null,
     restart_required: false,
-    message: "发现新版本 0.8.0（当前 0.7.2）。点击下方链接下载，打开后把新 App 拖到「应用程序」覆盖旧版即可；画像、Cookie 等数据不受影响。",
+    message: "发现新版本 0.8.0（当前 0.7.2）。点击下方链接下载，打开后把新 App 拖到「应用程序」覆盖旧版即可；设备型号、Cookie 等数据不受影响。",
     log: [],
     download_url: "https://example.com/CloakBrowser-Manager-0.8.0.dmg",
   };
