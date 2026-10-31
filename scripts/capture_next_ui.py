@@ -158,16 +158,16 @@ def screens(page: Page, base: str):
             page.wait_for_timeout(500)
         return run
 
-    first_row = lambda: page.locator("tr[data-row]").first
-    yield "01-profiles", go("/profiles", "tr[data-row]"), False
-    yield "01b-profiles-drawer", with_action("/profiles", "tr[data-row]",
-                                             lambda: first_row().locator("td").nth(2).click()), False
-    yield "01c-profiles-batch", with_action("/profiles", "tr[data-row]", lambda: (
+    first_row = lambda: page.locator("[data-row]").first
+    yield "01-profiles", go("/profiles", "[data-row]"), False
+    yield "01b-profiles-drawer", with_action("/profiles", "[data-row]",
+                                             lambda: first_row().locator("div.truncate").first.click()), False
+    yield "01c-profiles-batch", with_action("/profiles", "[data-row]", lambda: (
         page.get_by_role("checkbox", name="全选当前列表").click())), False
-    yield "01d-profiles-row-menu", with_action("/profiles", "tr[data-row]",
+    yield "01d-profiles-row-menu", with_action("/profiles", "[data-row]",
                                                lambda: page.get_by_role("button", name="的更多操作").first.click()), False
-    yield "01e-preflight", with_action("/profiles", "tr[data-row]", lambda: (
-        page.locator("tr[data-row]", has_text="Etsy UK").get_by_role("button", name="打开「Etsy UK」").click(),
+    yield "01e-preflight", with_action("/profiles", "[data-row]", lambda: (
+        page.locator("[data-row]", has_text="Etsy UK").get_by_role("button", name="打开「Etsy UK」").click(),
         page.wait_for_selector("text=启动前检查"))), False
     yield "01f-sentence", go("/profiles?create=sentence", "text=一句话描述"), False
     yield "01f2-sentence-preview", with_action("/profiles?create=sentence", "text=一句话描述", lambda: (
@@ -178,7 +178,7 @@ def screens(page: Page, base: str):
     yield "01h-no-match", go("/profiles?q=zzzz", "text=没有匹配的环境"), False
     def edit_first():
         page.goto(base + "/profiles")
-        page.wait_for_selector("tr[data-row]")
+        page.wait_for_selector("[data-row]")
         page.get_by_role("button", name="「Amazon Seller #1」的更多操作").click()
         page.get_by_role("menuitem", name="编辑").click()
         page.wait_for_selector("#form-basic")

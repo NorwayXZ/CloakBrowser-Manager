@@ -272,7 +272,7 @@ function WarmupScripts({ profileId }: { profileId: string }) {
       {info.batches.map((batch) => {
         const status = BATCH_STATUS[batch.status] ?? { label: batch.status, tone: "neutral" as const };
         return (
-          <div key={batch.batch_id} className="rounded-md border border-border bg-surface p-2.5 text-xs">
+          <div key={batch.batch_id} className="glass rounded-lg p-2.5 text-xs">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="flex items-center gap-2 text-fg-2">
                 {batch.created_at.slice(0, 16).replace("T", " ")}

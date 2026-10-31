@@ -70,7 +70,7 @@ function ToastCard({ toast, onDismiss }: { toast: ToastItem; onDismiss: (id: num
 
   return (
     <div
-      className="pointer-events-auto flex items-start gap-2.5 rounded-md border border-border bg-surface p-3 shadow-popover animate-[cbm-pop-in_160ms_ease-out]"
+      className="pointer-events-auto flex items-start gap-2.5 glass-strong rounded-md p-3.5 animate-[cbm-pop-in_160ms_ease-out]"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
       onFocus={() => setPaused(true)}

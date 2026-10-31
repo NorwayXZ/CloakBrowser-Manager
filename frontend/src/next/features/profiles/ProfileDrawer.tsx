@@ -16,7 +16,7 @@ import {
 } from "./format";
 import { ProxyIpActions } from "../proxies/ProxyIpActions";
 import { NoteField } from "./NoteField";
-import type { RowActions } from "./ProfileTable";
+import type { RowActions } from "./ProfileCards";
 import type { Profile } from "./types";
 
 const FingerprintReportDialog = lazy(() => import("./FingerprintReportDialog").then((m) => ({ default: m.FingerprintReportDialog })));
@@ -62,8 +62,8 @@ export function ProfileDrawer({
         }
       }}
       className={cn(
-        "flex w-drawer max-w-full shrink-0 flex-col border-l border-border bg-surface",
-        overlay && "absolute inset-y-0 right-0 z-20 shadow-modal animate-[cbm-pop-in_160ms_ease-out]",
+        "glass-strong flex w-drawer max-w-full shrink-0 flex-col rounded-none border-y-0 border-r-0",
+        overlay && "absolute inset-y-0 right-0 z-20 animate-[cbm-pop-in_160ms_ease-out]",
       )}
     >
       <header className="flex items-start gap-2 border-b border-border px-4 py-3">

@@ -37,7 +37,7 @@ export function Dialog({
         <RadixDialog.Content
           className={cn(
             "fixed left-1/2 top-1/2 z-50 flex max-h-[calc(100vh-48px)] w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 flex-col",
-            "rounded-lg border border-border/70 bg-surface shadow-modal focus:outline-none animate-[cbm-pop-in_220ms_cubic-bezier(0.22,1,0.36,1)]",
+            "glass-strong rounded-xl !shadow-modal focus:outline-none animate-[cbm-pop-in_220ms_cubic-bezier(0.22,1,0.36,1)]",
             width,
           )}
         >
@@ -68,11 +68,11 @@ export function Dialog({
 // ── Dropdown menu ───────────────────────────────────────────────────────────
 
 const menuContent =
-  "z-50 min-w-44 rounded-md border border-border/70 bg-surface/90 p-1.5 shadow-popover backdrop-blur-xl animate-[cbm-pop-in_140ms_cubic-bezier(0.22,1,0.36,1)]";
+  "glass-strong z-50 min-w-44 rounded-md p-1.5 animate-[cbm-pop-in_140ms_cubic-bezier(0.22,1,0.36,1)]";
 // No text colour here: callers pick exactly one (text-fg or text-danger), since
 // two competing colour utilities resolve by stylesheet order, not class order.
 const menuItem =
-  "flex h-8 cursor-default select-none items-center gap-2 rounded-[6px] px-2.5 text-sm outline-none " +
+  "flex h-9 cursor-default select-none items-center gap-2 rounded-[10px] px-3 text-sm outline-none " +
   "data-[disabled]:pointer-events-none data-[disabled]:opacity-50";
 // macOS menus highlight the row in solid blue (red for a destructive one) with white text.
 const menuHighlight = "data-[highlighted]:bg-accent-fill data-[highlighted]:text-accent-on";
@@ -174,7 +174,7 @@ export function Popover({
           aria-label={label}
           align={align}
           sideOffset={6}
-          className="z-50 w-72 max-w-[calc(100vw-32px)] rounded-md border border-border/70 bg-surface/90 p-3.5 text-sm shadow-popover backdrop-blur-xl animate-[cbm-pop-in_140ms_cubic-bezier(0.22,1,0.36,1)] focus:outline-none"
+          className="glass-strong z-50 w-72 max-w-[calc(100vw-32px)] rounded-md p-4 text-sm animate-[cbm-pop-in_140ms_cubic-bezier(0.22,1,0.36,1)] focus:outline-none"
         >
           {children}
         </RadixPopover.Content>
@@ -204,7 +204,7 @@ export function Tabs({
             key={tab.value}
             value={tab.value}
             className={cn(
-              "-mb-px h-9 shrink-0 whitespace-nowrap border-b-2 border-transparent px-3 text-sm font-medium text-fg-2",
+              "-mb-px h-10 shrink-0 whitespace-nowrap border-b-2 border-transparent px-4 text-sm font-medium text-fg-2",
               "transition-colors duration-fast hover:text-fg data-[state=active]:border-accent data-[state=active]:text-fg",
             )}
           >

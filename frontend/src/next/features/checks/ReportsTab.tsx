@@ -211,7 +211,7 @@ export function ReportsTab() {
           <ReportDetail id={selectedId} onClose={() => select(null)} />
         ) : (
           (reports.data?.length ?? 0) > 0 && (
-            <div className="rounded-md border border-dashed border-border-strong bg-surface">
+            <div className="glass rounded-lg">
               <EmptyState icon={FileSearch} title="选一份报告查看" description="能看到每个网站的结论、截图，以及和这个环境上一份报告的对比。" />
             </div>
           )
@@ -241,7 +241,7 @@ function ReportDetail({ id, onClose }: { id: string; onClose: () => void }) {
   const profileId = typeof env.profile_id === "string" ? env.profile_id : null;
 
   return (
-    <section aria-label="报告详情" className="min-w-0 rounded-md border border-border bg-surface">
+    <section aria-label="报告详情" className="min-w-0 glass rounded-lg">
       <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-3">
         <div className="flex min-w-0 items-start gap-2">
           {data.overall === "pass" ? <CheckCircle2 className="mt-0.5 h-5 w-5 text-success" aria-hidden /> : <XCircle className={cn("mt-0.5 h-5 w-5", data.overall === "warn" ? "text-warning" : "text-danger")} aria-hidden />}

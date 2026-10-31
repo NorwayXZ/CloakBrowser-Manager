@@ -91,7 +91,7 @@ function LinkabilityTab() {
         .map((cluster) => {
           const risk = RISK[cluster.risk as keyof typeof RISK] ?? { label: cluster.risk, tone: "warning" as const };
           return (
-            <section key={cluster.id} aria-label={`${risk.label}：${cluster.profiles.length} 个环境`} className="rounded-md border border-border bg-surface p-4">
+            <section key={cluster.id} aria-label={`${risk.label}：${cluster.profiles.length} 个环境`} className="glass rounded-lg p-4">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge tone={risk.tone}>{risk.label}</Badge>
                 <h3 className="text-sm font-medium text-fg">{cluster.profiles.length} 个环境可能被关联成同一个人</h3>

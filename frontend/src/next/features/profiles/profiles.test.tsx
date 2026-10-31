@@ -54,7 +54,7 @@ function routes(extra: MockRoute[] = []): MockRoute[] {
 }
 
 function row(name: string) {
-  return screen.getByRole("row", { name });
+  return screen.getByRole("article", { name });
 }
 
 function openMenu(button: HTMLElement) {
@@ -65,7 +65,7 @@ async function renderList(extra: MockRoute[] = [], path = "/profiles") {
   const fetchMock = mockFetch(routes(extra));
   const utils = renderApp(path);
   // hidden: a dialog opened from the URL hides the list from the accessibility tree.
-  if (profiles.length && !path.includes("/viewer")) await screen.findByRole("row", { name: profiles[0]!.name, hidden: true });
+  if (profiles.length && !path.includes("/viewer")) await screen.findByRole("article", { name: profiles[0]!.name, hidden: true });
   return { fetchMock, ...utils };
 }
 
@@ -112,25 +112,25 @@ describe("environment list", () => {
     await renderList();
     const search = screen.getByRole("textbox", { name: "搜索环境" });
     fireEvent.change(search, { target: { value: "主店铺" } });
-    expect(screen.getByRole("row", { name: "Amazon Seller #1" })).toBeInTheDocument();
-    expect(screen.queryByRole("row", { name: "Etsy UK" })).not.toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "Amazon Seller #1" })).toBeInTheDocument();
+    expect(screen.queryByRole("article", { name: "Etsy UK" })).not.toBeInTheDocument();
     fireEvent.change(search, { target: { value: "special" } });
-    expect(screen.getByRole("row", { name: "Etsy UK" })).toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "Etsy UK" })).toBeInTheDocument();
     fireEvent.change(search, { target: { value: "没有这个" } });
     expect(screen.getByText("没有匹配的环境")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "清除筛选" }));
-    expect(screen.getByRole("row", { name: "Etsy UK" })).toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "Etsy UK" })).toBeInTheDocument();
   });
 
   it("filters by group, including 未分组", async () => {
     await renderList();
     const rail = screen.getByRole("navigation", { name: "分组" });
     fireEvent.click(within(rail).getByRole("button", { name: /^美国账号/ }));
-    expect(screen.queryByRole("row", { name: "Etsy UK" })).not.toBeInTheDocument();
-    expect(screen.getByRole("row", { name: "Amazon Seller #1" })).toBeInTheDocument();
+    expect(screen.queryByRole("article", { name: "Etsy UK" })).not.toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "Amazon Seller #1" })).toBeInTheDocument();
     fireEvent.click(within(rail).getByRole("button", { name: /^未分组/ }));
-    expect(screen.getByRole("row", { name: "Etsy UK" })).toBeInTheDocument();
-    expect(screen.queryByRole("row", { name: "Amazon Seller #1" })).not.toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "Etsy UK" })).toBeInTheDocument();
+    expect(screen.queryByRole("article", { name: "Amazon Seller #1" })).not.toBeInTheDocument();
   });
 
   it("creates and deletes groups; deleting says the environments go back to 未分组", async () => {
@@ -167,7 +167,7 @@ describe("environment list", () => {
     fail = false;
     mockFetch(routes());
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
-    expect(await screen.findByRole("row", { name: "Amazon Seller #1" })).toBeInTheDocument();
+    expect(await screen.findByRole("article", { name: "Amazon Seller #1" })).toBeInTheDocument();
   });
 
   it("has no accessibility violations, with the details panel open", async () => {

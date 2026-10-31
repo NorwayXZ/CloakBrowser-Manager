@@ -9,7 +9,7 @@ export function SummaryPanel({ editor, hostOS, hostScreen, isEdit }: { editor: E
   const rows = summaryRows({ form: editor.form, proxyParts: editor.proxyParts, proxyTest: editor.proxyTest, hostOS, hostScreen, isEdit });
   const cloak = normalizeFormEngine(editor.form.browser_engine) === "cloakbrowser";
   return (
-    <aside aria-label="概要" className="rounded-md border border-border bg-surface">
+    <aside aria-label="概要" className="glass rounded-lg">
       <header className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
         <h2 className="text-base font-semibold text-fg">概要</h2>
         {cloak ? (

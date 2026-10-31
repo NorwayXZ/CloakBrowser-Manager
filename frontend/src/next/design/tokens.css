@@ -1,8 +1,6 @@
 /*
- * Design tokens of the panel, in Apple's visual language: the system font,
- * Apple's system colors (blue, green, orange, red), hairline separators,
- * grouped white cards on a light gray canvas, a gray sidebar, and the dark
- * appearance's elevated dark grays.
+ * Design tokens of the panel: soft gradient canvas, translucent "glass" cards,
+ * an indigo-to-blue accent gradient, large radii and a roomy type scale.
  *
  * Colors are RGB channels so Tailwind can add alpha (bg-accent/10). Light
  * values on :root, dark values under [data-theme="dark"]; ThemeProvider always
@@ -10,28 +8,29 @@
  * tokens.test.ts checks the text/background pairs below for WCAG contrast in
  * both themes.
  *
- * Apple's own blue is too light to be both a text color and a button fill in
- * the dark appearance, so there are two: --c-accent for text, icons and focus,
- * --c-accent-fill for solid buttons, checked boxes and selected menu rows.
+ * --c-accent is the accent as text, icon and focus color; --c-accent-fill and
+ * --c-accent-fill-2 are the two stops of the gradient behind white button text.
  */
 :root {
-  --c-canvas: 245 245 247;        /* #F5F5F7 page background */
-  --c-surface: 255 255 255;       /* #FFFFFF cards, toolbar, fields */
-  --c-surface-2: 242 242 247;     /* #F2F2F7 hover, sunken fields */
-  --c-surface-3: 229 229 234;     /* #E5E5EA pressed, segmented track */
-  --c-sidebar: 236 236 241;       /* #ECECF1 sidebar */
-  --c-border: 222 222 227;        /* #DEDEE3 hairlines */
-  --c-border-strong: 134 134 139; /* #86868B field outlines, 3:1 on surface and canvas */
-  --c-fg: 29 29 31;               /* #1D1D1F body text */
-  --c-fg-2: 85 85 90;             /* #55555A secondary text */
-  --c-fg-3: 110 110 115;          /* #6E6E73 captions, placeholders */
-  --c-accent: 0 102 204;          /* #0066CC Apple's link blue: 4.5:1 as text on canvas */
-  --c-accent-hover: 0 85 170;     /* #0055AA */
-  --c-accent-fill: 0 113 227;     /* #0071E3 */
-  --c-accent-fill-hover: 0 102 204; /* #0066CC */
-  --c-accent-soft: 232 242 253;   /* #E8F2FD */
+  --c-canvas: 238 235 252;        /* #EEEBFC the page's mid tone (the page itself is a gradient) */
+  --c-surface: 255 255 255;       /* #FFFFFF cards, fields */
+  --c-surface-2: 244 243 252;     /* #F4F3FC hover, sunken fields */
+  --c-surface-3: 232 230 248;     /* #E8E6F8 pressed, segmented track */
+  --c-sidebar: 238 235 252;       /* kept for the legacy token set */
+  --c-border: 222 220 240;        /* #DEDCF0 hairlines inside cards */
+  --c-border-strong: 128 128 160; /* #8080A0 field outlines, 3:1 on surface and canvas */
+  --c-glass-border: 255 255 255;
+  --c-fg: 28 28 58;               /* #1C1C3A body text */
+  --c-fg-2: 74 74 110;            /* #4A4A6E secondary text */
+  --c-fg-3: 98 98 134;            /* #626286 captions, placeholders */
+  --c-accent: 79 70 214;          /* #4F46D6 */
+  --c-accent-hover: 62 54 190;    /* #3E36BE */
+  --c-accent-fill: 91 80 232;     /* #5B50E8 */
+  --c-accent-fill-hover: 74 64 214; /* #4A40D6 */
+  --c-accent-fill-2: 50 110 224;  /* #326EE0 */
+  --c-accent-soft: 237 234 255;   /* #EDEAFF */
   --c-on-accent: 255 255 255;
-  --c-switch-on: 52 199 89;       /* #34C759 Apple's green for switches */
+  --c-switch-on: 52 199 89;       /* #34C759 */
   --c-success: 30 125 55;         /* #1E7D37 */
   --c-success-soft: 230 246 234;  /* #E6F6EA */
   --c-warning: 168 80 0;          /* #A85000 */
@@ -42,35 +41,42 @@
   --c-on-danger: 255 255 255;
   --c-info: 0 98 204;             /* #0062CC */
   --c-info-soft: 230 241 252;     /* #E6F1FC */
-  --c-backdrop: 0 0 0;
+  --c-backdrop: 20 16 60;
 
-  --shadow-raised: 0 0 0 0.5px rgb(0 0 0 / 0.04), 0 1px 2px rgb(0 0 0 / 0.05);
-  --shadow-popover: 0 8px 28px rgb(0 0 0 / 0.14), 0 0 0 0.5px rgb(0 0 0 / 0.1);
-  --shadow-modal: 0 24px 64px rgb(0 0 0 / 0.22), 0 0 0 0.5px rgb(0 0 0 / 0.12);
+  --page-gradient: linear-gradient(135deg, #e3ebff 0%, #f1e6ff 55%, #ffe6ef 100%);
+  --glass-alpha: 0.78;
+  --glass-border-alpha: 0.9;
 
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI",
-    "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+  --shadow-raised: 0 2px 8px rgb(80 70 160 / 0.1);
+  --shadow-card: 0 10px 30px rgb(80 70 160 / 0.12);
+  --shadow-popover: 0 14px 40px rgb(60 50 140 / 0.22), 0 0 0 0.5px rgb(60 50 140 / 0.1);
+  --shadow-modal: 0 28px 80px rgb(40 30 120 / 0.3), 0 0 0 0.5px rgb(60 50 140 / 0.12);
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
   --font-mono: "SF Mono", ui-monospace, "Cascadia Mono", "Cascadia Code", Consolas, monospace;
 
   color-scheme: light;
 }
 
 :root[data-theme="dark"] {
-  --c-canvas: 28 28 30;           /* #1C1C1E */
-  --c-surface: 44 44 46;          /* #2C2C2E */
-  --c-surface-2: 58 58 60;        /* #3A3A3C */
-  --c-surface-3: 72 72 74;        /* #48484A */
-  --c-sidebar: 36 36 38;          /* #242426 */
-  --c-border: 62 62 66;           /* #3E3E42 */
-  --c-border-strong: 130 130 136; /* #828288 */
-  --c-fg: 245 245 247;            /* #F5F5F7 */
-  --c-fg-2: 190 190 195;          /* #BEBEC3 */
-  --c-fg-3: 152 152 158;          /* #98989E */
-  --c-accent: 77 163 255;         /* #4DA3FF */
-  --c-accent-hover: 120 185 255;  /* #78B9FF */
-  --c-accent-fill: 10 111 234;    /* #0A6FEA */
-  --c-accent-fill-hover: 10 100 212; /* #0A64D4 */
-  --c-accent-soft: 12 38 74;      /* #0C264A */
+  --c-canvas: 17 17 30;           /* #11111E */
+  --c-surface: 34 34 54;          /* #222236 */
+  --c-surface-2: 46 46 70;        /* #2E2E46 */
+  --c-surface-3: 60 60 88;        /* #3C3C58 */
+  --c-sidebar: 24 24 40;
+  --c-border: 66 66 98;           /* #424262 */
+  --c-border-strong: 140 140 176; /* #8C8CB0 */
+  --c-glass-border: 255 255 255;
+  --c-fg: 240 240 255;            /* #F0F0FF */
+  --c-fg-2: 188 188 214;          /* #BCBCD6 */
+  --c-fg-3: 156 156 186;          /* #9C9CBA */
+  --c-accent: 150 142 255;        /* #968EFF */
+  --c-accent-hover: 180 174 255;  /* #B4AEFF */
+  --c-accent-fill: 91 80 232;     /* #5B50E8 */
+  --c-accent-fill-hover: 78 68 214; /* #4E44D6 */
+  --c-accent-fill-2: 50 110 224;  /* #326EE0 */
+  --c-accent-soft: 40 36 92;      /* #28245C */
   --c-on-accent: 255 255 255;
   --c-switch-on: 48 209 88;       /* #30D158 */
   --c-success: 48 209 88;         /* #30D158 */
@@ -80,14 +86,19 @@
   --c-danger: 255 105 97;         /* #FF6961 */
   --c-danger-hover: 255 138 130;  /* #FF8A82 */
   --c-danger-soft: 58 24 26;      /* #3A181A */
-  --c-on-danger: 28 28 30;
-  --c-info: 90 177 255;           /* #5AB1FF */
+  --c-on-danger: 17 17 30;
+  --c-info: 110 180 255;          /* #6EB4FF */
   --c-info-soft: 14 36 62;        /* #0E243E */
   --c-backdrop: 0 0 0;
 
-  --shadow-raised: 0 0 0 0.5px rgb(255 255 255 / 0.06), 0 1px 2px rgb(0 0 0 / 0.4);
-  --shadow-popover: 0 10px 32px rgb(0 0 0 / 0.55), 0 0 0 0.5px rgb(255 255 255 / 0.1);
-  --shadow-modal: 0 28px 72px rgb(0 0 0 / 0.65), 0 0 0 0.5px rgb(255 255 255 / 0.12);
+  --page-gradient: linear-gradient(135deg, #14142b 0%, #1d1236 55%, #2a1230 100%);
+  --glass-alpha: 0.64;
+  --glass-border-alpha: 0.1;
+
+  --shadow-raised: 0 2px 8px rgb(0 0 0 / 0.4);
+  --shadow-card: 0 12px 34px rgb(0 0 0 / 0.45);
+  --shadow-popover: 0 16px 44px rgb(0 0 0 / 0.6), 0 0 0 0.5px rgb(255 255 255 / 0.1);
+  --shadow-modal: 0 30px 90px rgb(0 0 0 / 0.7), 0 0 0 0.5px rgb(255 255 255 / 0.12);
 
   color-scheme: dark;
 }

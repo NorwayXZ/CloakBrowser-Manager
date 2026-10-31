@@ -60,52 +60,53 @@ export function GroupRail({
     }
   };
 
-  const item = (key: string, label: string, count: number, group?: ProfileGroup) => (
-    <li key={key} className="group/item relative">
-      <button
-        type="button"
-        aria-current={value === key ? "true" : undefined}
-        onClick={() => onChange(key)}
-        className={cn(
-          "flex h-8 w-full items-center gap-2 rounded px-2.5 text-left text-sm transition-colors duration-fast",
-          value === key ? "bg-accent-soft font-medium text-accent" : "text-fg-2 hover:bg-surface-2 hover:text-fg",
-          group && "pr-9",
+  const chip = (key: string, label: string, count: number, group?: ProfileGroup) => {
+    const active = value === key;
+    return (
+      <li key={key} className="group/item flex shrink-0 items-center">
+        <button
+          type="button"
+          aria-current={active ? "true" : undefined}
+          onClick={() => onChange(key)}
+          className={cn(
+            "inline-flex h-9 items-center gap-2 rounded-full px-4 text-sm transition-colors duration-fast",
+            active ? "bg-fg font-medium text-canvas" : "border border-border-strong/30 bg-surface/70 text-fg-2 hover:bg-surface hover:text-fg",
+            group && "pr-3",
+          )}
+        >
+          {group?.color && <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ background: group.color }} />}
+          <span className="max-w-40 truncate">{label}</span>
+          <span className={cn("tabular text-xs", active ? "text-canvas/70" : "text-fg-3")}>{count}</span>
+        </button>
+        {group && (
+          <IconButton
+            size="sm"
+            label={`删除分组「${group.name}」`}
+            icon={<Trash2 className="h-3.5 w-3.5" />}
+            className="-ml-1 hidden group-hover/item:inline-flex group-focus-within/item:inline-flex"
+            onClick={() => void remove(group)}
+          />
         )}
-      >
-        {group?.color && <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ background: group.color }} />}
-        <span className="min-w-0 flex-1 truncate">{label}</span>
-        <span className={cn("tabular text-xs", group && "group-hover/item:invisible group-focus-within/item:invisible")}>{count}</span>
-      </button>
-      {group && (
-        <IconButton
-          size="sm"
-          label={`删除分组「${group.name}」`}
-          icon={<Trash2 className="h-3.5 w-3.5" />}
-          className="invisible absolute right-1 top-0.5 group-hover/item:visible group-focus-within/item:visible focus-visible:visible"
-          onClick={() => void remove(group)}
-        />
-      )}
-    </li>
-  );
+      </li>
+    );
+  };
 
   return (
-    <nav aria-label="分组" className="flex w-52 shrink-0 flex-col gap-2 border-r border-border bg-surface px-3 py-4">
-      <div className="px-2.5 text-xs font-medium text-fg-3">分组</div>
-      <ul className="flex flex-col gap-0.5">
-        {item(ALL_GROUPS, "全部", total)}
-        {item(UNGROUPED, UNGROUPED, counts.get(UNGROUPED) ?? 0)}
+    <nav aria-label="分组" className="flex flex-wrap items-center gap-2">
+      <ul className="flex max-w-full list-none items-center gap-2 overflow-x-auto p-0 pb-1">
+        {chip(ALL_GROUPS, "全部", total)}
+        {chip(UNGROUPED, UNGROUPED, counts.get(UNGROUPED) ?? 0)}
         {loading ? (
-          <li className="flex flex-col gap-2 px-2.5 py-1">
-            <Skeleton className="h-4 w-24" />
+          <li className="flex items-center gap-2 px-2">
             <Skeleton className="h-4 w-20" />
           </li>
         ) : (
-          groups.filter((group) => group.name !== UNGROUPED).map((group) => item(group.name, group.name, counts.get(group.name) ?? 0, group))
+          groups.filter((group) => group.name !== UNGROUPED).map((group) => chip(group.name, group.name, counts.get(group.name) ?? 0, group))
         )}
       </ul>
       {adding ? (
         <form
-          className="flex flex-col gap-2 px-1"
+          className="flex items-center gap-2"
           onSubmit={(event) => {
             event.preventDefault();
             void submit();
@@ -116,6 +117,7 @@ export function GroupRail({
             aria-label="新分组名称"
             placeholder="例如 美国账号"
             maxLength={64}
+            className="w-44"
             value={name}
             onChange={(event) => setName(event.target.value)}
             onKeyDown={(event) => {
@@ -125,17 +127,15 @@ export function GroupRail({
               }
             }}
           />
-          <div className="flex gap-2">
-            <Button type="submit" size="sm" variant="primary" loading={createGroup.isPending} disabled={!name.trim()}>
-              添加
-            </Button>
-            <Button size="sm" onClick={() => { setAdding(false); setName(""); }}>
-              取消
-            </Button>
-          </div>
+          <Button type="submit" size="sm" variant="primary" loading={createGroup.isPending} disabled={!name.trim()}>
+            添加
+          </Button>
+          <Button size="sm" onClick={() => { setAdding(false); setName(""); }}>
+            取消
+          </Button>
         </form>
       ) : (
-        <Button variant="ghost" size="sm" className="justify-start" icon={<FolderPlus className="h-3.5 w-3.5" />} onClick={() => setAdding(true)}>
+        <Button variant="ghost" size="sm" icon={<FolderPlus className="h-3.5 w-3.5" />} onClick={() => setAdding(true)}>
           新建分组
         </Button>
       )}

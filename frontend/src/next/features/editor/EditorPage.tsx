@@ -182,7 +182,7 @@ function Editor({
         void save();
       }}
     >
-      <div className="flex shrink-0 items-center gap-3 border-b border-border bg-surface px-4 py-2.5">
+      <div className="flex shrink-0 items-center gap-3 border-b border-border/40 bg-surface/60 px-4 py-2.5 backdrop-blur-xl">
         <IconButton label="回到环境列表" icon={<ArrowLeft className="h-4 w-4" />} onClick={() => navigate("/profiles")} />
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-md font-semibold text-fg">{title}</h1>
@@ -272,7 +272,7 @@ function Editor({
         </div>
       </div>
 
-      <div className="flex shrink-0 flex-wrap items-center justify-end gap-3 border-t border-border bg-surface px-4 py-2.5">
+      <div className="flex shrink-0 flex-wrap items-center justify-end gap-3 border-t border-border/40 bg-surface/60 px-4 py-2.5 backdrop-blur-xl">
         <span className={cn("mr-auto flex items-center gap-2 text-sm", editor.dirty ? "text-fg" : "text-fg-3")} aria-live="polite">
           {editor.dirty && <span aria-hidden className="h-2 w-2 rounded-full bg-warning" />}
           {editor.dirty ? "有未保存的修改" : isEdit ? "没有修改" : "填好名称即可创建，其余都有默认值"}

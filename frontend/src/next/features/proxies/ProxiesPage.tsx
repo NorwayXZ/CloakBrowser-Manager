@@ -106,7 +106,7 @@ function ExitProxiesPage() {
           ) : presets.isError ? (
             <ErrorState message={presets.error.message} onRetry={() => void presets.refetch()} />
           ) : list.length === 0 ? (
-            <div className="rounded-md border border-dashed border-border-strong bg-surface">
+            <div className="glass rounded-lg">
               <EmptyState icon={Globe2} title="还没有保存的代理" description="在右边添加一个，或者一次粘贴一批。保存后在新建、编辑环境时可以直接选用。" />
             </div>
           ) : (
@@ -163,7 +163,7 @@ function ExitProxiesPage() {
 function AddPanel() {
   const [tab, setTab] = useState("single");
   return (
-    <div className="rounded-md border border-border bg-surface px-4 pb-4 pt-1">
+    <div className="glass rounded-lg px-4 pb-4 pt-1">
       <Tabs
         label="添加代理"
         value={tab}

@@ -7,8 +7,10 @@ export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "dang
 export type ButtonSize = "sm" | "md";
 
 const VARIANTS: Record<ButtonVariant, string> = {
-  primary: "bg-accent-fill text-accent-on hover:bg-accent-fill-hover active:bg-accent-fill-hover",
-  secondary: "border border-border bg-surface text-fg shadow-raised hover:bg-surface-2 active:bg-surface-3",
+  primary:
+    "bg-gradient-to-br from-accent-fill to-accent-fill-2 text-accent-on shadow-[0_6px_16px_rgb(91_80_232/0.28)] " +
+    "hover:from-accent-fill-hover hover:to-accent-fill-2 hover:brightness-105 active:brightness-95",
+  secondary: "border border-border-strong/60 bg-surface/70 text-fg hover:bg-surface active:bg-surface-2",
   ghost: "text-fg-2 hover:bg-surface-2 hover:text-fg active:bg-surface-3",
   danger: "bg-danger text-danger-on hover:bg-danger-hover active:bg-danger-hover",
   /** Destructive but secondary: red text, no fill (e.g. "移到回收站" beside other actions). */
@@ -16,12 +18,12 @@ const VARIANTS: Record<ButtonVariant, string> = {
 };
 
 const SIZES: Record<ButtonSize, string> = {
-  sm: "h-7 gap-1.5 px-3 text-xs",
-  md: "h-8 gap-2 px-3.5 text-sm",
+  sm: "h-8 gap-1.5 px-3.5 text-xs",
+  md: "h-10 gap-2 px-5 text-sm",
 };
 
 export const buttonBase =
-  "inline-flex shrink-0 select-none items-center justify-center whitespace-nowrap rounded font-medium " +
+  "inline-flex shrink-0 select-none items-center justify-center whitespace-nowrap rounded-full font-semibold " +
   "transition-[background-color,border-color,color,box-shadow,transform] duration-fast active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 " +
   "focus-visible:outline-accent disabled:pointer-events-none disabled:opacity-50";
 
@@ -77,7 +79,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
         ref={ref}
         type={type}
         aria-label={label}
-        className={cn(buttonBase, VARIANTS[variant], size === "sm" ? "h-7 w-7" : "h-8 w-8", className)}
+        className={cn(buttonBase, VARIANTS[variant], size === "sm" ? "h-8 w-8" : "h-10 w-10", className)}
         disabled={disabled || loading}
         aria-busy={loading || undefined}
         {...rest}

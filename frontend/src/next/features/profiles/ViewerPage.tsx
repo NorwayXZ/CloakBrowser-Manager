@@ -70,7 +70,7 @@ export function ViewerPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-surface px-3 py-1.5">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border/40 bg-surface/60 px-3 py-1.5 backdrop-blur-xl">
         <IconButton label="回到列表" icon={<ArrowLeft className="h-4 w-4" />} onClick={back} />
         <span className="min-w-0 truncate text-sm font-medium text-fg">{profile.name}</span>
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
@@ -229,7 +229,7 @@ function VncScreen({ profileId, initialClipboardSync, onDisconnect }: { profileI
 
   return (
     <div ref={frameRef} className="flex min-h-0 flex-1 flex-col bg-canvas">
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-surface px-3 py-1">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/40 bg-surface/60 px-3 py-1 backdrop-blur-xl">
         <StatusDot status={connected ? "running" : "busy"} label={connected ? "已连接" : "连接中…"} />
         <div className="flex items-center gap-1">
           <IconButton
