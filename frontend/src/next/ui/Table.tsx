@@ -18,8 +18,8 @@ export function Table({
   minWidth?: number;
 }) {
   return (
-    <div className={cn("min-w-0 glass overflow-auto rounded-lg", className)}>
-      <table aria-label={label} className="w-full table-fixed border-separate border-spacing-0 text-sm" style={minWidth ? { minWidth } : undefined}>
+    <div className={cn("min-w-0 overflow-auto px-1 pb-1", className)}>
+      <table aria-label={label} className="-mt-2 w-full table-fixed border-separate border-spacing-x-0 border-spacing-y-2.5 text-sm" style={minWidth ? { minWidth } : undefined}>
         {children}
       </table>
     </div>
@@ -27,14 +27,14 @@ export function Table({
 }
 
 export function THead({ children }: { children: ReactNode }) {
-  return <thead className="sticky top-0 z-10 bg-surface-2/70 backdrop-blur-md">{children}</thead>;
+  return <thead>{children}</thead>;
 }
 
 export function TH({ className, children, ...rest }: ThHTMLAttributes<HTMLTableCellElement>) {
   return (
     <th
       scope="col"
-      className={cn("h-9 whitespace-nowrap border-b border-border px-3 text-left text-xs font-medium text-fg-3", className)}
+      className={cn("h-8 whitespace-nowrap px-4 text-left text-xs font-medium text-fg-3", className)}
       {...rest}
     >
       {children}
@@ -47,7 +47,7 @@ export function TR({ className, selected, children, ...rest }: HTMLAttributes<HT
   return (
     <tr
       data-selected={selected || undefined}
-      className={cn("transition-colors duration-fast hover:bg-surface-2", selected && "bg-accent-soft hover:bg-accent-soft", className)}
+      className={cn("group", className)}
       {...rest}
     >
       {children}
@@ -57,7 +57,7 @@ export function TR({ className, selected, children, ...rest }: HTMLAttributes<HT
 
 export function TD({ className, children, ...rest }: TdHTMLAttributes<HTMLTableCellElement>) {
   return (
-    <td className={cn("h-11 border-b border-border px-3 align-middle text-fg", className)} {...rest}>
+    <td className={cn("h-14 border-y border-border bg-surface/80 px-4 align-middle text-fg transition-colors duration-fast first:rounded-l-lg first:border-l last:rounded-r-lg last:border-r group-hover:bg-surface group-data-[selected]:bg-accent-soft", className)} {...rest}>
       {children}
     </td>
   );
