@@ -190,15 +190,18 @@ export function Tabs({
   onValueChange,
   tabs,
   label,
+  inset,
 }: {
   value: string;
   onValueChange: (value: string) => void;
   tabs: { value: string; label: ReactNode; content: ReactNode }[];
   label: string;
+  /** Inside a card: a quiet track instead of a floating glass pill. */
+  inset?: boolean;
 }) {
   return (
     <RadixTabs.Root value={value} onValueChange={onValueChange} className="min-w-0">
-      <RadixTabs.List aria-label={label} className="glass flex w-fit max-w-full gap-1 overflow-x-auto rounded-full p-1.5">
+      <RadixTabs.List aria-label={label} className={cn("flex w-fit max-w-full gap-1 overflow-x-auto rounded-full p-1.5", inset ? "bg-surface-3/60" : "glass")}>
         {tabs.map((tab) => (
           <RadixTabs.Trigger
             key={tab.value}

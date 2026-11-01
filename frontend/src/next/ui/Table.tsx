@@ -21,7 +21,7 @@ export function Table({
   flat?: boolean;
 }) {
   return (
-    <div data-flat={flat || undefined} className={cn("group/t min-w-0 overflow-auto px-1 pb-1", flat && "glass rounded-lg px-0 pb-0", className)}>
+    <div data-flat={flat || undefined} className={cn("group/t min-w-0 overflow-auto pb-1", flat && "glass rounded-lg px-0 pb-0", className)}>
       <table aria-label={label} className="-mt-2 w-full table-fixed border-separate border-spacing-x-0 border-spacing-y-2.5 text-sm group-data-[flat]/t:mt-0 group-data-[flat]/t:border-spacing-y-0" style={minWidth ? { minWidth } : undefined}>
         {children}
       </table>

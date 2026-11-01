@@ -89,7 +89,7 @@ export function GroupRail({
   );
 
   return (
-    <nav aria-label="分组" className="flex w-52 shrink-0 flex-col gap-2 border-r border-border bg-surface px-3 py-4">
+    <nav aria-label="分组" className="glass flex h-fit max-h-full w-52 shrink-0 flex-col gap-2 self-start overflow-y-auto rounded-lg px-3 py-4">
       <div className="px-2.5 text-xs font-medium text-fg-3">分组</div>
       <ul className="flex flex-col gap-0.5">
         {item(ALL_GROUPS, "全部", total)}
