@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Clock, Cpu, Info, Monitor, Moon, Plug, ShieldCheck, Sparkles, Sun } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clock, Cpu, Info, KeyRound, Monitor, Moon, Plug, ShieldCheck, Sparkles, Sun } from "lucide-react";
 import { Link, Navigate, useParams } from "react-router";
 import { useManagerStatus } from "../features/app/api";
 import { THEME_OPTIONS, usePreferences, type ThemePreference } from "../features/settings/preferences";
@@ -10,12 +10,14 @@ import { AgentAccessSection } from "../features/settings/AgentAccessSection";
 import { AiSection } from "../features/settings/AiSection";
 import { AutomationSection } from "../features/settings/AutomationSection";
 import { KernelSection } from "../features/settings/KernelSection";
+import { VaultSection } from "../features/settings/VaultSection";
 
 const SECTIONS = [
   { id: "appearance", label: "外观" },
   { id: "kernel", label: "浏览器内核", desc: "版本、授权密钥和更新方式", icon: Cpu, tile: "from-[#6e8bff] to-[#7b6bff]" },
   { id: "ai", label: "AI 接口", desc: "用来按人设生成一周的浏览剧本", icon: Sparkles, tile: "from-[#c06bff] to-[#ff6bb0]" },
   { id: "agent", label: "AI 接入", desc: "让外部 AI 工具来操作环境", icon: Plug, tile: "from-[#6bd0ff] to-[#6e8bff]" },
+  { id: "vault", label: "保险库", desc: "AI 注册账号时生成的密码，AI 只拿到引用", icon: KeyRound, tile: "from-[#8bd35a] to-[#4fb0ff]" },
   { id: "automation", label: "自动化", desc: "定时任务只在这个时间段内运行", icon: Clock, tile: "from-[#ffb36b] to-[#ff7b6b]" },
   { id: "account", label: "账号与安全", desc: "管理员账号、密码和退出登录", icon: ShieldCheck, tile: "from-[#5ad0a0] to-[#4fb0ff]" },
   { id: "about", label: "关于与更新", desc: "版本信息、检查更新", icon: Info, tile: "from-[#9aa3b8] to-[#6b7390]" },
@@ -31,7 +33,7 @@ export function SettingsPage() {
     <div className="flex min-h-full flex-col gap-6 pb-8 pt-2">
       {landing ? (
         <>
-          <PageHeader title="设置" description="外观、内核、AI、自动化、账号与更新。" />
+          <PageHeader title="设置" description="外观、内核、AI、保险库、自动化、账号与更新。" />
           <div className="grid min-w-0 grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
             <nav aria-label="设置分类" className="min-w-0">
               <ul className="m-0 flex list-none flex-col gap-3 p-0">
@@ -151,6 +153,8 @@ function CurrentSection({ id }: { id: (typeof SECTIONS)[number]["id"] }) {
       return <AiSection />;
     case "agent":
       return <AgentAccessSection />;
+    case "vault":
+      return <VaultSection />;
     case "automation":
       return <AutomationSection />;
     case "account":

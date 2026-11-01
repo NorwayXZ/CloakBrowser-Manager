@@ -34,7 +34,7 @@ from fastapi.staticfiles import StaticFiles
 import starlette.requests
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from . import agent_api, agent_auth, agent_lease
+from . import agent_api, agent_auth, agent_lease, vault_api
 from . import auto_backup
 from . import client_logs
 from . import backup as backups
@@ -3674,6 +3674,9 @@ agent_http_mcp = agent_api.install(
         auth_required=_auth_required,
     ),
 )
+
+
+vault_api.install(app, lambda profile_id: bool((p := db.get_profile(profile_id)) and not p.get("deleted_at")))
 
 
 # ── Static Frontend ───────────────────────────────────────────────────────────

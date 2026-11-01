@@ -32,7 +32,7 @@ from fastapi import APIRouter, Body, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
-from . import agent_lease
+from . import agent_lease, vault
 from .agent_auth import SCOPES, TokenStore, clamp_mode
 from .agent_tools import (
     SERVER_NAME,
@@ -105,6 +105,21 @@ class AgentDeps:
     cdp: CdpConnections
     internal_token: str
     auth_required: Callable[[], bool]
+
+
+def _resolve_vault_refs(profile_id: str, action: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Swap ``{{vault:…}}`` references in text that is about to be typed for the stored
+    value, so the agent never handles the password itself. Raises ``VaultError``."""
+    if action == "type" and vault.has_refs(body.get("text")):
+        return {**body, "text": vault.resolve_refs(body["text"], profile_id)}
+    if action == "batch" and isinstance(body.get("steps"), list):
+        steps = []
+        for step in body["steps"]:
+            if isinstance(step, dict) and step.get("do") == "type" and vault.has_refs(step.get("text")):
+                step = {**step, "text": vault.resolve_refs(step["text"], profile_id)}
+            steps.append(step)
+        return {**body, "steps": steps}
+    return body
 
 
 def agent_scope_of(scope_or_request: Any) -> tuple[str | None, str | None]:
@@ -206,6 +221,10 @@ def create_router(deps: AgentDeps) -> APIRouter:
             return JSONResponse({"ok": False, "reason": reason, "detail": detail}, status_code=status)
 
         _profile_or_404(profile_id)
+        try:
+            body = _resolve_vault_refs(profile_id, action, body)
+        except vault.VaultError as exc:
+            return fail(409, exc.reason, exc.detail)
         running = deps.browser_mgr.running.get(profile_id)
         if running is None:
             return fail(404, "not_running", "这个画像没在运行。先 open_browser。")
@@ -277,7 +296,9 @@ def create_router(deps: AgentDeps) -> APIRouter:
             return fail(_REASON_STATUS.get(exc.reason, 409), exc.reason, exc.detail)
         except (TypeError, ValueError) as exc:
             return fail(400, "invalid_argument", f"参数不合法：{exc}")
-        return result
+        # A page can echo a typed password back (a "show password" toggle in a snapshot,
+        # say); never let the plaintext reach the agent.
+        return vault.redact(result, vault.redaction_map(profile_id))
 
     # ── tool API ───────────────────────────────────────────────────────────
 
