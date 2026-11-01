@@ -139,13 +139,13 @@ export function ProfilesPage() {
   const filtered = query.trim() !== "" || group !== ALL_GROUPS;
 
   return (
-    <div className="flex h-full min-h-0">
+    <div className="flex h-full min-h-0 gap-6 pt-2">
       {!narrow && (
         <GroupRail groups={groups.data ?? []} loading={groups.isPending} counts={counts} total={all.length} value={group} onChange={(value) => setParam("g", value === ALL_GROUPS ? null : value)} />
       )}
 
       <div className="relative flex min-w-0 flex-1 flex-col">
-        <div className="flex shrink-0 flex-col gap-3 px-6 pb-3 pt-5">
+        <div className="flex shrink-0 flex-col gap-3 pb-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
               <h1 className="text-lg font-semibold text-fg">环境</h1>
@@ -245,7 +245,7 @@ export function ProfilesPage() {
           )}
         </div>
 
-        <div ref={tableRef} className="min-h-0 flex-1 px-6 pb-6">
+        <div ref={tableRef} className="min-h-0 flex-1 pb-6">
           {profiles.isPending ? (
             <ListSkeleton />
           ) : profiles.isError ? (

@@ -28,12 +28,12 @@ export function SettingsPage() {
   const landing = current.id === "appearance";
 
   return (
-    <div className="flex min-h-full flex-col gap-6 px-6 pb-8 pt-2 lg:px-10">
+    <div className="flex min-h-full flex-col gap-6 pb-8 pt-2">
       {landing ? (
         <>
           <PageHeader title="设置" description="外观、内核、AI、自动化、账号与更新。" />
           <div className="grid min-w-0 grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-            <nav aria-label="设置分类" className="min-w-0 max-w-[820px]">
+            <nav aria-label="设置分类" className="min-w-0">
               <ul className="m-0 flex list-none flex-col gap-3 p-0">
                 {SECTIONS.filter((item) => item.id !== "appearance").map((item) => (
                   <li key={item.id}>
@@ -52,7 +52,7 @@ export function SettingsPage() {
             <ChevronLeft className="h-4 w-4" aria-hidden />
             设置
           </Link>
-          <div className="min-w-0 max-w-form">
+          <div className="mx-auto w-full min-w-0 max-w-form">
             <CurrentSection id={current.id} />
           </div>
         </>

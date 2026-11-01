@@ -61,7 +61,7 @@ function message(error: unknown) {
 
 export function ProxiesPage() {
   const [tab, setTab] = useState("proxies");
-  return <div className="px-6 pt-2 lg:px-10"><Tabs label="代理分类" value={tab} onValueChange={setTab} tabs={[
+  return <div className="pt-2"><Tabs label="代理分类" value={tab} onValueChange={setTab} tabs={[
     { value: "proxies", label: "出口代理", content: <ExitProxiesPage /> },
     { value: "relays", label: "中转服务器", content: <RelayNodesPanel /> },
   ]} /></div>;
@@ -163,8 +163,9 @@ function ExitProxiesPage() {
 function AddPanel() {
   const [tab, setTab] = useState("single");
   return (
-    <div className="glass rounded-lg px-4 pb-4 pt-1">
+    <div className="glass rounded-lg p-4">
       <Tabs
+        inset
         label="添加代理"
         value={tab}
         onValueChange={setTab}

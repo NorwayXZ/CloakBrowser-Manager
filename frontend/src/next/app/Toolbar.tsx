@@ -21,7 +21,7 @@ export function Toolbar({ onShowShortcuts }: { onShowShortcuts: () => void }) {
   const compact = useMediaQuery(COMPACT_QUERY);
 
   return (
-    <header className="flex h-20 shrink-0 items-center gap-4 px-6 lg:px-10">
+    <header className="mx-auto flex h-20 w-full max-w-[1320px] shrink-0 items-center gap-4 px-6 lg:px-10">
       <div className="flex min-w-0 shrink-0 items-center gap-2.5">
         <div aria-hidden className="flex h-9 w-9 items-center justify-center rounded-[12px] bg-gradient-to-br from-accent-fill to-accent-fill-2 text-md font-bold text-accent-on shadow-raised">
           C

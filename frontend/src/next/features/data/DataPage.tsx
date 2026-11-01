@@ -45,7 +45,7 @@ export function DataPage() {
   ];
 
   return (
-    <div className="flex flex-col gap-5 px-6 pb-8 pt-2 lg:px-10">
+    <div className="flex flex-col gap-5 pb-8 pt-2">
       <PageHeader title="数据" description="备份、恢复、导出配置，以及 7 天内删除的环境。" />
       <nav aria-label="数据分类" className="glass flex w-fit max-w-full gap-1 overflow-x-auto rounded-full p-1.5">
         {tabs.map((tab) => (
@@ -189,13 +189,14 @@ function BackupTab() {
   };
 
   return (
-    <div className="flex max-w-form flex-col gap-5">
-      <Card className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+    <div className="grid grid-cols-1 gap-5 xl:grid-cols-2 xl:items-start">
+      <Card className="grid grid-cols-1 gap-3 sm:grid-cols-3 xl:col-span-2">
         <Stat label="最近完整备份" value={backups.isPending ? null : latestFull ? formatTime(latestFull.created_at) : "还没有"} />
         <Stat label="下次自动备份" value={auto.isPending ? null : auto.data?.enabled ? formatTime(auto.data.next_due_at) : "已关闭"} />
         <Stat label="备份文件夹" value={backups.isPending ? null : <span className="break-all font-mono text-xs">{backups.data?.location ?? "—"}</span>} />
       </Card>
 
+      <div className="flex flex-col gap-5 empty:hidden xl:col-span-2">
       {blocked && (
         <Banner tone="warning" title={`有 ${running} 个浏览器正在运行`}>
           为了保证 Cookie 等数据完整，备份和恢复前请先关闭所有浏览器。
@@ -206,7 +207,9 @@ function BackupTab() {
           {result.text}
         </Banner>
       )}
+      </div>
 
+      <div className="flex min-w-0 flex-col gap-5">
       <Section id="full-backup" title="完整备份（推荐）" description="包含所有环境的 Cookie、登录状态、历史记录、本地存储、标签页，以及环境列表、分组、代理和加密密钥。网页缓存不备份。备份文件里有账号登录信息，不要发给别人。">
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="primary" icon={<Archive className="h-4 w-4" />} loading={busy === "full"} disabled={busy !== null || blocked} title={stopFirst} onClick={() => void createFull()}>
@@ -221,9 +224,22 @@ function BackupTab() {
           </Button>
         </div>
       </Section>
-
+      <Section id="config-backup" title="只导出配置（JSON）" description="只包含环境配置、分组、代理和 Cookie JSON，不含登录状态和浏览记录。适合把设置迁到另一台电脑；导入时会新建环境记录，同名代理会更新。">
+        <div className="flex flex-wrap gap-2">
+          <Button icon={<FileJson className="h-4 w-4" />} loading={busy === "export"} disabled={busy !== null} onClick={() => void exportConfig()}>
+            下载配置备份
+          </Button>
+          <input ref={configInput} type="file" accept="application/json,.json" className="hidden" aria-hidden tabIndex={-1} onChange={(event) => importConfig(event.target.files?.[0] ?? null)} />
+          <Button icon={<Upload className="h-4 w-4" />} loading={busy === "import"} disabled={busy !== null || blocked} title={stopFirst} onClick={() => configInput.current?.click()}>
+            导入配置
+          </Button>
+        </div>
+      </Section>
+      </div>
+      <div className="flex min-w-0 flex-col gap-5">
       <AutoBackupSection running={running} />
-
+      </div>
+      <div className="min-w-0 xl:col-span-2">
       <Section id="backup-history" title="备份记录" description="每次启动 Manager 会自动保存一份环境列表快照（保留最近 10 份）。">
         {backups.isPending ? (
           <Skeleton className="h-24 w-full" />
@@ -278,18 +294,7 @@ function BackupTab() {
           </Table>
         )}
       </Section>
-
-      <Section id="config-backup" title="只导出配置（JSON）" description="只包含环境配置、分组、代理和 Cookie JSON，不含登录状态和浏览记录。适合把设置迁到另一台电脑；导入时会新建环境记录，同名代理会更新。">
-        <div className="flex flex-wrap gap-2">
-          <Button icon={<FileJson className="h-4 w-4" />} loading={busy === "export"} disabled={busy !== null} onClick={() => void exportConfig()}>
-            下载配置备份
-          </Button>
-          <input ref={configInput} type="file" accept="application/json,.json" className="hidden" aria-hidden tabIndex={-1} onChange={(event) => importConfig(event.target.files?.[0] ?? null)} />
-          <Button icon={<Upload className="h-4 w-4" />} loading={busy === "import"} disabled={busy !== null || blocked} title={stopFirst} onClick={() => configInput.current?.click()}>
-            导入配置
-          </Button>
-        </div>
-      </Section>
+      </div>
     </div>
   );
 }
