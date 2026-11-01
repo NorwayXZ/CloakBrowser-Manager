@@ -70,7 +70,7 @@ curl -X POST http://127.0.0.1:8080/api/agent/tools/open_browser \
 | `off` | 全部拒绝 |
 | `read-only`（默认） | 14 个只读工具：看画像、预检、检测报告、养号/进化状态、内核信息 |
 | `full` | 再加启停画像、跑检测/养号/进化（`launch_profile` 只能 `manual`），以及 3 个邮箱工具 |
-| `automation` | 再加 `open_browser`、`get_cdp_endpoint` 和 15 个页面工具，`launch_profile` 可用 `debug` |
+| `automation` | 再加 `open_browser`、`get_cdp_endpoint`、15 个页面工具和 4 个保险库工具，`launch_profile` 可用 `debug` |
 
 **为什么页面控制单独成档**：CDP 能读取页面的全部 Cookie，而桥在其他档位刻意不提供任何 Cookie 读取。开 `automation` 等于允许 agent 接触该画像的登录态，请只在需要操作页面时开，用完改回 `full` 或 `read-only`。
 
@@ -95,6 +95,34 @@ curl -X POST http://127.0.0.1:8080/api/agent/tools/open_browser \
 4. 没等到（`mail_timeout`）：确认表单真的提交了、地址没填错，必要时点页面上的「重新发送」，再等一次。
 
 `mail_list_messages(address)` 可以回看这个地址最近的邮件。可以用 `from_contains` / `subject_contains` 只等某个网站的邮件，避免拿错。
+
+## 保险库：注册时的密码（你拿不到明文）
+
+注册还要一个密码。**不要向用户要密码，也不要自己编一个**：让 Manager 生成并保存，你只用**引用**（`automation` 档）。
+
+| 工具 | 作用 |
+| --- | --- |
+| `account_prepare(profile, site, username?)` | 一步到位：新建一个邮箱地址（走「邮箱」页接好的服务器）+ 一个保险库条目（用户名、生成的强密码）。返回 `email`、`username` 和三个引用 `refs` |
+| `vault_create(profile, site, email?, username?)` | 只建条目（邮箱已经有时用） |
+| `vault_list(profile)` | 列这个画像的条目：网站、用户名、邮箱、状态、引用，**不含密码**。登录已注册的网站时用它找引用 |
+| `vault_mark(profile, entry_id, status, notes?)` | 标记 `registered`（已提交）/ `verified`（邮箱已验证、可用）/ `failed` |
+
+流程：`account_prepare` → 打开注册页 → 把 `refs` 里的引用**原样**写进 `browser_type`（或 `browser_batch` 的 `type` 步骤）的 `text`，例如：
+
+```json
+{"do": "type", "ref": "label=Email", "text": "{{vault:3f9c2a61d0b84e17.email}}"}
+{"do": "type", "ref": "css=#password", "text": "{{vault:3f9c2a61d0b84e17.password}}"}
+```
+
+提交后 `mail_wait_code(address=email)` 取验证码或验证链接 → 填回页面 → `vault_mark(entry_id, "verified")`。以后登录同一个网站，同样用引用填用户名和密码。
+
+- **引用在服务端换成真值**再输入，你全程拿不到密码。引用只在拥有该条目的画像里有效，别的画像用会得到 `vault_ref_invalid`。
+- 页面如果把已存的密码回显出来（比如「显示密码」开关），快照和页面文字里它会被换回引用；截图里的像素没法处理。
+- `browser_type` 的 `text` 在审计日志里只记长度，不记内容。
+- 每 24 小时最多新建 30 个条目，不要批量创建。
+- 遇到图形验证码、手机短信、人机验证：**停下来**，请用户在面板里接管处理；处理完再继续，不要尝试绕过。
+- 用户在面板「设置 → 保险库」里查看、复制或删除密码；没设管理员密码时，本机任何程序（包括有命令行权限的 AI）都能直接调用查看接口，所以让有命令行权限的 AI 工作之前请先设管理员密码。
+- 开着「拟人化」的画像里 `browser_type` 每个字符都有人类打字延迟，一个邮箱要几秒；用 `browser_batch` 合并整张表单，并预期这一步比较慢。
 
 ## 操作页面：内置页面工具
 
@@ -303,6 +331,8 @@ MCP 客户端除了工具，还能读到：
 | `navigation_failed` / `timeout` | 网址打不开 / 操作超时 | `browser_snapshot` 看现状，检查代理出口 |
 | `mail_not_configured` | 用户还没接好邮箱服务器 | 告诉用户去「邮箱」页配置，不要自己找别的邮箱 |
 | `mail_timeout` | 等待时间内没收到新邮件 | 检查表单是否提交成功、地址是否填对，必要时重新发送后再等 |
+| `vault_ref_invalid` | 引用的条目不存在，或不属于这个画像 | `vault_list` 看这个画像有哪些条目 |
+| `quota_exceeded` | 24 小时内新建的保险库条目到上限 | 不要再批量创建 |
 | `mail_server_error` | 邮箱服务器出错或连不上 | 稍等再试一次，还不行把 `detail` 告诉用户 |
 | `seat_busy` | 授权单座位被占 | 等几分钟，**不要立刻重试**；或先关掉别的画像 |
 | `automation_busy` | 另一个自动化（检测/养号/进化）在跑，带 `owner` | 等它结束 |

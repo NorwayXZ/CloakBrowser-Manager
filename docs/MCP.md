@@ -25,7 +25,7 @@ Manager 本体是唯一的执行者。
 | `off` | 桥拒绝服务，工具列表为空 |
 | `read-only`（默认） | 只读 14 个工具；动作工具不在列表里出现，直调也会被拒绝并记审计 |
 | `full` | 只读 14 个 + 动作 5 个（启动/关闭画像、跑检测、跑养号、跑进化）；`launch_profile` 只能 `manual` 模式 |
-| `automation` | `full` 的全部，再加浏览器工具 17 个（`open_browser`、`get_cdp_endpoint` 和 15 个页面工具），`launch_profile` 可用 `debug` 模式——这一档会把页面控制和 CDP 端点交给 agent |
+| `automation` | `full` 的全部，再加浏览器工具 21 个（`open_browser`、`get_cdp_endpoint`、15 个页面工具和 4 个保险库工具），`launch_profile` 可用 `debug` 模式——这一档会把页面控制和 CDP 端点交给 agent |
 
 查看 / 修改：面板「设置 → AI 接入」页（旧界面在左侧「AI 接入」）可以直接切换（切到「可操作页面」会先弹出 Cookie 风险确认）；也可以用命令行或 API：
 
@@ -95,6 +95,7 @@ Codex 的配置见 [AGENT.md](AGENT.md#在-codex-里配置)（stdio 和 HTTP 两
 - `open_browser(profile)`：画像 id 或名称。确保以 `debug` 模式在跑并返回 CDP 连接信息；已经以 `debug` 在跑就直接返回（`started=false`），以 `manual` 在跑则回 `already_running`，不会替你重启。
 - `get_cdp_endpoint(profile_id)`：对已在 `debug` 模式运行的画像返回 CDP 连接信息（HTTP/WebSocket 端点、页面标签、接入写法）。
 - 页面工具 15 个（都以 `profile`=id 或名称为第一个参数）：`browser_navigate`、`browser_snapshot`、`browser_get_text`、`browser_click`、`browser_type`、`browser_press_key`、`browser_scroll`、`browser_screenshot`、`browser_wait_for`、`browser_dialog`、`browser_batch`、`browser_upload`、`browser_downloads`、`browser_back`、`browser_tabs`。`ref` 参数除了快照引用，还支持 `text=…` / `role=…[name=…]` / `label=…` / `placeholder=…` / `css=…` 语义选择器。它们跑在 Manager 里，复用 Manager 已有的浏览器连接；用法见 [AGENT.md](AGENT.md#操作页面内置页面工具)。
+- 保险库工具 4 个：`account_prepare`、`vault_create`、`vault_list`、`vault_mark`。注册账号时密码由 Manager 生成并加密保存，agent 只拿 `{{vault:…}}` 引用，在 `browser_type` 里由 Manager 换成真值；见 [AGENT.md](AGENT.md#保险库注册时的密码你拿不到明文)。
 
 端点指向 Manager 自己的 CDP 代理 `/api/profiles/{id}/cdp`，不是 Chrome 的原始调试端口；开了鉴权时返回里只有 `auth_required` 和提示，不回显 token。
 
@@ -115,6 +116,7 @@ Codex 的配置见 [AGENT.md](AGENT.md#在-codex-里配置)（stdio 和 HTTP 两
 - `cookies_json` 与任何 Cookie 值不回——MCP 层没有任何 Cookie 主题工具。
 - license key 的值在 REST 层就不存在（只有 tier/plan/到期/`key_stored`），桥自然也拿不到。
 - VNC 端口、显示号、`user_data_dir` 等本机访问路径不回。`cdp_url` 只在 `automation` 档以 Manager 代理端点的形式交出（见上）。
+- 保险库里的密码 AI 拿不到明文：`browser_type` 的 `{{vault:…}}` 引用在服务端换成真值，页面回显的已存密码在返回前被换回引用；`text` 参数在审计里只记长度。引用只在拥有该条目的画像里有效。
 - 上传只允许 `agent-files/` 目录里的文件，下载也落在这个目录；agent 不能借上传把本机其他文件传给网站。
 - 页面快照里的密码输入框不显示值；快照用的元素引用保存在 Manager 里，不会往页面 DOM 写属性。
 - 范围化的 agent token 不能访问原始 REST（画像的 Cookie、代理账密在那里），只能走上面已脱敏的 `/api/agent/*`。

@@ -193,6 +193,23 @@ def init_db():
                 last_delivered_id INTEGER NOT NULL DEFAULT 0
             );
 
+            -- Credentials an agent created for a sign-up (backend/vault.py). The password is
+            -- encrypted and only ever leaves the Manager through the panel's explicit "reveal"
+            -- or as a {{vault:<id>.password}} reference resolved while typing.
+            CREATE TABLE IF NOT EXISTS vault_entries (
+                id TEXT PRIMARY KEY,
+                profile_id TEXT NOT NULL,
+                site TEXT NOT NULL,
+                username TEXT,
+                email TEXT,
+                password_enc TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'new',
+                notes TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_vault_profile ON vault_entries(profile_id);
+
             CREATE TABLE IF NOT EXISTS mcp_audit_log (
                 id TEXT PRIMARY KEY,
                 ts TEXT NOT NULL,
@@ -486,6 +503,83 @@ def list_mcp_audit(limit: int = 100) -> list[dict[str, Any]]:
         entry["ok"] = bool(entry["ok"])
         entries.append(entry)
     return entries
+
+
+# ── Credential vault ─────────────────────────────────────────────────────────
+
+
+def _vault_row(row: sqlite3.Row, *, with_password: bool = False) -> dict[str, Any]:
+    entry = dict(row)
+    password = decrypt_value(entry.pop("password_enc", None))
+    if with_password:
+        entry["password"] = password
+    return entry
+
+
+def create_vault_entry(
+    *, profile_id: str, site: str, username: str | None, email: str | None, password: str,
+    notes: str | None = None,
+) -> dict[str, Any]:
+    entry_id = uuid.uuid4().hex[:16]
+    now = _now()
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO vault_entries
+                (id, profile_id, site, username, email, password_enc, status, notes, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'new', ?, ?, ?)
+            """,
+            (entry_id, profile_id, site, username, email, encrypt_value(password), notes, now, now),
+        )
+        conn.commit()
+    return get_vault_entry(entry_id)  # type: ignore[return-value]
+
+
+def get_vault_entry(entry_id: str, *, with_password: bool = False) -> dict[str, Any] | None:
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM vault_entries WHERE id = ?", (entry_id,)).fetchone()
+    return _vault_row(row, with_password=with_password) if row else None
+
+
+def list_vault_entries(profile_id: str | None = None, *, with_password: bool = False) -> list[dict[str, Any]]:
+    with get_db() as conn:
+        if profile_id is None:
+            rows = conn.execute("SELECT * FROM vault_entries ORDER BY created_at DESC, rowid DESC").fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM vault_entries WHERE profile_id = ? ORDER BY created_at DESC, rowid DESC", (profile_id,)
+            ).fetchall()
+    return [_vault_row(row, with_password=with_password) for row in rows]
+
+
+def count_vault_entries_since(since_iso: str) -> int:
+    with get_db() as conn:
+        row = conn.execute("SELECT COUNT(*) AS n FROM vault_entries WHERE created_at >= ?", (since_iso,)).fetchone()
+    return int(row["n"])
+
+
+def update_vault_entry(entry_id: str, *, status: str | None = None, notes: str | None = None) -> dict[str, Any] | None:
+    fields, values = [], []
+    if status is not None:
+        fields.append("status = ?")
+        values.append(status)
+    if notes is not None:
+        fields.append("notes = ?")
+        values.append(notes)
+    if fields:
+        fields.append("updated_at = ?")
+        values.append(_now())
+        with get_db() as conn:
+            conn.execute(f"UPDATE vault_entries SET {', '.join(fields)} WHERE id = ?", (*values, entry_id))
+            conn.commit()
+    return get_vault_entry(entry_id)
+
+
+def delete_vault_entry(entry_id: str) -> bool:
+    with get_db() as conn:
+        cursor = conn.execute("DELETE FROM vault_entries WHERE id = ?", (entry_id,))
+        conn.commit()
+    return cursor.rowcount > 0
 
 
 def export_configuration() -> dict[str, Any]:

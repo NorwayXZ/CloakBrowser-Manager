@@ -82,6 +82,7 @@ describe("settings landing", () => {
       "/settings/kernel",
       "/settings/ai",
       "/settings/agent",
+      "/settings/vault",
       "/settings/automation",
       "/settings/account",
       "/settings/about",
@@ -456,6 +457,79 @@ describe("settings › AI 接入", () => {
     await open("/settings/agent", agentRoutes([{ path: "/api/settings/mcp", status: 500, respond: { detail: "读不到" } }]), "AI agent 权限");
     expect(await screen.findByText("AI 接入设置没有读出来")).toBeInTheDocument();
     expect(screen.getByText("读不到")).toBeInTheDocument();
+  });
+});
+
+describe("settings › 保险库", () => {
+  const ENTRY = { id: "abc123def4567890", profile_id: "p1", site: "acme.example", username: "kcarter61", email: "nina.shaw42@mail.example.com", status: "verified", notes: null, created_at: "2026-10-26T01:00:00+00:00", updated_at: "2026-10-26T01:05:00+00:00" };
+  const NO_TOKENS = { enforced: true, scopes: ["read", "control", "cdp"], tokens: [] };
+
+  function vaultRoutes(extra: MockRoute[] = [], opts: { entries?: unknown[]; tokens?: unknown } = {}): MockRoute[] {
+    return [
+      ...extra,
+      { path: "/api/vault", respond: { entries: opts.entries ?? [] } },
+      { path: "/api/agent/tokens", respond: opts.tokens ?? NO_TOKENS },
+      { path: "/api/profiles", respond: [{ id: "p1", name: "店铺 A" }] },
+    ];
+  }
+
+  it("lists entries with the environment name, status and no password", async () => {
+    await open("/settings/vault", vaultRoutes([], { entries: [ENTRY] }), "保险库");
+    const table = await screen.findByRole("table", { name: "保险库" });
+    expect(within(table).getByText("acme.example")).toBeInTheDocument();
+    expect(within(table).getByText("kcarter61")).toBeInTheDocument();
+    expect(within(table).getByText("店铺 A")).toBeInTheDocument();
+    expect(within(table).getByText("已验证")).toBeInTheDocument();
+    expect(screen.queryByText(/Sup3r/)).not.toBeInTheDocument();
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("marks an entry whose environment was deleted", async () => {
+    await open("/settings/vault", vaultRoutes([], { entries: [{ ...ENTRY, profile_id: "gone" }] }), "保险库");
+    expect(await screen.findByText("（已删除）")).toBeInTheDocument();
+  });
+
+  it("says so when nothing was registered yet", async () => {
+    await open("/settings/vault", vaultRoutes(), "保险库");
+    expect(await screen.findByText(/还没有记录/)).toBeInTheDocument();
+  });
+
+  it("reveals a password only on request, then hides it again", async () => {
+    const { fetchMock } = await open(
+      "/settings/vault",
+      vaultRoutes([{ method: "POST", path: "/api/vault/abc123def4567890/reveal", respond: { ok: true, password: "Sup3r-secret-pw!", username: "kcarter61", email: ENTRY.email } }], { entries: [ENTRY] }),
+      "保险库",
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "查看 acme.example 的密码" }));
+    expect(await screen.findByText("Sup3r-secret-pw!")).toBeInTheDocument();
+    expect(bodies(fetchMock, "POST", "/api/vault/abc123def4567890/reveal")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "隐藏" }));
+    expect(screen.queryByText("Sup3r-secret-pw!")).not.toBeInTheDocument();
+  });
+
+  it("deletes an entry only after confirmation", async () => {
+    let entries: unknown[] = [ENTRY];
+    const { fetchMock } = await open(
+      "/settings/vault",
+      vaultRoutes([{ method: "DELETE", path: "/api/vault/abc123def4567890", respond: () => ((entries = []), { ok: true }) }, { path: "/api/vault", respond: () => ({ entries }) }]),
+      "保险库",
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "删除 acme.example 的记录" }));
+    await cancelDialog();
+    expect(bodies(fetchMock, "DELETE", "/api/vault/abc123def4567890")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "删除 acme.example 的记录" }));
+    await confirmWith("删除");
+    expect(await screen.findByText(/还没有记录/)).toBeInTheDocument();
+  });
+
+  it("warns when anyone on this computer could read the passwords", async () => {
+    await open("/settings/vault", vaultRoutes([], { entries: [ENTRY], tokens: { ...NO_TOKENS, enforced: false } }), "保险库");
+    expect(await screen.findByText("没有设置管理员密码")).toBeInTheDocument();
+  });
+
+  it("shows why the vault could not be read", async () => {
+    await open("/settings/vault", vaultRoutes([{ path: "/api/vault", status: 500, respond: { detail: "读不出来" } }]), "保险库");
+    expect(await screen.findByText("读不出来")).toBeInTheDocument();
   });
 });
 

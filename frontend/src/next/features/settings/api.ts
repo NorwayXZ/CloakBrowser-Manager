@@ -25,6 +25,21 @@ export interface LlmSettings {
   executor_effort: string | null;
 }
 
+export type VaultStatus = "new" | "registered" | "verified" | "failed";
+
+/** A sign-up an agent made. The password is only ever readable through `revealVault`. */
+export interface VaultEntry {
+  id: string;
+  profile_id: string;
+  site: string;
+  username: string | null;
+  email: string | null;
+  status: VaultStatus;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export type McpMode = Schemas["McpSettingsModel"]["mode"];
 export type McpAuditEntry = Schemas["McpAuditResponse"];
 export type AgentTokenScope = "read" | "control" | "cdp";
@@ -92,6 +107,7 @@ export const settingsKeys = {
   mcp: ["settings", "mcp"] as const,
   agentTokens: ["agent", "tokens"] as const,
   mcpAudit: ["mcp", "audit"] as const,
+  vault: ["vault", "entries"] as const,
   hours: ["automation", "hours"] as const,
   appUpdate: ["app", "update"] as const,
   /** Last "检查更新" result, kept so the toolbar can mention a new version. */
@@ -121,6 +137,11 @@ export const settingsApi = {
     request<AgentTokenCreated>("/api/agent/tokens", { method: "POST", body: { name, scope } }),
   revokeAgentToken: (id: string) => request<{ ok: boolean }>(`/api/agent/tokens/${enc(id)}`, { method: "DELETE" }),
   mcpAudit: (limit: number) => request<McpAuditEntry[]>(`/api/mcp/audit?limit=${limit}`),
+
+  vault: () => request<{ entries: VaultEntry[] }>("/api/vault"),
+  revealVault: (id: string) =>
+    request<{ ok: boolean; password: string; username: string | null; email: string | null }>(`/api/vault/${enc(id)}/reveal`, { method: "POST", body: {} }),
+  deleteVault: (id: string) => request<{ ok: boolean }>(`/api/vault/${enc(id)}`, { method: "DELETE" }),
 
   hours: () => request<AutomationHours>("/api/automation/hours"),
   saveHours: (hours: string | null) => request<AutomationHours>("/api/automation/hours", { method: "PUT", body: { hours } }),
@@ -153,6 +174,10 @@ export function useMcpMode() {
 
 export function useAgentTokens() {
   return useQuery({ queryKey: settingsKeys.agentTokens, queryFn: settingsApi.agentTokens });
+}
+
+export function useVault() {
+  return useQuery({ queryKey: settingsKeys.vault, queryFn: settingsApi.vault });
 }
 
 export const AUDIT_LIMIT = 30;

@@ -230,13 +230,16 @@ def test_tool_snapshot_full_mode():
     assert {t.name: t.input_schema for t in tools} == expected
 
 
+VAULT_TOOLS = ("account_prepare", "vault_create", "vault_list", "vault_mark")
+
+
 def test_tool_snapshot_automation_mode():
     tools = mcp_server.build_mcp_tools("automation")
     expected = {**EXPECTED_READ_TOOLS, **EXPECTED_ACTION_TOOLS, **EXPECTED_BROWSER_TOOLS}
-    assert [t.name for t in tools] == [*expected, *PAGE_TOOLS]
+    assert [t.name for t in tools] == [*expected, *PAGE_TOOLS, *VAULT_TOOLS]
     by_name = {t.name: t.input_schema for t in tools}
     assert {name: by_name[name] for name in expected} == expected
-    for name in PAGE_TOOLS:
+    for name in (*PAGE_TOOLS, *VAULT_TOOLS):
         assert "profile" in by_name[name]["required"], name
         assert by_name[name]["properties"]["profile"]["type"] == "string"
 
@@ -929,7 +932,9 @@ async def test_token_scope_caps_the_mode():
     names = lambda scope: [t.name for t in agent_tools.visible_tools("automation", scope)]  # noqa: E731
     assert names("read") == list(EXPECTED_READ_TOOLS)
     assert names("control") == [*EXPECTED_READ_TOOLS, *EXPECTED_ACTION_TOOLS]
-    assert names("cdp") == [*EXPECTED_READ_TOOLS, *EXPECTED_ACTION_TOOLS, *EXPECTED_BROWSER_TOOLS, *PAGE_TOOLS]
+    assert names("cdp") == [
+        *EXPECTED_READ_TOOLS, *EXPECTED_ACTION_TOOLS, *EXPECTED_BROWSER_TOOLS, *PAGE_TOOLS, *VAULT_TOOLS,
+    ]
 
 
 async def test_open_browser_stops_when_the_profile_is_leased_to_someone_else():
@@ -1160,3 +1165,93 @@ async def test_remote_calls_carry_a_per_session_lease_holder():
     assert sent.startswith("codex#") and len(sent) > len("codex#")
     await agent_tools.RemoteBackend(fake.client(), holder="cloak-cli").call("manager_status", {}, "cloak-cli", None)
     assert fake.bodies[("POST", "/api/agent/tools/manager_status")]["holder"] == "cloak-cli"
+
+
+# ── credential vault tools ───────────────────────────────────────────────────
+
+
+def vault_fake() -> FakeManager:
+    fake = automation_fake()
+    fake.routes[("GET", f"/api/profiles/{PID}")] = (200, {"id": PID, "name": "店铺A"})
+    return fake
+
+
+async def test_account_prepare_gets_an_address_then_a_vault_entry_and_returns_references_only():
+    fake = vault_fake()
+    fake.routes[("POST", "/api/mail/addresses")] = (201, {"address": "nina.shaw42@mail.example.com"})
+    fake.routes[("POST", f"/api/profiles/{PID}/vault")] = (
+        200,
+        {"ok": True, "entry": {
+            "id": "abc123def4567890", "site": "example.com", "username": "kcarter61", "email": "nina.shaw42@mail.example.com",
+            "status": "new", "refs": {"password": "{{vault:abc123def4567890.password}}"},
+        }},
+    )
+    result = await mcp_server.dispatch(fake.client(), "account_prepare", {"profile": "店铺A", "site": "https://example.com/join"})
+    assert result["ok"] is True and result["email"] == "nina.shaw42@mail.example.com"
+    assert result["entry"]["refs"]["password"] == "{{vault:abc123def4567890.password}}"
+    assert "mail_wait_code" in result["next_step"] and "验证码" in result["next_step"]
+    assert fake.bodies[("POST", "/api/mail/addresses")] == {"profile_id": PID}
+    assert fake.bodies[("POST", f"/api/profiles/{PID}/vault")] == {
+        "site": "https://example.com/join", "username": None, "email": "nina.shaw42@mail.example.com",
+        "generate_username": True, "password_length": 20, "symbols": True,
+    }
+    assert "password" not in {k for k in result["entry"] if k != "refs"}
+    # it only creates credentials: the page (and its lease) is not touched
+    assert not fake.hit("POST", f"/api/profiles/{PID}/lease")
+
+
+async def test_account_prepare_stops_with_the_mail_error_when_mail_is_not_set_up():
+    fake = vault_fake()
+    fake.routes[("POST", "/api/mail/addresses")] = (409, {"detail": "邮箱还没配置"})
+    result = await mcp_server.dispatch(fake.client(), "account_prepare", {"profile": PID, "site": "example.com"})
+    assert result["reason"] == "mail_not_configured"
+    assert not fake.hit("POST", f"/api/profiles/{PID}/vault")  # no orphan vault entry
+
+
+async def test_account_prepare_passes_a_vault_quota_error_through():
+    fake = vault_fake()
+    fake.routes[("POST", "/api/mail/addresses")] = (201, {"address": "a@mail.example.com"})
+    fake.routes[("POST", f"/api/profiles/{PID}/vault")] = (
+        429, {"ok": False, "reason": "quota_exceeded", "detail": "24 小时内最多新建 30 个保险库条目。"},
+    )
+    result = await mcp_server.dispatch(fake.client(), "account_prepare", {"profile": PID, "site": "example.com"})
+    assert result["reason"] == "quota_exceeded" and "next_step" in result
+
+
+async def test_vault_tools_hit_their_endpoints():
+    fake = vault_fake()
+    base = f"/api/profiles/{PID}"
+    fake.routes.update({
+        ("POST", f"{base}/vault"): (200, {"ok": True, "entry": {"id": "e1"}}),
+        ("GET", f"{base}/vault"): (200, {"ok": True, "entries": []}),
+        ("PATCH", f"{base}/vault/e1"): (200, {"ok": True, "entry": {"id": "e1", "status": "verified"}}),
+    })
+    for name, args, method, path in (
+        ("vault_create", {"site": "example.com", "symbols": False}, "POST", f"{base}/vault"),
+        ("vault_list", {}, "GET", f"{base}/vault"),
+        ("vault_mark", {"entry_id": "e1", "status": "verified"}, "PATCH", f"{base}/vault/e1"),
+    ):
+        result = await mcp_server.dispatch(fake.client(), name, {"profile": PID, **args})
+        assert result["ok"] is True, (name, result)
+        assert fake.hit(method, path), name
+    assert fake.bodies[("POST", f"{base}/vault")]["symbols"] is False
+
+
+async def test_vault_tools_validate_arguments_and_need_the_automation_tier():
+    fake = vault_fake()
+    for name, args in (("vault_list", {}), ("account_prepare", {"site": "x.com"}), ("vault_create", {"site": "x.com"})):
+        assert (await mcp_server.dispatch(fake.client(), name, args))["reason"] == "invalid_argument", name
+    assert (await mcp_server.dispatch(fake.client(), "vault_mark", {"profile": PID}))["reason"] == "invalid_argument"
+    fake.mode = "full"
+    for name in VAULT_TOOLS:
+        assert (await mcp_server.dispatch(fake.client(), name, {"profile": PID}))["reason"] == "mode_not_automation", name
+    fake.mode = "automation"
+    for name in VAULT_TOOLS:
+        result = await mcp_server.dispatch(fake.client(), name, {"profile": PID}, token_scope="control")
+        assert result["reason"] == "scope_denied", name
+
+
+def test_typed_text_is_not_kept_in_the_audit_log():
+    summary = mcp_server.summarize_args({"profile": "p", "ref": "e1", "text": "hunter2-hunter2"})
+    assert summary["text"] == {"present": True, "length": 15}
+    assert "hunter2" not in json.dumps(summary)

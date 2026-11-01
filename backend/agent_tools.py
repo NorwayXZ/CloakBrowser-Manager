@@ -271,7 +271,8 @@ def shape_profile(profile: dict[str, Any]) -> dict[str, Any]:
     return shaped
 
 
-_PRIVATE_ARG_KEYS = {"notes", "persona", "warmup_persona"}
+# `text` is what browser_type types: it can be a password, so the audit keeps only its length.
+_PRIVATE_ARG_KEYS = {"notes", "persona", "warmup_persona", "text"}
 
 
 def summarize_args(args: dict[str, Any] | None) -> dict[str, Any]:
@@ -420,6 +421,8 @@ NEXT_STEPS: dict[str, str] = {
     "timeout": "操作超时：页面可能还在加载，browser_snapshot 看看现状再决定是否重试。",
     "mail_not_configured": "邮箱还没配置：告诉用户在 Manager 的「邮箱」页填写邮箱服务器和管理员账号，不要自己去找别的邮箱。",
     "mail_server_error": "邮箱服务器出错或连不上：稍等再试一次；还不行就把 detail 告诉用户。",
+    "vault_ref_invalid": "引用无效：用 vault_list 看这个画像有哪些条目；条目属于哪个画像，引用就只能在哪个画像里用。",
+    "quota_exceeded": "今天新建的保险库条目到上限了：别再批量创建，需要的话让用户处理。",
     "mail_timeout": "还没收到邮件：确认表单真的提交成功、地址没填错（browser_snapshot 看看页面），需要的话点页面上的「重新发送」，再调一次 mail_wait_code。",
 }
 
@@ -1599,6 +1602,141 @@ async def _browser_tabs(client: RestClient, args: dict[str, Any]) -> dict[str, A
     )
 
 
+# ── Tools: credential vault (browser layer) ──────────────────────────────────
+#
+# The agent signs up for accounts without ever holding a password: the Manager generates
+# and stores it, the agent types a {{vault:…}} reference that the Manager resolves on the
+# way to the page. Details in backend/vault.py. Mail comes from the mail_* tools above.
+
+
+async def _profile_call(
+    client: RestClient, args: dict[str, Any], method: str, suffix: str, body: dict[str, Any] | None = None,
+    *, tool: str = "",
+) -> dict[str, Any]:
+    """Resolve the profile, call ``/api/profiles/{id}/{suffix}`` and pass the answer through."""
+    ref = str(args.get("profile") or "").strip()
+    if not ref:
+        return {"ok": False, "reason": "invalid_argument", "detail": "缺少 profile（画像 id 或名称），先用 list_profiles 查。"}
+    profile_id, err = await _resolve_profile(client, ref)
+    if err:
+        return err
+    path = f"/api/profiles/{quote(profile_id, safe='')}/{suffix}"
+    status, payload = await client.request(method, path, json_body=body)
+    if status >= 300 or not isinstance(payload, dict):
+        return error_result(status, payload, tool=tool)
+    if payload.get("ok") is False:
+        return dict(payload)
+    return {"profile_id": profile_id, **payload}
+
+
+@register(
+    "account_prepare",
+    "注册新账号前一步到位：给这个画像新建一个邮箱地址（走「邮箱」页接好的邮箱服务器）+ 一个保险库条目（用户名、自动生成的强密码）。"
+    "返回 email、username 和三个引用 refs（{{vault:…password}} 等）：往注册表单里填的时候，"
+    "把引用原样写进 browser_type 的 text，Manager 会在服务端换成真值，密码不会经过你。"
+    "提交后用 mail_wait_code(address=email) 取验证码或验证链接。",
+    _page_schema(
+        {
+            "site": {"type": "string", "description": "要注册的网站域名，如 example.com"},
+            "username": {"type": "string", "description": "可选：指定用户名；不填则随机生成"},
+            "password_length": {"type": "integer", "default": 20, "description": "密码长度，12~64"},
+            "symbols": {"type": "boolean", "default": True, "description": "密码里是否含符号（个别网站不允许时设 false）"},
+            "domain": {"type": "string", "description": "可选：邮箱域名，不填随机选一个"},
+        },
+        ("site",),
+    ),
+    "browser",
+)
+async def _account_prepare(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    ref = str(args.get("profile") or "").strip()
+    if not ref:
+        return {"ok": False, "reason": "invalid_argument", "detail": "缺少 profile（画像 id 或名称），先用 list_profiles 查。"}
+    profile_id, err = await _resolve_profile(client, ref)
+    if err:
+        return err
+    address_body: dict[str, Any] = {"profile_id": profile_id}
+    if args.get("domain"):
+        address_body["domain"] = str(args["domain"])
+    status, payload = await client.post("/api/mail/addresses", json_body=address_body)
+    if status >= 300 or not isinstance(payload, dict):
+        return _mail_error(status, payload, tool="account_prepare")
+    address = str(payload["address"])
+    status, payload = await client.post(
+        f"/api/profiles/{quote(profile_id, safe='')}/vault",
+        json_body={
+            "site": args.get("site"), "username": args.get("username"), "email": address,
+            "generate_username": not args.get("username"),
+            "password_length": args.get("password_length") or 20, "symbols": args.get("symbols", True) is not False,
+        },
+    )
+    if status >= 300 or not isinstance(payload, dict):
+        return error_result(status, payload, tool="account_prepare")
+    if payload.get("ok") is False:
+        return dict(payload)
+    return {
+        "ok": True, "profile_id": profile_id, "email": address, "entry": payload["entry"],
+        "next_step": (
+            "用 browser_navigate 打开注册页，browser_type 把 refs 里的引用原样填进邮箱/用户名/密码；提交后 "
+            "mail_wait_code(address=email) 取验证码。遇到图形验证码或手机短信验证：停下来，请用户在面板里接管处理。"
+        ),
+    }
+
+
+@register(
+    "vault_create",
+    "为一个网站新建保险库条目：Manager 生成强密码并加密保存，你只拿到引用（{{vault:…}}），拿不到明文。"
+    "已有邮箱地址要用时通过 email 传入；要一步拿邮箱加条目就用 account_prepare。",
+    _page_schema(
+        {
+            "site": {"type": "string", "description": "网站域名"},
+            "username": {"type": "string", "description": "可选：用户名"},
+            "email": {"type": "string", "description": "可选：账号用的邮箱"},
+            "password_length": {"type": "integer", "default": 20},
+            "symbols": {"type": "boolean", "default": True},
+        },
+        ("site",),
+    ),
+    "browser",
+)
+async def _vault_create(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    return await _profile_call(
+        client, args, "POST", "vault",
+        {
+            "site": args.get("site"), "username": args.get("username"), "email": args.get("email"),
+            "password_length": args.get("password_length") or 20, "symbols": args.get("symbols", True) is not False,
+        },
+        tool="vault_create",
+    )
+
+
+@register("vault_list", "列出这个画像的保险库条目（网站、用户名、邮箱、状态、引用），不含密码。登录已注册的网站时用它找引用。", _page_schema(), "browser")
+async def _vault_list(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    return await _profile_call(client, args, "GET", "vault", tool="vault_list")
+
+
+@register(
+    "vault_mark",
+    "更新条目的状态：registered（已提交注册）/ verified（邮箱已验证、账号可用）/ failed；可附备注。",
+    _page_schema(
+        {
+            "entry_id": {"type": "string", "description": "条目 id"},
+            "status": {"type": "string", "enum": ["new", "registered", "verified", "failed"]},
+            "notes": {"type": "string", "description": "可选备注（不要写密码）"},
+        },
+        ("entry_id",),
+    ),
+    "browser",
+)
+async def _vault_mark(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    entry_id = str(args.get("entry_id") or "").strip()
+    if not entry_id:
+        return {"ok": False, "reason": "invalid_argument", "detail": "缺少 entry_id。"}
+    return await _profile_call(
+        client, args, "PATCH", f"vault/{quote(entry_id, safe='')}",
+        {"status": args.get("status"), "notes": args.get("notes")}, tool="vault_mark",
+    )
+
+
 # ── English summaries (tool lists show "中文 | English") ──────────────────────
 
 TOOL_EN: dict[str, str] = {
@@ -1637,6 +1775,10 @@ TOOL_EN: dict[str, str] = {
     "browser_scroll": "Scroll the page up/down/left/right by pixels.",
     "browser_screenshot": "Screenshot the current page (jpeg default; full_page for the whole page).",
     "browser_wait_for": "Wait until text appears / disappears, the URL contains a string, or a selector is visible (or just wait ms). Each condition is bounded by timeout_ms.",
+    "account_prepare": "Before a sign-up: get a mailbox address and a vault entry (generated password). Returns the email, username and {{vault:…}} references to type; the password never reaches you.",
+    "vault_create": "Create a vault entry for a site: the Manager generates and encrypts the password; you only get {{vault:…}} references.",
+    "vault_list": "List this profile's vault entries (site, username, email, status, references), never passwords.",
+    "vault_mark": "Set an entry's status (registered / verified / failed) and notes.",
     "browser_batch": "Run up to 20 page steps in one call ({do: click|type|navigate|...}); stops on an error or a dialog and appends a snapshot. Use semantic selectors across page changes.",
     "browser_upload": "Upload files to a file input or the chooser a button opens. Only files inside the agent files folder are allowed (see browser_downloads.files_dir).",
     "browser_downloads": "List files this profile downloaded (auto-saved into the agent files folder) and where that folder is.",
@@ -1806,6 +1948,7 @@ CloakBrowser Manager runs isolated fingerprint-browser profiles on this machine.
    也可以把 open_browser 返回的 cdp_http_endpoint 交给 Playwright / playwright-mcp / chrome-devtools-mcp。
 6. 用完 stop_profile。
 注册要邮箱验证时（full 档）：mail_get_address(profile) 拿地址 → 填表提交 → mail_wait_code(address) 拿验证码或验证链接。不要向用户要邮箱或验证码。
+注册新账号（automation 档）更省事：account_prepare(profile, site) 一步拿到邮箱、用户名和密码引用 → browser_type 把引用（如 {{vault:ID.password}}）原样填进表单，你拿不到密码明文 → 提交后 mail_wait_code 取验证码 → vault_mark(registered/verified)。登录已注册的网站：vault_list 找引用再填。遇到图形验证码或手机短信验证：停下来，请用户在面板里接管。
 
 规则 / Rules:
 - 权限由 Manager 设置 mcp.mode 决定：read-only 只读；full 加启停、检测/养号/进化和邮箱；automation 再加 open_browser / get_cdp_endpoint / browser_* 页面工具。你的 token 还可能把上限压得更低（scope_denied）。工具列表在连接时协商，改模式后要重启客户端。
