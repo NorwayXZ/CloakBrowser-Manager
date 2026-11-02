@@ -170,7 +170,21 @@ def test_windows_chrome_candidates_use_env():
     assert [c.as_posix() for c in candidates] == [
         "C:/PF/Google/Chrome/Application/chrome.exe",
         "C:/L/Google/Chrome/Application/chrome.exe",
+        "C:/PF/Microsoft/Edge/Application/msedge.exe",
+        "C:/L/Microsoft/Edge/Application/msedge.exe",
     ]
+
+
+def test_find_chrome_prefers_chrome_over_edge_on_windows(tmp_path: Path):
+    env = {"PROGRAMFILES": str(tmp_path)}
+    edge = tmp_path / "Microsoft" / "Edge" / "Application" / "msedge.exe"
+    edge.parent.mkdir(parents=True)
+    edge.touch()
+    assert find_chrome(windows_chrome_candidates(env)) == edge
+    chrome = tmp_path / "Google" / "Chrome" / "Application" / "chrome.exe"
+    chrome.parent.mkdir(parents=True)
+    chrome.touch()
+    assert find_chrome(windows_chrome_candidates(env)) == chrome
 
 
 def test_log_dir_on_windows(tmp_path: Path):

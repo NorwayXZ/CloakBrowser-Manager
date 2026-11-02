@@ -412,9 +412,11 @@ def port_is_free(port: int) -> bool:
 def windows_chrome_candidates(environ: Mapping[str, str] | None = None) -> tuple[Path, ...]:
     env = os.environ if environ is None else environ
     roots = [env.get("PROGRAMFILES"), env.get("PROGRAMFILES(X86)"), env.get("LOCALAPPDATA")]
-    return tuple(
-        Path(root) / "Google" / "Chrome" / "Application" / "chrome.exe" for root in roots if root
-    )
+    chrome = [Path(root) / "Google" / "Chrome" / "Application" / "chrome.exe" for root in roots if root]
+    # Edge ships with Windows 10/11 and takes the same --app= flag, so the panel
+    # gets its own window even when Chrome is not installed.
+    edge = [Path(root) / "Microsoft" / "Edge" / "Application" / "msedge.exe" for root in roots if root]
+    return tuple(chrome + edge)
 
 
 def find_chrome(candidates: tuple[Path, ...] | None = None) -> Path | None:
