@@ -1,6 +1,8 @@
 """Render the app icon: a 1024px PNG (macOS .icns via iconutil) and/or a Windows .ico.
 
     python make_icon.py icon.png [icon.ico]
+
+The mark is packaging/app-logo.png (transparent PNG), centred on a light rounded tile.
 """
 
 from __future__ import annotations
@@ -8,60 +10,53 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 SIZE = 1024
+LOGO = Path(__file__).with_name("app-logo.png")
+LOGO_WIDTH = 700  # px in the 1024 canvas; the tile itself is 824 wide
 
 
 def render(path: Path) -> None:
     scale = 4  # supersample for smooth edges
     size = SIZE * scale
-    image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
 
     # macOS icon grid: ~824px rounded square centred in a 1024px canvas.
     inset = 100 * scale
     box = (inset, inset, size - inset, size - inset)
     radius = 185 * scale
+    tile_mask = Image.new("L", (size, size), 0)
+    ImageDraw.Draw(tile_mask).rounded_rectangle(box, radius=radius, fill=255)
 
+    # Soft drop shadow under the tile.
+    shadow_alpha = tile_mask.filter(ImageFilter.GaussianBlur(14 * scale)).point(lambda a: int(a * 0.28))
+    shadow = Image.new("RGBA", (size, size), (15, 23, 60, 0))
+    shadow.putalpha(shadow_alpha)
+    image = ImageChops.offset(shadow, 0, 10 * scale)
+
+    # Light vertical gradient: white at the top, faint blue at the bottom.
     gradient = Image.new("RGBA", (size, size))
-    top, bottom = (40, 52, 84), (14, 18, 32)
+    top, bottom = (255, 255, 255), (232, 239, 255)
     draw = ImageDraw.Draw(gradient)
     for y in range(size):
-        t = y / (size - 1)
+        t = min(max((y - inset) / (size - 2 * inset), 0.0), 1.0)
         color = tuple(int(top[i] + (bottom[i] - top[i]) * t) for i in range(3))
         draw.line([(0, y), (size, y)], fill=(*color, 255))
-    mask = Image.new("L", (size, size), 0)
-    ImageDraw.Draw(mask).rounded_rectangle(box, radius=radius, fill=255)
-    image.paste(gradient, (0, 0), mask)
+    tile = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    tile.paste(gradient, (0, 0), tile_mask)
+    image = Image.alpha_composite(image, tile)
 
-    # A hooded "cloak" silhouette with a browser window inside it.
-    glyph = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    g = ImageDraw.Draw(glyph)
-    cx = size // 2
-    hood = [
-        (cx, 245 * scale),
-        (cx + 250 * scale, 400 * scale),
-        (cx + 275 * scale, 780 * scale),
-        (cx - 275 * scale, 780 * scale),
-        (cx - 250 * scale, 400 * scale),
-    ]
-    g.polygon(hood, fill=(120, 170, 255, 255))
-    window = (cx - 165 * scale, 455 * scale, cx + 165 * scale, 690 * scale)
-    g.rounded_rectangle(window, radius=28 * scale, fill=(16, 22, 40, 255))
-    bar = (window[0], window[1], window[2], window[1] + 52 * scale)
-    g.rounded_rectangle(bar, radius=28 * scale, fill=(236, 242, 255, 255))
-    g.rectangle((bar[0], bar[1] + 28 * scale, bar[2], bar[3]), fill=(236, 242, 255, 255))
-    for i, dot in enumerate(((255, 95, 87), (254, 188, 46), (40, 200, 64))):
-        x = window[0] + (38 + i * 38) * scale
-        y = window[1] + 26 * scale
-        r = 11 * scale
-        g.ellipse((x - r, y - r, x + r, y + r), fill=(*dot, 255))
+    # Hairline edge so the white tile reads against light backgrounds.
+    edge = Image.new("L", (size, size), 0)
+    ImageDraw.Draw(edge).rounded_rectangle(box, radius=radius, outline=255, width=2 * scale)
+    edge_layer = Image.new("RGBA", (size, size), (120, 140, 190, 0))
+    edge_layer.putalpha(edge.point(lambda a: int(a * 0.35)))
+    image = Image.alpha_composite(image, edge_layer)
 
-    shadow = glyph.split()[3].filter(ImageFilter.GaussianBlur(18 * scale))
-    shadow_layer = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    shadow_layer.putalpha(shadow.point(lambda a: a * 0.45))
-    image = Image.alpha_composite(image, shadow_layer)
-    image = Image.alpha_composite(image, glyph)
+    logo = Image.open(LOGO).convert("RGBA")
+    width = LOGO_WIDTH * scale
+    logo = logo.resize((width, round(logo.height * width / logo.width)), Image.LANCZOS)
+    image.alpha_composite(logo, ((size - logo.width) // 2, (size - logo.height) // 2))
 
     image.resize((SIZE, SIZE), Image.LANCZOS).save(path)
 
