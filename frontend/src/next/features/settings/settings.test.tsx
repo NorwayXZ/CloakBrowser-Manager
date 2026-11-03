@@ -75,10 +75,12 @@ afterEach(() => {
 });
 
 describe("settings landing", () => {
-  it("lists every section as a card and keeps the appearance choice beside them", async () => {
+  it("lists every section as a card, with 检测 and 数据 first and no appearance card", async () => {
     await open("/settings", [{ path: "/api/kernel", respond: overview() }]);
     const nav = await screen.findByRole("navigation", { name: "设置分类" });
     expect(within(nav).getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual([
+      "/settings/checks",
+      "/settings/data",
       "/settings/kernel",
       "/settings/ai",
       "/settings/agent",
@@ -89,7 +91,7 @@ describe("settings landing", () => {
     ]);
     expect(within(nav).getByRole("link", { name: /浏览器内核/ })).toHaveTextContent("145.0.7632.159.1");
     expect(within(nav).getByRole("link", { name: /关于与更新/ })).toHaveTextContent("v0.7.2");
-    expect(screen.getByRole("radio", { name: "深色" })).toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: "深色" })).not.toBeInTheDocument();
     await expectNoAxeViolations(document.body);
   });
 
@@ -597,7 +599,7 @@ describe("settings › automation", () => {
           { path: "/api/evolution/status", respond: { busy: false, pending_proposals: 0 } },
         ]),
       );
-      const { unmount } = renderApp("/checks");
+      const { unmount } = renderApp("/settings/checks");
       await screen.findByRole("heading", { name: "检测" });
       if (outside) expect(await screen.findByText(/当前不在自动化时段（09-18）内/)).toBeInTheDocument();
       else {
@@ -777,9 +779,9 @@ describe("settings › interface switch", () => {
     const { fetchMock } = await open(
       "/settings",
       [{ path: "/api/settings/ui", respond: { theme: "system", sidebar_collapsed: false, interface: "legacy" } }],
-      "外观",
     );
-    fireEvent.click(await screen.findByRole("radio", { name: "深色" }));
+    fireEvent.keyDown(await screen.findByRole("button", { name: /^外观：/ }), { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "深色" }));
     await waitFor(() => expect(bodies(fetchMock, "PUT", "/api/settings/ui")).toHaveLength(1));
     expect(bodies(fetchMock, "PUT", "/api/settings/ui")[0]).toEqual({ theme: "dark", sidebar_collapsed: false, interface: "legacy" });
   });

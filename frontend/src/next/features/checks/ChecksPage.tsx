@@ -14,9 +14,9 @@ export function ChecksPage() {
   const state = useCheckState();
   const evolution = useEvolutionStatus();
   const tabs = [
-    { id: "reports", to: "/checks", label: "检测报告", badge: state.data && ACTIVE_PHASES.has(state.data.phase) ? "进行中" : null },
-    { id: "evolution", to: "/checks/evolution", label: "进化", badge: evolution.data?.pending_proposals ? `${evolution.data.pending_proposals} 待批准` : evolution.data?.busy ? "进行中" : null },
-    { id: "links", to: "/checks/links", label: "关联分析", badge: null },
+    { id: "reports", to: "/settings/checks", label: "检测报告", badge: state.data && ACTIVE_PHASES.has(state.data.phase) ? "进行中" : null },
+    { id: "evolution", to: "/settings/checks/evolution", label: "进化", badge: evolution.data?.pending_proposals ? `${evolution.data.pending_proposals} 待批准` : evolution.data?.busy ? "进行中" : null },
+    { id: "links", to: "/settings/checks/links", label: "关联分析", badge: null },
   ];
 
   return (

@@ -40,7 +40,7 @@ function checkRoutes(extra: MockRoute[] = [], report: Report = REPORT): MockRout
   ]);
 }
 
-async function open(path = "/checks", extra: MockRoute[] = [], report?: Report) {
+async function open(path = "/settings/checks", extra: MockRoute[] = [], report?: Report) {
   const fetchMock = mockFetch(checkRoutes(extra, report));
   const utils = renderApp(path);
   await screen.findByRole("heading", { name: "检测" });
@@ -78,7 +78,7 @@ describe("detection reports", () => {
   });
 
   it("starts after confirmation, shows live progress and opens the report when done", async () => {
-    const { fetchMock, router } = await open("/checks", [
+    const { fetchMock, router } = await open("/settings/checks", [
       { method: "POST", path: "/api/profiles/p1/site-check", respond: () => {
         state = { phase: "checking", profile_name: "win", site: "pixelscan", index: 1, total: 2, results: [REPORT.results[0]!] };
         return state;
@@ -98,7 +98,7 @@ describe("detection reports", () => {
   });
 
   it("explains a check that could not start", async () => {
-    await open("/checks", [{ method: "POST", path: "/api/profiles/p1/site-check", status: 409, respond: { detail: "已经有一项检测在进行" } }]);
+    await open("/settings/checks", [{ method: "POST", path: "/api/profiles/p1/site-check", status: 409, respond: { detail: "已经有一项检测在进行" } }]);
     fireEvent.click(await screen.findByRole("button", { name: "开始检测" }));
     fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "开始检测" }));
     expect(await screen.findByText("已经有一项检测在进行")).toBeInTheDocument();
@@ -133,7 +133,7 @@ describe("detection reports", () => {
         REPORT.results[1]!,
       ],
     };
-    await open(`/checks?report=${REPORT.id}`, [], rich);
+    await open(`/settings/checks?report=${REPORT.id}`, [], rich);
     expect(await screen.findByText(/共 3 项：通过 1 · 警告 1 · 未通过 1/)).toBeInTheDocument();
     expect(screen.getByText(/标注「IP 信誉」的条目结论受出口 IP 影响/)).toBeInTheDocument();
     expect(screen.getByText("本地自检")).toBeInTheDocument();
@@ -151,7 +151,7 @@ describe("detection reports", () => {
         ],
       },
     };
-    await open(`/checks?report=${REPORT.id}`, [], withDiff);
+    await open(`/settings/checks?report=${REPORT.id}`, [], withDiff);
     expect(await screen.findByText(/与上次报告（.*）相比的变化/)).toBeInTheDocument();
     expect(screen.getByText("新增")).toBeInTheDocument();
     const changedRow = document.querySelector("li[data-changed]");
@@ -160,19 +160,19 @@ describe("detection reports", () => {
   });
 
   it("says so when nothing changed against the previous report", async () => {
-    await open(`/checks?report=${REPORT.id}`, [], { ...REPORT, diff: { previous_created_at: "2026-10-19T19:00:00+08:00", changes: [] } });
+    await open(`/settings/checks?report=${REPORT.id}`, [], { ...REPORT, diff: { previous_created_at: "2026-10-19T19:00:00+08:00", changes: [] } });
     expect(await screen.findByText(/各条目结论没有变化/)).toBeInTheDocument();
   });
 
   it("deletes a report after confirmation", async () => {
-    const { fetchMock } = await open("/checks", [{ method: "DELETE", path: `/api/site-checks/${REPORT.id}`, respond: { ok: true } }]);
+    const { fetchMock } = await open("/settings/checks", [{ method: "DELETE", path: `/api/site-checks/${REPORT.id}`, respond: { ok: true } }]);
     fireEvent.click(await screen.findByRole("button", { name: "删除报告 win" }));
     fireEvent.click(within(await screen.findByRole("dialog", { name: "删除这份检测报告和截图？" })).getByRole("button", { name: "删除" }));
     await waitFor(() => expect(calls(fetchMock, "DELETE", `/api/site-checks/${REPORT.id}`)).toHaveLength(1));
   });
 
   it("has no accessibility violations with a report open", async () => {
-    const { container } = await open(`/checks?report=${REPORT.id}`);
+    const { container } = await open(`/settings/checks?report=${REPORT.id}`);
     await screen.findByRole("heading", { name: "win：未通过" });
     await expectNoAxeViolations(container);
   });
@@ -203,7 +203,7 @@ describe("evolution", () => {
 
   it("shows a pending proposal with its evidence and approves it after confirmation", async () => {
     profiles = [makeProfile({ id: "p1", name: "主力号" })];
-    const { fetchMock } = await open("/checks/evolution", evolutionRoutes([PROPOSAL], [], [{ method: "POST", path: "/api/evolution/proposals/prop-1/approve", respond: { ...PROPOSAL, status: "applied" } }]));
+    const { fetchMock } = await open("/settings/checks/evolution", evolutionRoutes([PROPOSAL], [], [{ method: "POST", path: "/api/evolution/proposals/prop-1/approve", respond: { ...PROPOSAL, status: "applied" } }]));
     expect(await screen.findByText("关闭指纹噪声")).toBeInTheDocument();
     expect(screen.getByText(/自动（内核决定） → 关闭/)).toBeInTheDocument();
     expect(screen.getByText(/creepjs：/)).toBeInTheDocument();
@@ -213,14 +213,14 @@ describe("evolution", () => {
   });
 
   it("dismisses a proposal without applying it", async () => {
-    const { fetchMock } = await open("/checks/evolution", evolutionRoutes([PROPOSAL], [], [{ method: "POST", path: "/api/evolution/proposals/prop-1/dismiss", respond: { ...PROPOSAL, status: "dismissed" } }]));
+    const { fetchMock } = await open("/settings/checks/evolution", evolutionRoutes([PROPOSAL], [], [{ method: "POST", path: "/api/evolution/proposals/prop-1/dismiss", respond: { ...PROPOSAL, status: "dismissed" } }]));
     fireEvent.click(await screen.findByRole("button", { name: "忽略" }));
     await waitFor(() => expect(calls(fetchMock, "POST", "/api/evolution/proposals/prop-1/dismiss")).toHaveLength(1));
     expect(calls(fetchMock, "POST", "/api/evolution/proposals/prop-1/approve")).toHaveLength(0);
   });
 
   it("renders the timeline with experiment verdicts and unfixable reasons", async () => {
-    await open("/checks/evolution", evolutionRoutes([], [LOG]));
+    await open("/settings/checks/evolution", evolutionRoutes([], [LOG]));
     expect(await screen.findByText("实验完成")).toBeInTheDocument();
     fireEvent.click(screen.getByText(/克隆实验 1 个：1 个有效/));
     expect(await screen.findByText("有效")).toBeInTheDocument();
@@ -229,14 +229,14 @@ describe("evolution", () => {
   });
 
   it("toggles auto-evolution through the profile update path", async () => {
-    const { fetchMock } = await open("/checks/evolution", evolutionRoutes([], [], [{ method: "PUT", path: "/api/profiles/p1", respond: (body: unknown) => ({ ...profiles[0], ...(body as object) }) }]));
+    const { fetchMock } = await open("/settings/checks/evolution", evolutionRoutes([], [], [{ method: "PUT", path: "/api/profiles/p1", respond: (body: unknown) => ({ ...profiles[0], ...(body as object) }) }]));
     fireEvent.click(await screen.findByRole("switch", { name: "自动进化" }));
     await waitFor(() => expect(JSON.parse(String((calls(fetchMock, "PUT", "/api/profiles/p1")[0]![1] as RequestInit).body))).toEqual({ evolution_enabled: true, evolution_interval_hours: 24 }));
     expect(await screen.findByRole("switch", { name: "自动进化" })).toBeChecked();
   });
 
   it("runs a cycle on demand after confirmation, and shows empty states", async () => {
-    const { fetchMock } = await open("/checks/evolution", evolutionRoutes([], [], [{ method: "POST", path: "/api/profiles/p1/evolution/run", respond: { ok: true, started: true } }]));
+    const { fetchMock } = await open("/settings/checks/evolution", evolutionRoutes([], [], [{ method: "POST", path: "/api/profiles/p1/evolution/run", respond: { ok: true, started: true } }]));
     expect(await screen.findByText(/暂无待批准提案/)).toBeInTheDocument();
     expect(screen.getByText("还没有进化记录")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "现在运行一次" }));
@@ -246,7 +246,7 @@ describe("evolution", () => {
 
   it("counts pending proposals in the tab", async () => {
     mockFetch(checkRoutes([{ path: "/api/evolution/status", respond: { busy: false, pending_proposals: 2 } }, ...evolutionRoutes()]));
-    renderApp("/checks");
+    renderApp("/settings/checks");
     expect(await screen.findByText("2 待批准")).toBeInTheDocument();
   });
 });
@@ -264,7 +264,7 @@ describe("linkability", () => {
   };
 
   it("renders clusters with reasons, risk badge, suggestions and links to the profiles", async () => {
-    await open("/checks/links", [{ path: "/api/linkability", respond: RESULT }]);
+    await open("/settings/checks/links", [{ path: "/api/linkability", respond: RESULT }]);
     expect(await screen.findByText("高风险")).toBeInTheDocument();
     expect(screen.getByText(/共用同一代理出口/)).toBeInTheDocument();
     expect(screen.getByText(/建议：给其中一个设备型号换一个独立的代理出口/)).toBeInTheDocument();
@@ -274,13 +274,13 @@ describe("linkability", () => {
   });
 
   it("shows the all-clear state when nothing is linked", async () => {
-    await open("/checks/links", [{ path: "/api/linkability", respond: { profile_count: 2, unclustered_count: 2, clusters: [] } }]);
+    await open("/settings/checks/links", [{ path: "/api/linkability", respond: { profile_count: 2, unclustered_count: 2, clusters: [] } }]);
     expect(await screen.findByText("没有发现可关联的环境组合")).toBeInTheDocument();
     expect(screen.getByText(/当前 2 个环境之间没有共用出口/)).toBeInTheDocument();
   });
 
   it("surfaces load errors and re-runs on demand", async () => {
-    const { fetchMock } = await open("/checks/links", [{ path: "/api/linkability", status: 500, respond: { detail: "数据库被锁定" } }]);
+    const { fetchMock } = await open("/settings/checks/links", [{ path: "/api/linkability", status: 500, respond: { detail: "数据库被锁定" } }]);
     expect(await screen.findByText("数据库被锁定")).toBeInTheDocument();
     const before = calls(fetchMock, "GET", "/api/linkability").length;
     await act(async () => {

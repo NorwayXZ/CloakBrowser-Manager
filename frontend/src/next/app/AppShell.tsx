@@ -74,7 +74,7 @@ function DowngradeBanner() {
   return (
     <div className="mx-auto w-full max-w-[1320px] shrink-0 px-6 pb-2 lg:px-10">
       <Banner tone="warning" title="这份数据来自更新版本的 Manager">
-        你现在运行的是较旧的版本，它可能读不全或写坏新版本保存的内容。建议先更新到最新版本再继续使用；如果要保留现在的数据，请先在“数据”里做一次完整备份。
+        你现在运行的是较旧的版本，它可能读不全或写坏新版本保存的内容。建议先更新到最新版本再继续使用；如果要保留现在的数据，请先在“设置 → 数据”里做一次完整备份。
       </Banner>
     </div>
   );

@@ -21,7 +21,7 @@ function autoStatus(overrides: Record<string, unknown> = {}) {
 let backups: unknown[];
 let running: boolean;
 
-async function open(path = "/data", extra: MockRoute[] = []) {
+async function open(path = "/settings/data", extra: MockRoute[] = []) {
   const fetchMock = mockFetch(shellRoutes([
     ...extra,
     { path: "/api/backups", respond: () => ({ backups, location: "/data/backups" }) },
@@ -74,7 +74,7 @@ describe("backups", () => {
   it("creates a full backup and starts the download", async () => {
     backups = [];
     const clicks = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
-    const { fetchMock } = await open("/data", [{ method: "POST", path: "/api/backups", respond: FULL }]);
+    const { fetchMock } = await open("/settings/data", [{ method: "POST", path: "/api/backups", respond: FULL }]);
     fireEvent.click(await screen.findByRole("button", { name: "立即完整备份" }));
     await waitFor(() => expect(called(fetchMock, "POST", "/api/backups")).toHaveLength(1));
     expect(await screen.findByText(/完整备份已生成（39.0 MB）/)).toBeInTheDocument();
@@ -92,7 +92,7 @@ describe("backups", () => {
   });
 
   it("restores only after confirmation and says where the old data went", async () => {
-    const { fetchMock } = await open("/data", [{ method: "POST", path: /\/full\/.*\/restore$/, respond: { ok: true, profiles: 5, previous_data: "/data/backups/before-restore-1" } }]);
+    const { fetchMock } = await open("/settings/data", [{ method: "POST", path: /\/full\/.*\/restore$/, respond: { ok: true, profiles: 5, previous_data: "/data/backups/before-restore-1" } }]);
     fireEvent.click(await screen.findByRole("button", { name: `恢复到 ${FULL.name}` }));
     let dialog = await screen.findByRole("dialog", { name: "恢复这个完整备份？" });
     expect(dialog).toHaveTextContent("before-restore-");
@@ -114,7 +114,7 @@ describe("backups", () => {
   });
 
   it("restores from a chosen file, sent as the zip itself", async () => {
-    const { fetchMock } = await open("/data", [{ method: "POST", path: "/api/backups/restore-upload", respond: { ok: true, profiles: 3, previous_data: "/x" } }]);
+    const { fetchMock } = await open("/settings/data", [{ method: "POST", path: "/api/backups/restore-upload", respond: { ok: true, profiles: 3, previous_data: "/x" } }]);
     const input = document.querySelector<HTMLInputElement>('input[type="file"][accept*="zip"]')!;
     const file = new File(["PK"], "backup.zip", { type: "application/zip" });
     fireEvent.change(input, { target: { files: [file] } });
@@ -127,14 +127,14 @@ describe("backups", () => {
   });
 
   it("deletes a backup after confirmation", async () => {
-    const { fetchMock } = await open("/data", [{ method: "DELETE", path: `/api/backups/auto/${SNAPSHOT.name}`, respond: { ok: true } }]);
+    const { fetchMock } = await open("/settings/data", [{ method: "DELETE", path: `/api/backups/auto/${SNAPSHOT.name}`, respond: { ok: true } }]);
     fireEvent.click(await screen.findByRole("button", { name: `删除备份 ${SNAPSHOT.name}` }));
     fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "删除" }));
     await waitFor(() => expect(called(fetchMock, "DELETE", `/api/backups/auto/${SNAPSHOT.name}`)).toHaveLength(1));
   });
 
   it("explains a failed backup", async () => {
-    await open("/data", [{ method: "POST", path: "/api/backups", status: 409, respond: { detail: "磁盘空间不足" } }]);
+    await open("/settings/data", [{ method: "POST", path: "/api/backups", status: 409, respond: { detail: "磁盘空间不足" } }]);
     fireEvent.click(await screen.findByRole("button", { name: "立即完整备份" }));
     expect(await screen.findByText("备份没有完成")).toBeInTheDocument();
     expect(screen.getByText("磁盘空间不足")).toBeInTheDocument();
@@ -155,7 +155,7 @@ describe("backups", () => {
 
 describe("configuration export and import", () => {
   it("imports a configuration file and reports what was added", async () => {
-    const { fetchMock } = await open("/data", [{ method: "POST", path: "/api/configuration/import", respond: { ok: true, profiles: 2, groups: 1, proxy_presets: 3 } }]);
+    const { fetchMock } = await open("/settings/data", [{ method: "POST", path: "/api/configuration/import", respond: { ok: true, profiles: 2, groups: 1, proxy_presets: 3 } }]);
     const input = document.querySelector<HTMLInputElement>('input[type="file"][accept*="json"]')!;
     fireEvent.change(input, { target: { files: [new File(['{"profiles":[]}'], "c.json", { type: "application/json" })] } });
     expect(await screen.findByText("新增 2 个环境、1 个分组、3 个代理。")).toBeInTheDocument();
@@ -203,7 +203,7 @@ describe("automatic backups", () => {
   });
 
   it("runs a backup now and reports the copy", async () => {
-    await open("/data", [{ method: "POST", path: "/api/backups/auto/run", respond: { ok: true, name: "CloakBrowser-backup-auto-20261017-210000.zip", copy: `${DEFAULT_DIR}/x.zip`, copy_error: null, status: autoStatus() } }]);
+    await open("/settings/data", [{ method: "POST", path: "/api/backups/auto/run", respond: { ok: true, name: "CloakBrowser-backup-auto-20261017-210000.zip", copy: `${DEFAULT_DIR}/x.zip`, copy_error: null, status: autoStatus() } }]);
     fireEvent.click(await screen.findByRole("button", { name: "立即备份一次" }));
     expect(await screen.findByText(/已备份：CloakBrowser-backup-auto-20261017-210000\.zip/)).toBeInTheDocument();
   });

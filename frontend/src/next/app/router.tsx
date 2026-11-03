@@ -1,11 +1,12 @@
 import { lazy, Suspense, type ReactNode } from "react";
-import { createBrowserRouter, Navigate, type RouteObject } from "react-router";
+import { createBrowserRouter, Navigate, useLocation, type RouteObject } from "react-router";
 import { ProfilesLayout } from "../features/profiles/ProfilesLayout";
 import { ProfilesPage } from "../features/profiles/ProfilesPage";
 import { NotFound } from "../pages/NotFound";
 import { Skeleton } from "../ui";
 import { AppShell } from "./AppShell";
-import { APP_BASENAME } from "./nav";
+import { ResourcesLayout } from "../features/resources/ResourcesLayout";
+import { APP_BASENAME, MOVED_PAGES } from "./nav";
 
 const Gallery = lazy(() => import("../dev/Gallery").then((m) => ({ default: m.Gallery })));
 const ViewerPage = lazy(() => import("../features/profiles/ViewerPage").then((m) => ({ default: m.ViewerPage })));
@@ -15,9 +16,16 @@ const DataPage = lazy(() => import("../features/data/DataPage").then((m) => ({ d
 const MailPage = lazy(() => import("../features/mail/MailPage").then((m) => ({ default: m.MailPage })));
 const ChecksPage = lazy(() => import("../features/checks/ChecksPage").then((m) => ({ default: m.ChecksPage })));
 const SettingsPage = lazy(() => import("../pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
+const SettingsSubpage = lazy(() => import("../pages/SettingsPage").then((m) => ({ default: m.SettingsSubpage })));
 
 function page(element: ReactNode) {
   return <Suspense fallback={<PageFallback />}>{element}</Suspense>;
+}
+
+/** An old top-level address: same sub-path, query and hash under the page's new home. */
+function MovedPage({ from }: { from: string }) {
+  const { pathname, search, hash } = useLocation();
+  return <Navigate to={`${MOVED_PAGES[from]}${pathname.slice(from.length)}${search}${hash}`} replace />;
 }
 
 function PageFallback() {
@@ -44,14 +52,25 @@ export const routes: RouteObject[] = [
           { path: ":id/viewer", element: page(<ViewerPage />) },
         ],
       },
-      { path: "proxies", element: page(<ProxiesPage />) },
-      { path: "mail", element: page(<MailPage />) },
-      { path: "checks", element: page(<ChecksPage />) },
-      { path: "checks/evolution", element: page(<ChecksPage />) },
-      { path: "checks/links", element: page(<ChecksPage />) },
-      { path: "data", element: page(<DataPage />) },
-      { path: "data/trash", element: page(<DataPage />) },
+      {
+        path: "resources",
+        element: <ResourcesLayout />,
+        children: [
+          { index: true, element: <Navigate to="proxies" replace /> },
+          { path: "proxies", element: page(<ProxiesPage />) },
+          { path: "mail", element: page(<MailPage />) },
+        ],
+      },
       { path: "settings", element: page(<SettingsPage />) },
+      { path: "settings/checks", element: page(<SettingsSubpage><ChecksPage /></SettingsSubpage>) },
+      { path: "settings/checks/evolution", element: page(<SettingsSubpage><ChecksPage /></SettingsSubpage>) },
+      { path: "settings/checks/links", element: page(<SettingsSubpage><ChecksPage /></SettingsSubpage>) },
+      { path: "settings/data", element: page(<SettingsSubpage><DataPage /></SettingsSubpage>) },
+      { path: "settings/data/trash", element: page(<SettingsSubpage><DataPage /></SettingsSubpage>) },
+      ...Object.keys(MOVED_PAGES).flatMap((from) => [
+        { path: from.slice(1), element: <MovedPage from={from} /> },
+        { path: `${from.slice(1)}/*`, element: <MovedPage from={from} /> },
+      ]),
       { path: "settings/:section", element: page(<SettingsPage />) },
       {
         path: "__ui",

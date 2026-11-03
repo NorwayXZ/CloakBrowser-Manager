@@ -1,9 +1,9 @@
-import { ChevronLeft, ChevronRight, Clock, Cpu, Info, KeyRound, Monitor, Moon, Plug, ShieldCheck, Sparkles, Sun } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clock, Cpu, Database, Info, KeyRound, Plug, ScanSearch, ShieldCheck, Sparkles } from "lucide-react";
+import type { ReactNode } from "react";
 import { Link, Navigate, useParams } from "react-router";
 import { useManagerStatus } from "../features/app/api";
-import { THEME_OPTIONS, usePreferences, type ThemePreference } from "../features/settings/preferences";
 import { cn } from "../shared/lib/cn";
-import { PageHeader, Section, Spinner } from "../ui";
+import { PageHeader } from "../ui";
 import { AboutSection } from "../features/settings/AboutSection";
 import { AccountSection } from "../features/settings/AccountSection";
 import { AgentAccessSection } from "../features/settings/AgentAccessSection";
@@ -12,8 +12,13 @@ import { AutomationSection } from "../features/settings/AutomationSection";
 import { KernelSection } from "../features/settings/KernelSection";
 import { VaultSection } from "../features/settings/VaultSection";
 
+/** 检测 and 数据 used to be top-level pages; they keep their own routes under /settings. */
+const PAGES = [
+  { id: "checks", label: "检测", desc: "检测报告、进化修复和环境关联分析", icon: ScanSearch, tile: "from-[#4fb0ff] to-[#5ad0a0]" },
+  { id: "data", label: "数据", desc: "备份、恢复、导出配置和回收站", icon: Database, tile: "from-[#ffb36b] to-[#ffd36b]" },
+] as const;
+
 const SECTIONS = [
-  { id: "appearance", label: "外观" },
   { id: "kernel", label: "浏览器内核", desc: "版本、授权密钥和更新方式", icon: Cpu, tile: "from-[#6e8bff] to-[#7b6bff]" },
   { id: "ai", label: "AI 接口", desc: "用来按人设生成一周的浏览剧本", icon: Sparkles, tile: "from-[#c06bff] to-[#ff6bb0]" },
   { id: "agent", label: "AI 接入", desc: "让外部 AI 工具来操作环境", icon: Plug, tile: "from-[#6bd0ff] to-[#6e8bff]" },
@@ -25,45 +30,55 @@ const SECTIONS = [
 
 export function SettingsPage() {
   const { section } = useParams();
-  const current = SECTIONS.find((item) => item.id === (section ?? "appearance"));
+  if (!section) {
+    return (
+      <div className="flex min-h-full flex-col gap-6 pb-8 pt-2">
+        <PageHeader title="设置" description="检测、数据、内核、AI、保险库、自动化、账号与更新。" />
+        <nav aria-label="设置分类" className="min-w-0">
+          <ul className="m-0 flex list-none flex-col gap-3 p-0">
+            {[...PAGES, ...SECTIONS].map((item) => (
+              <li key={item.id}>
+                <SettingsCard item={item} />
+              </li>
+            ))}
+          </ul>
+        </nav>
+      </div>
+    );
+  }
+  const current = SECTIONS.find((item) => item.id === section);
   if (!current) return <Navigate to="/settings" replace />;
-  const landing = current.id === "appearance";
-
   return (
     <div className="flex min-h-full flex-col gap-6 pb-8 pt-2">
-      {landing ? (
-        <>
-          <PageHeader title="设置" description="外观、内核、AI、保险库、自动化、账号与更新。" />
-          <div className="grid min-w-0 grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-            <nav aria-label="设置分类" className="min-w-0">
-              <ul className="m-0 flex list-none flex-col gap-3 p-0">
-                {SECTIONS.filter((item) => item.id !== "appearance").map((item) => (
-                  <li key={item.id}>
-                    <SettingsCard item={item as SectionCard} />
-                  </li>
-                ))}
-              </ul>
-            </nav>
-            <AppearanceSettings />
-          </div>
-        </>
-      ) : (
-        <>
-          <h1 className="sr-only">设置</h1>
-          <Link to="/settings" className="inline-flex w-fit items-center gap-1 rounded-full px-3 py-1.5 text-sm font-medium text-accent hover:bg-surface/60">
-            <ChevronLeft className="h-4 w-4" aria-hidden />
-            设置
-          </Link>
-          <div className="mx-auto w-full min-w-0 max-w-form">
-            <CurrentSection id={current.id} />
-          </div>
-        </>
-      )}
+      <h1 className="sr-only">设置</h1>
+      <BackToSettings />
+      <div className="mx-auto w-full min-w-0 max-w-form">
+        <CurrentSection id={current.id} />
+      </div>
     </div>
   );
 }
 
-type SectionCard = Extract<(typeof SECTIONS)[number], { icon: unknown }>;
+/** A full page (检测, 数据) opened from the settings cards, with the same way back. */
+export function SettingsSubpage({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex min-h-full flex-col pt-2">
+      <BackToSettings />
+      {children}
+    </div>
+  );
+}
+
+function BackToSettings() {
+  return (
+    <Link to="/settings" className="inline-flex w-fit items-center gap-1 rounded-full px-3 py-1.5 text-sm font-medium text-accent hover:bg-surface/60">
+      <ChevronLeft className="h-4 w-4" aria-hidden />
+      设置
+    </Link>
+  );
+}
+
+type SectionCard = (typeof PAGES)[number] | (typeof SECTIONS)[number];
 
 function SettingsCard({ item }: { item: SectionCard }) {
   const status = useManagerStatus();
@@ -87,64 +102,6 @@ function SettingsCard({ item }: { item: SectionCard }) {
   );
 }
 
-const ICONS: Record<ThemePreference, typeof Sun> = { system: Monitor, light: Sun, dark: Moon };
-const HINTS: Record<ThemePreference, string> = {
-  system: "跟着电脑的浅色 / 深色设置自动切换",
-  light: "始终使用浅色",
-  dark: "始终使用深色，适合夜间",
-};
-
-function AppearanceSettings() {
-  const { theme, setTheme, resolvedTheme, saving } = usePreferences();
-  return (
-    <Section
-      id="appearance"
-      title="外观"
-      description="只影响这个管理面板，不影响浏览器环境里网页看到的颜色偏好。"
-      actions={saving ? <Spinner className="h-4 w-4 text-fg-3" label="正在保存" /> : undefined}
-    >
-      <fieldset>
-        <legend className="mb-3 text-sm font-medium text-fg">主题</legend>
-        <div className="grid grid-cols-1 gap-2.5">
-          {THEME_OPTIONS.map((option) => {
-            const Icon = ICONS[option.value];
-            const checked = theme === option.value;
-            return (
-              <label
-                key={option.value}
-                className={cn(
-                  "flex cursor-pointer flex-col gap-1 rounded-md border p-3.5 transition-colors duration-fast",
-                  "has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent",
-                  checked ? "border-accent bg-accent-soft" : "border-border/60 bg-surface/60 hover:bg-surface",
-                )}
-              >
-                <input
-                  type="radio"
-                  name="theme"
-                  value={option.value}
-                  checked={checked}
-                  onChange={() => setTheme(option.value)}
-                  aria-label={option.label}
-                  aria-describedby={`theme-hint-${option.value}`}
-                  className="sr-only"
-                />
-                <span className="flex items-center gap-2 text-sm font-medium text-fg">
-                  <Icon className={cn("h-4 w-4", checked ? "text-accent" : "text-fg-3")} aria-hidden />
-                  {option.label}
-                </span>
-                <span id={`theme-hint-${option.value}`} className="text-xs text-fg-2">
-                  {HINTS[option.value]}
-                </span>
-              </label>
-            );
-          })}
-        </div>
-        <p className="mt-3 text-xs text-fg-3">现在显示的是{resolvedTheme === "dark" ? "深色" : "浅色"}。设置保存在 Manager 里，换端口或恢复备份后仍然有效。</p>
-      </fieldset>
-    </Section>
-  );
-}
-
 function CurrentSection({ id }: { id: (typeof SECTIONS)[number]["id"] }) {
   switch (id) {
     case "kernel":
@@ -161,7 +118,5 @@ function CurrentSection({ id }: { id: (typeof SECTIONS)[number]["id"] }) {
       return <AccountSection />;
     case "about":
       return <AboutSection />;
-    default:
-      return <AppearanceSettings />;
   }
 }

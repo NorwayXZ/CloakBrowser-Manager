@@ -168,10 +168,8 @@ function ThemeMenu() {
 
 export const SHORTCUTS = [
   { combo: "mod+1", label: "环境" },
-  { combo: "mod+2", label: "代理" },
-  { combo: "mod+3", label: "检测" },
-  { combo: "mod+4", label: "数据" },
-  { combo: "mod+5", label: "设置" },
+  { combo: "mod+2", label: "资源（代理、邮箱）" },
+  { combo: "mod+3", label: "设置" },
   { combo: "?", label: "显示快捷键" },
   { combo: "esc", label: "关闭对话框或菜单" },
 ].map((item) => ({ ...item, keys: formatShortcut(item.combo) }));

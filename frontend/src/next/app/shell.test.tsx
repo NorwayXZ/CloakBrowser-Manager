@@ -30,6 +30,12 @@ function controllableMedia(initial: Record<string, boolean>) {
   };
 }
 
+/** The theme lives in the toolbar menu; the settings page no longer repeats it. */
+async function pickTheme(label: string) {
+  fireEvent.keyDown(await screen.findByRole("button", { name: /^外观：/ }), { key: "Enter" });
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: label }));
+}
+
 const DARK = "(prefers-color-scheme: dark)";
 const COMPACT = "(max-width: 899px)";
 
@@ -56,7 +62,7 @@ describe("app shell", () => {
     expect(await screen.findByText("Manager v0.7.2")).toBeInTheDocument();
     expect(screen.getByText("内核 145.0.7632.159.1")).toBeInTheDocument();
     expect(await screen.findByText("运行中 2")).toBeInTheDocument();
-    expect(await screen.findByRole("heading", { name: "外观" })).toBeInTheDocument();
+    expect(await screen.findByRole("navigation", { name: "设置分类" })).toBeInTheDocument();
   });
 
   it("shows background automation with its profile, and nothing while idle", async () => {
@@ -92,7 +98,7 @@ describe("app shell", () => {
     mockFetch(shellRoutes());
     const { router } = renderApp("/settings");
     fireEvent.keyDown(window, { key: "2", ctrlKey: true, metaKey: true });
-    expect(router.state.location.pathname).toBe("/proxies");
+    expect(router.state.location.pathname).toBe("/resources/proxies");
     expect(await screen.findByRole("heading", { name: "代理" })).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "?", shiftKey: true });
     expect(await screen.findByRole("dialog", { name: "快捷键" })).toBeInTheDocument();
@@ -129,7 +135,7 @@ describe("app shell", () => {
     renderApp("/settings");
     expect(screen.getByText("CloakBrowser")).toBeInTheDocument();
     const nav = screen.getByRole("navigation", { name: "页面" });
-    expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual(["环境", "代理", "邮箱", "检测", "数据", "设置"]);
+    expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual(["环境", "资源", "设置"]);
   });
 
   it("asks for a restart when the running Manager is older than the panel", async () => {
@@ -152,8 +158,24 @@ describe("app shell", () => {
     controllableMedia({});
     mockFetch(shellRoutes());
     renderApp("/settings");
-    expect(await screen.findByRole("heading", { name: "外观" })).toBeInTheDocument();
+    expect(await screen.findByRole("navigation", { name: "设置分类" })).toBeInTheDocument();
     expect(screen.queryByText("Manager 服务是旧版本，需要重启")).not.toBeInTheDocument();
+  });
+
+  it("sends the old page addresses to their new homes, keeping the rest of the address", async () => {
+    controllableMedia({});
+    mockFetch(shellRoutes());
+    for (const [from, to] of [
+      ["/proxies", "/resources/proxies"],
+      ["/mail", "/resources/mail"],
+      ["/checks/evolution?x=1", "/settings/checks/evolution?x=1"],
+      ["/data/trash", "/settings/data/trash"],
+      ["/resources", "/resources/proxies"],
+    ]) {
+      const { router, unmount } = renderApp(from);
+      await waitFor(() => expect(`${router.state.location.pathname}${router.state.location.search}`).toBe(to));
+      unmount();
+    }
   });
 
   it("shows a not-found page for unknown paths", () => {
@@ -179,9 +201,8 @@ describe("theme", () => {
     const fetchMock = mockFetch(shellRoutes([{ path: "/api/settings/ui", respond: { theme: "dark", sidebar_collapsed: false } }]));
     renderApp("/settings");
     await waitFor(() => expect(document.documentElement.dataset.theme).toBe("dark"));
-    expect(screen.getByRole("radio", { name: "深色" })).toBeChecked();
-    expect(screen.getByRole("radio", { name: "深色" })).toHaveAccessibleDescription("始终使用深色，适合夜间");
-    fireEvent.click(screen.getByRole("radio", { name: "浅色" }));
+    expect(await screen.findByRole("button", { name: "外观：深色" })).toBeInTheDocument();
+    await pickTheme("浅色");
     await waitFor(() => expect(document.documentElement.dataset.theme).toBe("light"));
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith("/api/settings/ui", expect.objectContaining({ method: "PUT", body: JSON.stringify({ theme: "light", sidebar_collapsed: false, interface: "new" }) })),
@@ -197,13 +218,13 @@ describe("theme", () => {
       mockFetch(shellRoutes());
       renderApp("/settings");
       await waitFor(() => expect(postMessage).toHaveBeenCalledWith({ theme: "system", resolved: "light" }));
-      fireEvent.click(screen.getByRole("radio", { name: "深色" }));
+      await pickTheme("深色");
       await waitFor(() => expect(postMessage).toHaveBeenLastCalledWith({ theme: "dark", resolved: "dark" }));
       // A bridge that throws must not break the panel.
       postMessage.mockImplementation(() => {
         throw new Error("bridge gone");
       });
-      fireEvent.click(screen.getByRole("radio", { name: "浅色" }));
+      await pickTheme("浅色");
       await waitFor(() => expect(document.documentElement.dataset.theme).toBe("light"));
     } finally {
       delete window.webkit;
@@ -227,10 +248,10 @@ describe("theme", () => {
     mockFetch(shellRoutes([{ method: "PUT", path: "/api/settings/ui", status: 500, respond: { detail: "数据库被锁定" } }]));
     renderApp("/settings");
     await screen.findByText("Manager v0.7.2");
-    fireEvent.click(screen.getByRole("radio", { name: "深色" }));
+    await pickTheme("深色");
     expect(await screen.findByText("界面偏好没有保存")).toBeInTheDocument();
     expect(screen.getByText("数据库被锁定")).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole("radio", { name: "跟随系统" })).toBeChecked());
+    expect(await screen.findByRole("button", { name: "外观：跟随系统" })).toBeInTheDocument();
     expect(document.documentElement.dataset.theme).toBe("light");
   });
 });

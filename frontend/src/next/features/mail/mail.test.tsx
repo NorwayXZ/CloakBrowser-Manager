@@ -32,7 +32,7 @@ async function open(extra: MockRoute[] = []) {
       { path: "/api/profiles", respond: [{ id: "p1", name: "注册用" }] },
     ]),
   );
-  const utils = renderApp("/mail");
+  const utils = renderApp("/resources/mail");
   await screen.findByRole("heading", { name: "邮箱", level: 1 });
   return { fetchMock, ...utils };
 }

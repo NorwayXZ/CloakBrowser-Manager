@@ -12,7 +12,7 @@ let presets: typeof PRESETS;
 
 async function open(extra: MockRoute[] = []) {
   const fetchMock = mockFetch(shellRoutes([...extra, { path: "/api/proxy-presets", respond: () => presets }]));
-  const utils = renderApp("/proxies");
+  const utils = renderApp("/resources/proxies");
   await screen.findByRole("heading", { name: "代理" });
   return { fetchMock, ...utils };
 }

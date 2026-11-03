@@ -40,8 +40,8 @@ export function DataPage() {
   const trash = useTrash();
   const onTrash = location.pathname.endsWith("/trash");
   const tabs = [
-    { to: "/data", label: "备份与恢复", active: !onTrash },
-    { to: "/data/trash", label: "回收站", active: onTrash, count: trash.data?.length },
+    { to: "/settings/data", label: "备份与恢复", active: !onTrash },
+    { to: "/settings/data/trash", label: "回收站", active: onTrash, count: trash.data?.length },
   ];
 
   return (

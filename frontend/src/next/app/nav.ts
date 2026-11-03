@@ -1,4 +1,4 @@
-import { Database, Globe2, LayoutGrid, Mail, Settings, ShieldCheck, type LucideIcon } from "lucide-react";
+import { Boxes, LayoutGrid, Settings, type LucideIcon } from "lucide-react";
 
 export interface NavItem {
   path: string;
@@ -10,12 +10,17 @@ export interface NavItem {
 
 export const NAV_ITEMS: NavItem[] = [
   { path: "/profiles", label: "环境", icon: LayoutGrid, key: "1" },
-  { path: "/proxies", label: "代理", icon: Globe2, key: "2" },
-  { path: "/mail", label: "邮箱", icon: Mail, key: "3" },
-  { path: "/checks", label: "检测", icon: ShieldCheck, key: "4" },
-  { path: "/data", label: "数据", icon: Database, key: "5" },
-  { path: "/settings", label: "设置", icon: Settings, key: "6" },
+  { path: "/resources", label: "资源", icon: Boxes, key: "2" },
+  { path: "/settings", label: "设置", icon: Settings, key: "3" },
 ];
+
+/** Pages that used to have their own top-level entry, and where they live now. */
+export const MOVED_PAGES: Record<string, string> = {
+  "/proxies": "/resources/proxies",
+  "/mail": "/resources/mail",
+  "/checks": "/settings/checks",
+  "/data": "/settings/data",
+};
 
 export function navItemFor(pathname: string): NavItem | undefined {
   return NAV_ITEMS.find((item) => pathname === item.path || pathname.startsWith(`${item.path}/`));
