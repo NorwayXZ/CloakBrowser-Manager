@@ -3090,7 +3090,7 @@ export interface components {
         McpSettingsModel: {
             /**
              * Mode
-             * @default read-only
+             * @default automation
              * @enum {string}
              */
             mode: "off" | "read-only" | "full" | "automation";

@@ -209,6 +209,10 @@ EXPECTED_ACTION_TOOLS = {
     "restore_profile": PROFILE_ID_ARGS,
     "create_proxy": agent_tools.TOOLS["create_proxy"].input_schema,
     "stop_all_profiles": NO_ARGS,
+    "approve_warmup_batch": agent_tools.TOOLS["approve_warmup_batch"].input_schema,
+    "reject_warmup_batch": agent_tools.TOOLS["reject_warmup_batch"].input_schema,
+    "approve_evolution_proposal": agent_tools.TOOLS["approve_evolution_proposal"].input_schema,
+    "dismiss_evolution_proposal": agent_tools.TOOLS["dismiss_evolution_proposal"].input_schema,
 }
 
 EXPECTED_BROWSER_TOOLS = {
@@ -243,15 +247,20 @@ def test_tool_snapshot_full_mode():
 
 
 VAULT_TOOLS = ("account_prepare", "vault_create", "vault_list", "vault_mark")
+# The unrestricted extras of the automation tier: delete / purge by profile_id, the rest by `profile`.
+DELETE_TOOLS = ("delete_profile", "purge_profile")
+PAGE_EXTRA_TOOLS = ("browser_hover", "browser_drag", "browser_get_html", "browser_evaluate", "browser_cookies")
 
 
 def test_tool_snapshot_automation_mode():
     tools = mcp_server.build_mcp_tools("automation")
     expected = {**EXPECTED_READ_TOOLS, **EXPECTED_ACTION_TOOLS, **EXPECTED_BROWSER_TOOLS}
-    assert [t.name for t in tools] == [*expected, *PAGE_TOOLS, *VAULT_TOOLS]
+    assert [t.name for t in tools] == [*expected, *PAGE_TOOLS, *VAULT_TOOLS, *DELETE_TOOLS, *PAGE_EXTRA_TOOLS]
     by_name = {t.name: t.input_schema for t in tools}
     assert {name: by_name[name] for name in expected} == expected
-    for name in (*PAGE_TOOLS, *VAULT_TOOLS):
+    for name in DELETE_TOOLS:
+        assert by_name[name]["required"] == ["profile_id"], name
+    for name in (*PAGE_TOOLS, *VAULT_TOOLS, *PAGE_EXTRA_TOOLS):
         assert "profile" in by_name[name]["required"], name
         assert by_name[name]["properties"]["profile"]["type"] == "string"
 
@@ -266,23 +275,21 @@ def test_tool_snapshot_off_mode_is_empty():
     assert mcp_server.build_mcp_tools("off") == []
 
 
-def test_no_cookie_or_destructive_tools_exist():
-    names = set(mcp_server.TOOLS)
-    for forbidden in names:
-        assert "cookie" not in forbidden
-        assert "burn" not in forbidden
-        assert "purge" not in forbidden
-        assert "delete" not in forbidden
-        assert "approve" not in forbidden
-        assert "clipboard" not in forbidden
-        # CDP handout lives only in the automation-tier "browser" layer.
-        if "cdp" in forbidden:
-            assert mcp_server.TOOLS[forbidden].layer == "browser"
+def test_unrestricted_tools_live_in_the_automation_tier():
+    """Delete, cookies and page JavaScript exist, and sit in the top tier; approvals are plain action tools."""
+    for name in (*DELETE_TOOLS, *PAGE_EXTRA_TOOLS):
+        assert mcp_server.TOOLS[name].layer == "browser", name
+    for name in ("approve_warmup_batch", "reject_warmup_batch", "approve_evolution_proposal", "dismiss_evolution_proposal"):
+        assert mcp_server.TOOLS[name].layer == "action", name
+    # The CDP handout stays in the same tier.
+    for name in mcp_server.TOOLS:
+        if "cdp" in name:
+            assert mcp_server.TOOLS[name].layer == "browser"
 
 
 def test_instructions_name_real_tools():
     for name in (
-        "manager_status", "list_profiles", "get_profile_preflight", "open_browser",
+        "manager_status", "list_profiles", "get_profile_preflight", "open_browser", "purge_profile",
         "launch_profile", "stop_profile", "get_fingerprint_report", "get_cdp_endpoint",
     ):
         assert name in mcp_server.TOOLS, name
@@ -695,11 +702,15 @@ async def test_no_secret_appears_in_any_tool_output(tmp_path):
         assert results[name]["ok"] is True, (name, results[name])
     blob = json.dumps(results, ensure_ascii=False)
     audit_blob = json.dumps(fake.audits, ensure_ascii=False)
-    for secret in (PROXY_PASSWORD, "agentuser", NOTE_SECRET, PERSONA_SECRET, COOKIE_VALUE, LICENSE_KEY):
+    for secret in (PROXY_PASSWORD, "agentuser", COOKIE_VALUE, LICENSE_KEY):
         assert secret not in blob, secret
         assert secret not in audit_blob, secret
     assert "/cdp" not in blob
     assert ".cloak" not in blob
+    # The user's own notes and persona are readable by their agent, and only there.
+    assert results["get_profile"]["profile"]["notes"] == NOTE_SECRET
+    assert results["get_profile"]["profile"]["warmup_persona"] == PERSONA_SECRET
+    assert NOTE_SECRET not in json.dumps(results["list_profiles"])
     # Positive controls: the shaping kept the useful, non-secret facts.
     assert results["list_profiles"]["profiles"][0]["proxy"] == "socks5://10.0.0.8:1080"
     steps = results["list_warmup_scripts"]["batches"][0]["scripts"][0]["steps"]
@@ -946,6 +957,7 @@ async def test_token_scope_caps_the_mode():
     assert names("control") == [*EXPECTED_READ_TOOLS, *EXPECTED_ACTION_TOOLS]
     assert names("cdp") == [
         *EXPECTED_READ_TOOLS, *EXPECTED_ACTION_TOOLS, *EXPECTED_BROWSER_TOOLS, *PAGE_TOOLS, *VAULT_TOOLS,
+        *DELETE_TOOLS, *PAGE_EXTRA_TOOLS,
     ]
 
 
@@ -1109,10 +1121,10 @@ async def test_remote_backend_reports_a_revoked_token():
 # ── Manager-side endpoints ───────────────────────────────────────────────────
 
 
-def test_mcp_settings_default_read_only_and_update(app_client):
+def test_mcp_settings_default_open_and_update(app_client):
     resp = app_client.get("/api/settings/mcp")
     assert resp.status_code == 200
-    assert resp.json() == {"mode": "read-only"}
+    assert resp.json() == {"mode": "automation"}
     resp = app_client.put("/api/settings/mcp", json={"mode": "full"})
     assert resp.status_code == 200
     assert resp.json() == {"mode": "full"}
@@ -1286,8 +1298,9 @@ def test_every_tool_is_documented_for_agents():
     assert set(agent_tools.TRIGGERS) == set(agent_tools.TOOLS)
 
 
-def test_destructive_tools_stay_out_of_the_agent_surface():
-    forbidden = {"delete_profile", "purge_profile", "burn_profile", "get_cookies", "export_cookies", "set_license", "restore_backup"}
+def test_app_level_admin_stays_out_of_the_agent_surface():
+    """Licence, backups and the self-updater are the app's own admin, not profile work."""
+    forbidden = {"burn_profile", "set_license", "restore_backup", "install_update"}
     assert not forbidden & set(agent_tools.TOOLS)
 
 
@@ -1332,9 +1345,7 @@ async def test_create_profile_sends_only_whitelisted_fields():
 @pytest.mark.parametrize(
     "args",
     [
-        {"name": "x", "cookies_json": "[]"},
-        {"name": "x", "notes": "n"},
-        {"name": "x", "proxy": "socks5://u:p@h:1"},
+        {"name": "x", "license_key": "k"},
         {"name": "x", "startup_urls": ["file:///etc/passwd"]},
         {},
     ],
@@ -1351,8 +1362,8 @@ async def test_update_profile_needs_fields_and_whitelists():
     client = fake.client()
     empty = await agent_tools.TOOLS["update_profile"].handler(client, {"profile_id": "p1"})
     assert empty["reason"] == "invalid_argument"
-    cookies = await agent_tools.TOOLS["update_profile"].handler(client, {"profile_id": "p1", "cookies_json": "[]"})
-    assert cookies["reason"] == "invalid_argument"
+    unknown = await agent_tools.TOOLS["update_profile"].handler(client, {"profile_id": "p1", "license_key": "k"})
+    assert unknown["reason"] == "invalid_argument"
     fake.routes[("PUT", "/api/profiles/p1")] = (200, {"id": "p1", "name": "新名字", "proxy": "http://u:pw@h:1"})
     ok = await agent_tools.TOOLS["update_profile"].handler(client, {"profile_id": "p1", "name": "新名字"})
     assert ok["ok"] and "pw" not in json.dumps(ok)
@@ -1395,3 +1406,74 @@ async def test_groups_and_running_and_trash_reads():
     assert running["count"] == 1
     trash = await agent_tools.TOOLS["list_trash"].handler(client, {})
     assert trash["profiles"][0]["id"] == "t"
+
+
+# ── Delete / purge / approvals ───────────────────────────────────────────────
+
+
+async def test_delete_and_purge_call_the_matching_endpoints():
+    fake = FakeManager()
+    fake.routes[("DELETE", "/api/profiles/p1")] = (200, {"ok": True})
+    fake.routes[("DELETE", "/api/profiles/p1/purge")] = (200, {"ok": True})
+    client = fake.client()
+    deleted = await agent_tools.TOOLS["delete_profile"].handler(client, {"profile_id": "p1"})
+    assert deleted == {"ok": True, "profile_id": "p1", "in_trash": True}
+    assert fake.hit("DELETE", "/api/profiles/p1") and not fake.hit("DELETE", "/api/profiles/p1/purge")
+    purged = await agent_tools.TOOLS["purge_profile"].handler(client, {"profile_id": "p1"})
+    assert purged["purged"] is True and fake.hit("DELETE", "/api/profiles/p1/purge")
+    missing = await agent_tools.TOOLS["delete_profile"].handler(client, {"profile_id": "nope"})
+    assert missing["ok"] is False and missing["reason"] == "not_found"
+
+
+async def test_approvals_pass_through_to_the_manager():
+    fake = FakeManager()
+    fake.routes[("POST", "/api/profiles/p1/warmup/scripts/batches/b1/approve")] = (200, {"ok": True, "status": "approved", "count": 3})
+    fake.routes[("POST", "/api/profiles/p1/warmup/scripts/batches/b1/reject")] = (200, {"ok": True, "status": "rejected", "count": 3})
+    fake.routes[("POST", "/api/evolution/proposals/ev1/approve")] = (200, {"id": "ev1", "status": "approved"})
+    fake.routes[("POST", "/api/evolution/proposals/ev1/dismiss")] = (200, {"id": "ev1", "status": "dismissed"})
+    client = fake.client()
+    call = lambda name, args: agent_tools.TOOLS[name].handler(client, args)  # noqa: E731
+    assert (await call("approve_warmup_batch", {"profile_id": "p1", "batch_id": "b1"}))["status"] == "approved"
+    assert (await call("reject_warmup_batch", {"profile_id": "p1", "batch_id": "b1"}))["status"] == "rejected"
+    assert (await call("approve_evolution_proposal", {"proposal_id": "ev1"}))["proposal"]["status"] == "approved"
+    assert (await call("dismiss_evolution_proposal", {"proposal_id": "ev1"}))["proposal"]["status"] == "dismissed"
+    assert (await call("approve_warmup_batch", {"profile_id": "p1"}))["reason"] == "invalid_argument"
+    assert (await call("approve_evolution_proposal", {}))["reason"] == "invalid_argument"
+
+
+async def test_create_and_update_profile_now_take_notes_cookies_and_a_direct_proxy():
+    fake = FakeManager()
+    fake.routes[("POST", "/api/profiles")] = (200, {"id": "p9", "name": "x", "proxy": "socks5://u:p@h:1"})
+    fake.routes[("PUT", "/api/profiles/p9")] = (200, {"id": "p9", "name": "x"})
+    client = fake.client()
+    created = await agent_tools.TOOLS["create_profile"].handler(
+        client, {"name": "x", "notes": "n", "cookies_json": "[]", "proxy": "socks5://u:p@h:1"}
+    )
+    assert created["ok"] and "p@h" not in json.dumps(created)  # credentials are never echoed back
+    sent = fake.bodies[("POST", "/api/profiles")]
+    assert sent["notes"] == "n" and sent["cookies_json"] == "[]" and sent["proxy"] == "socks5://u:p@h:1"
+    updated = await agent_tools.TOOLS["update_profile"].handler(client, {"profile_id": "p9", "notes": "新备注"})
+    assert updated["ok"]
+
+
+async def test_audit_keeps_cookies_and_script_out_of_the_summary():
+    summary = agent_tools.summarize_args({"profile": "p1", "cookies": [{"name": "sid", "value": "TOPSECRET"}], "cookies_json": "TOPSECRET2"})
+    assert "TOPSECRET" not in json.dumps(summary) and "TOPSECRET2" not in json.dumps(summary)
+
+
+async def test_create_profile_defaults_to_the_host_system():
+    fake = FakeManager()
+    fake.routes[("GET", "/api/status")] = (200, {"host_os": "macos"})
+    fake.routes[("POST", "/api/profiles")] = (200, {"id": "p1", "name": "x", "platform": "macos"})
+    client = fake.client()
+    await agent_tools.TOOLS["create_profile"].handler(client, {"name": "x"})
+    assert fake.bodies[("POST", "/api/profiles")]["platform"] == "macos"
+    await agent_tools.TOOLS["create_profile"].handler(client, {"name": "y", "platform": "linux"})
+    assert fake.bodies[("POST", "/api/profiles")]["platform"] == "linux"  # an explicit choice wins
+
+
+async def test_create_profile_still_works_when_status_is_unreachable():
+    fake = FakeManager()
+    fake.routes[("POST", "/api/profiles")] = (200, {"id": "p1", "name": "x"})
+    result = await agent_tools.TOOLS["create_profile"].handler(fake.client(), {"name": "x"})
+    assert result["ok"] and "platform" not in fake.bodies[("POST", "/api/profiles")]

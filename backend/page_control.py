@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import logging
 import re
 import time
@@ -868,6 +869,117 @@ class PageController:
             raise self._wrap(exc, "滚动") from exc
         return await self._page_info(context, page)
 
+    async def hover(self, context: Any, profile_id: str, ref: str) -> dict[str, Any]:
+        page = await self._current_page(context, profile_id)
+        self._raise_if_dialog(page)
+        element = await self._target(page, profile_id, ref)
+        try:
+            await element.scroll_into_view_if_needed(timeout=ACTION_TIMEOUT_MS)
+            await element.hover(timeout=ACTION_TIMEOUT_MS)
+        except (PlaywrightError, PlaywrightTimeout) as exc:
+            raise self._wrap(exc, f"悬停 {ref} ") from exc
+        return await self._page_info(context, page)
+
+    async def drag(self, context: Any, profile_id: str, ref: str, to_ref: str) -> dict[str, Any]:
+        """Press on ``ref``, move to ``to_ref`` in a few steps and release (sliders, sortable lists, drop zones)."""
+        page = await self._current_page(context, profile_id)
+        self._raise_if_dialog(page)
+        source = await self._target(page, profile_id, ref)
+        target = await self._target(page, profile_id, to_ref)
+        try:
+            await source.scroll_into_view_if_needed(timeout=ACTION_TIMEOUT_MS)
+            start = await source.bounding_box()
+            end = await target.bounding_box()
+            if start is None or end is None:
+                raise PageControlError("action_failed", "拖拽失败：起点或终点元素当前没有可见区域。")
+            await page.mouse.move(start["x"] + start["width"] / 2, start["y"] + start["height"] / 2)
+            await page.mouse.down()
+            await page.mouse.move(end["x"] + end["width"] / 2, end["y"] + end["height"] / 2, steps=12)
+            await page.mouse.up()
+        except (PlaywrightError, PlaywrightTimeout) as exc:
+            raise self._wrap(exc, f"拖拽 {ref} 到 {to_ref} ") from exc
+        return await self._page_info(context, page)
+
+    async def get_html(
+        self, context: Any, profile_id: str, *, ref: str | None = None,
+        offset: int = 0, max_chars: int = TEXT_DEFAULT_CHARS,
+    ) -> dict[str, Any]:
+        """Raw HTML of the page (or one element's outerHTML) in pages of ``max_chars``."""
+        page = await self._current_page(context, profile_id, create=False)
+        self._raise_if_dialog(page)
+        await self._wait_idle(profile_id)
+        offset = max(0, int(offset or 0))
+        max_chars = max(100, min(int(max_chars or TEXT_DEFAULT_CHARS), TEXT_MAX_CHARS))
+        try:
+            if ref:
+                html = await (await self._target(page, profile_id, ref)).evaluate("e => e.outerHTML")
+            else:
+                html = await page.content()
+        except (PlaywrightError, PlaywrightTimeout) as exc:
+            raise self._wrap(exc, "读取 HTML") from exc
+        html = html or ""
+        chunk = html[offset : offset + max_chars]
+        end = offset + len(chunk)
+        info = await self._page_info(context, page)
+        return {**info, "html": chunk, "offset": offset, "total_chars": len(html), "next_offset": end if end < len(html) else None}
+
+    async def evaluate(
+        self, context: Any, profile_id: str, script: str, *, ref: str | None = None
+    ) -> dict[str, Any]:
+        """Run JavaScript in the page and return its JSON-serialisable result.
+
+        ``script`` is an expression or an arrow function. With ``ref`` the function
+        receives that element as its first argument: ``el => el.value``.
+        """
+        script = (script or "").strip()
+        if not script:
+            raise PageControlError("invalid_argument", "缺少 script（JS 表达式或箭头函数，如 () => document.title）。")
+        page = await self._current_page(context, profile_id)
+        self._raise_if_dialog(page)
+        try:
+            if ref:
+                element = await self._target(page, profile_id, ref)
+                outcome = await self._guarded(page, element.evaluate(script))
+            else:
+                outcome = await self._guarded(page, page.evaluate(script))
+        except (PlaywrightError, PlaywrightTimeout) as exc:
+            raise self._wrap(exc, "执行脚本") from exc
+        if outcome is _DIALOG:
+            return {**await self._page_info(context, page), "result": None, "dialog_opened": True}
+        try:
+            encoded = json.dumps(outcome, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):
+            encoded = json.dumps(str(outcome), ensure_ascii=False)
+        truncated = len(encoded) > TEXT_MAX_CHARS
+        value = outcome
+        if truncated:
+            value = encoded[:TEXT_MAX_CHARS]
+        return {**await self._page_info(context, page), "result": value, "truncated": truncated, "total_chars": len(encoded)}
+
+    async def cookies(
+        self, context: Any, profile_id: str, action: str = "get", *,
+        urls: Any = None, domain: str | None = None, cookies: Any = None,
+    ) -> dict[str, Any]:
+        """Read, write or clear the profile's cookies (the whole browser context, not one tab)."""
+        try:
+            if action == "get":
+                found = await context.cookies(list(urls)) if urls else await context.cookies()
+                if domain:
+                    needle = domain.lower().lstrip(".")
+                    found = [c for c in found if needle in str(c.get("domain", "")).lower()]
+                return {"count": len(found), "cookies": found}
+            if action == "set":
+                if not isinstance(cookies, list) or not cookies:
+                    raise PageControlError("invalid_argument", "set 需要 cookies 数组（每项含 name、value，以及 url 或 domain+path）。")
+                await context.add_cookies(cookies)
+                return {"set": len(cookies)}
+            if action == "clear":
+                await context.clear_cookies()
+                return {"cleared": True}
+        except (PlaywrightError, PlaywrightTimeout) as exc:
+            raise self._wrap(exc, "读写 Cookie") from exc
+        raise PageControlError("invalid_argument", "action 只能是 get / set / clear。")
+
     async def wait_for(
         self, context: Any, profile_id: str, *, text: str | None = None, ms: int | None = None,
         text_gone: str | None = None, url: str | None = None, selector: str | None = None,
@@ -1008,6 +1120,10 @@ class PageController:
             return await self.press_key(context, profile_id, str(arg("key", "")))
         if verb == "scroll":
             return await self.scroll(context, profile_id, str(arg("direction", "down")), int(arg("amount", SCROLL_DEFAULT_PX)))
+        if verb == "hover":
+            return await self.hover(context, profile_id, str(arg("ref", "")))
+        if verb == "drag":
+            return await self.drag(context, profile_id, str(arg("ref", "")), str(arg("to_ref", "")))
         if verb == "wait_for":
             return await self.wait_for(
                 context, profile_id, text=arg("text"), ms=arg("ms"), text_gone=arg("text_gone"),

@@ -18,9 +18,9 @@ import {
 
 const MODES: { id: McpMode; title: string; text: string }[] = [
   { id: "off", title: "关闭", text: "拒绝所有 AI agent 请求。" },
-  { id: "read-only", title: "只读（默认）", text: "agent 只能查看环境、预检、检测报告和各种状态，不能启动或关闭浏览器。" },
-  { id: "full", title: "可启停", text: "只读 + 启动/关闭环境、跑指纹检测、养号和进化实验。只能以手动模式打开，不能操作页面。" },
-  { id: "automation", title: "可操作页面", text: "可启停 + 打开网页、读取页面、点击、输入、截图，并交出 CDP 端点。" },
+  { id: "read-only", title: "只读", text: "agent 只能查看环境、预检、检测报告和各种状态，不能启动或关闭浏览器。" },
+  { id: "full", title: "可启停", text: "只读 + 新建/修改环境、启动/关闭、跑指纹检测、养号和进化实验。不能操作页面，不能删除。" },
+  { id: "automation", title: "全部开放（默认）", text: "没有限制：操作页面、读写 Cookie、执行脚本、删除环境、批准养号和进化提案，并交出 CDP 端点。" },
 ];
 
 const SCOPES: { id: AgentTokenScope; title: string }[] = [
@@ -40,9 +40,9 @@ export function AgentAccessSection() {
   const [issued, setIssued] = useState<AgentTokenCreated | null>(null);
   return (
     <div className="flex flex-col gap-6">
+      <ConnectSection token={issued?.token ?? null} />
       <PermissionSection />
       <TokenSection created={issued} onCreated={setIssued} />
-      <ConnectSection token={issued?.token ?? null} />
       <AuditSection />
     </div>
   );
@@ -51,7 +51,6 @@ export function AgentAccessSection() {
 function PermissionSection() {
   const mode = useMcpMode();
   const queryClient = useQueryClient();
-  const confirm = useConfirm();
   const toast = useToast();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,16 +58,6 @@ function PermissionSection() {
 
   const change = async (next: McpMode) => {
     if (next === mode.data?.mode) return;
-    if (next === "automation") {
-      const ok = await confirm({
-        title: "允许 AI 操作页面？",
-        description: "「可操作页面」会让 AI agent 接触环境里的登录状态：页面控制和 CDP 都能读到该环境的全部 Cookie。",
-        details: "只在需要 agent 操作页面时开启，用完改回「可启停」或「只读」。",
-        confirmLabel: "确定开启",
-        danger: true,
-      });
-      if (!ok) return;
-    }
     setSaving(true);
     setError(null);
     try {
@@ -101,7 +90,7 @@ function PermissionSection() {
     <Section
       id="agent-permission"
       title={title}
-      description="决定 Codex、Claude、DeepSeek harness 等 AI agent 能对环境做什么。你随时可以在「环境」列表里点「接管」把环境拿回来。"
+      description="默认全部开放，不用设置。只有想收紧时才需要改；你随时可以在「环境」列表里点「接管」把环境拿回来。"
     >
       <fieldset className="flex flex-col gap-4" disabled={saving}>
         <legend className="sr-only">AI agent 权限</legend>
@@ -138,9 +127,6 @@ function PermissionSection() {
             );
           })}
         </div>
-        {current === "automation" && (
-          <Banner tone="warning">当前允许 AI 操作页面，包括读取环境的登录状态。不用时请改回「可启停」或「只读」。</Banner>
-        )}
         {error && <Banner tone="danger" title="没有保存">{error}</Banner>}
       </fieldset>
     </Section>

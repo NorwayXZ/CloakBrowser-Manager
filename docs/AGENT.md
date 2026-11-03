@@ -68,11 +68,11 @@ curl -X POST http://127.0.0.1:8080/api/agent/tools/open_browser \
 | 模式 | 你能做什么 |
 | --- | --- |
 | `off` | 全部拒绝 |
-| `read-only`（默认） | 14 个只读工具：看画像、预检、检测报告、养号/进化状态、内核信息 |
-| `full` | 再加启停画像、跑检测/养号/进化（`launch_profile` 只能 `manual`），以及 3 个邮箱工具 |
-| `automation` | 再加 `open_browser`、`get_cdp_endpoint`、15 个页面工具和 4 个保险库工具，`launch_profile` 可用 `debug` |
+| `read-only` | 只读工具：看画像、预检、检测报告、养号/进化状态、内核信息 |
+| `full` | 再加新建/修改画像、启停、跑检测/养号/进化（`launch_profile` 只能 `manual`）、批准养号剧本和进化提案，以及邮箱工具 |
+| `automation`（默认） | **没有限制**：再加 `open_browser`、`get_cdp_endpoint`、页面工具（含 `browser_cookies` 读写 Cookie、`browser_evaluate` 执行 JS、`browser_get_html`）、保险库工具，以及 `delete_profile` / `purge_profile`；`launch_profile` 可用 `debug` |
 
-**为什么页面控制单独成档**：CDP 能读取页面的全部 Cookie，而桥在其他档位刻意不提供任何 Cookie 读取。开 `automation` 等于允许 agent 接触该画像的登录态，请只在需要操作页面时开，用完改回 `full` 或 `read-only`。
+这是用户自己的单机工具，所以默认全开、不需要任何设置。用户想收紧时才会调低，你就会看到更少的工具。
 
 ## 标准流程
 
@@ -143,6 +143,11 @@ curl -X POST http://127.0.0.1:8080/api/agent/tools/open_browser \
 | `browser_batch(profile, steps, snapshot_after?, viewport_only?, stop_on_error?)` | 一次调用按顺序做最多 20 步（见下） |
 | `browser_upload(profile, ref, paths)` | 上传文件到文件输入框，或点一个会弹出文件选择器的按钮；**只允许 agent 文件目录里的文件**（见下） |
 | `browser_downloads(profile)` | 列出这个画像下载过的文件和 agent 文件目录的位置 |
+| `browser_hover(profile, ref)` | 鼠标移到元素上（弹出菜单、悬浮提示） |
+| `browser_drag(profile, ref, to_ref)` | 按住 `ref` 拖到 `to_ref`（滑块、排序、拖放区） |
+| `browser_get_html(profile, ref?, offset?, max_chars?)` | 原始 HTML（整页或某个元素的 outerHTML），分页返回；平时读 `browser_snapshot` 更省 |
+| `browser_evaluate(profile, script, ref?)` | 在页面里执行 JS，返回可 JSON 化的结果（超过 2 万字符截断）；给了 `ref` 时函数的参数是那个元素，如 `el => el.value` |
+| `browser_cookies(profile, action?, domain?, urls?, cookies?)` | `get` 读（可按域名过滤）、`set` 写入、`clear` 清空；作用于整个浏览器，不是单个标签页 |
 | `browser_back(profile)` | 后退 |
 | `browser_tabs(profile, action, index?, url?)` | `list` / `new` / `select` / `close` |
 
@@ -300,9 +305,10 @@ MCP 客户端除了工具，还能读到：
 
 - **一次只开一个画像。** 免费授权只有一个并发座位。
 - **不要改指纹来「绕过」问题。** 画像异常先看 `get_fingerprint_report`、`get_profile_preflight`，把结论告诉用户，而不是自己调参数。
-- **不要回显或外传 Cookie、账号、代理凭据。** 工具已对代理账密、备注做了脱敏；用 CDP 时这条靠你自觉。
+- **Cookie 和凭据：** `browser_cookies` 能读写 Cookie，任务需要时直接用，不必往对话里贴 Cookie 值；代理账密只写不读。
+- **删除：** `delete_profile` 进回收站，7 天内 `restore_profile` 能恢复；`purge_profile` 连数据目录一起清掉，不可恢复，只在用户明确要求彻底删除时用。
 - **只对任务需要的画像开 `debug`，用完就关。**
-- **没有的工具是设计如此**：删除/焚毁画像、批准进化提案与养号剧本、Cookie 读取与导出、备份恢复、license 写入、执行任意 JS。需要时请用户在面板里做。
+- 仍然没有的工具：备份恢复、license 写入、应用自更新，这些是应用本身的管理，不是画像操作。
 
 ## 错误码怎么处理
 
@@ -313,8 +319,8 @@ MCP 客户端除了工具，还能读到：
 | `manager_unreachable` | Manager 没开或端口不一致 | 让用户启动 Manager，不要重试 |
 | `unauthorized` | token 不对或已撤销 | 让用户换 token |
 | `mcp_disabled` | `mcp.mode=off` | 让用户改模式 |
-| `mode_read_only` | 当前是只读模式 | 让用户改成 `full` |
-| `mode_not_automation` | 需要 `automation` 档（页面控制/CDP） | 说明理由，让用户决定要不要开 |
+| `mode_read_only` | 用户把档位调到了只读（默认是全开） | 让用户改成 `full` 或 `automation` |
+| `mode_not_automation` | 用户把档位调低了，页面控制、Cookie、删除不可用 | 说明需要哪个工具，让用户改回 `automation` |
 | `scope_denied` | 你的 agent token scope 不够 | 让管理员签发更高 scope 的 token |
 | `not_found` | 画像/报告不存在 | 用 `list_profiles` 重新查 |
 | `invalid_argument` | 参数缺失或有歧义（如重名、非 http 网址） | 按 `detail` 改参数 |

@@ -21,7 +21,7 @@ TARGET = ROOT / "skills" / "cloakbrowser-manager" / "references" / "tool-referen
 LAYER_TITLES = {
     "read": ("只读工具", "`read-only` 档以上都能用"),
     "action": ("动作与管理工具", "需要 `full` 档（令牌范围 `control`）"),
-    "browser": ("浏览器与页面工具", "需要 `automation` 档（令牌范围 `cdp`）；能读到页面里的 Cookie，只在需要时开"),
+    "browser": ("浏览器、页面与删除工具", "需要 `automation` 档（令牌范围 `cdp`，默认档）；含 Cookie 读写、执行 JS、删除画像"),
 }
 
 

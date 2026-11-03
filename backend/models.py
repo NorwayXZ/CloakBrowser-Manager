@@ -722,7 +722,7 @@ class McpSettingsModel(BaseModel):
     # full = read tools + the 5 action tools; automation = full + the browser
     # tools that hand the agent a CDP endpoint (CDP can read cookies, so it is
     # its own opt-in tier). Stored as settings["mcp.mode"].
-    mode: Literal["off", "read-only", "full", "automation"] = "read-only"
+    mode: Literal["off", "read-only", "full", "automation"] = "automation"
 
 
 class UiPreferencesModel(BaseModel):

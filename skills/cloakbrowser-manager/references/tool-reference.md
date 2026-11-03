@@ -2,7 +2,7 @@
 
 由 `python scripts/gen_skill_reference.py` 从 Manager 的工具注册表生成；`pytest` 会检查它没有过期。
 
-共 60 个工具。每个工具的“触发词”是用户常用说法，用来对上你该选哪个工具。
+共 71 个工具。每个工具的“触发词”是用户常用说法，用来对上你该选哪个工具。
 
 ## 只读工具（21）
 
@@ -38,7 +38,7 @@ Manager 总览：应用版本、内核版本、运行中的浏览器数、画像
 
 ### `get_profile`
 
-看单个画像的完整配置（字段政策同 list_profiles）加实时运行状态。
+看单个画像的完整配置（含备注 notes 和养号人设）加实时运行状态。代理只显示地址，不显示账号密码。
 
 *One profile's full config (same field policy) plus live run state.*
 
@@ -138,7 +138,7 @@ Manager 总览：应用版本、内核版本、运行中的浏览器数、画像
 
 ### `list_warmup_scripts`
 
-看画像的 AI 养号剧本批次：状态、主题与意图（搜索词）。persona 快照不回。批准/驳回只能在面板里人工操作，这里没有对应工具。
+看画像的 AI 养号剧本批次：状态、主题与意图（搜索词）。persona 快照不回。批准/驳回用 approve_warmup_batch / reject_warmup_batch。
 
 *Warm-up script batches awaiting or past review (intents and search terms only).*
 
@@ -150,7 +150,7 @@ Manager 总览：应用版本、内核版本、运行中的浏览器数、画像
 
 ### `get_evolution`
 
-看自对抗进化：引擎状态、待人工批准的提案、实验战报。section 可选 status/proposals/logs/all（默认 all）。批准提案只能在面板里人工操作。
+看自对抗进化：引擎状态、待人工批准的提案、实验战报。section 可选 status/proposals/logs/all（默认 all）。批准提案用 approve_evolution_proposal，驳回用 dismiss_evolution_proposal。
 
 *Evolution state, pending proposals and logs.*
 
@@ -248,7 +248,7 @@ Manager 总览：应用版本、内核版本、运行中的浏览器数、画像
 
 无参数。
 
-## 动作与管理工具（18）
+## 动作与管理工具（22）
 
 需要 `full` 档（令牌范围 `control`）
 
@@ -381,7 +381,7 @@ Manager 总览：应用版本、内核版本、运行中的浏览器数、画像
 | 参数 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `name` | string | 是 | 画像名称（只用来自己识别） |
-| `platform` | windows / macos / linux |  | 设备系统 |
+| `platform` | windows / macos / linux |  | 设备系统；新建时不填就用本机系统（本地版只能启动和本机同系统的画像） |
 | `group_name` | string |  | 分组名称（先用 list_groups 查；没有就先 create_group） |
 | `proxy_id` | string |  | list_proxies 里的 proxy_id；不填表示不改/直连 |
 | `device_profile` | string |  | 设备模板 id（list_device_templates 查） |
@@ -391,10 +391,20 @@ Manager 总览：应用版本、内核版本、运行中的浏览器数、画像
 | `startup_urls` | array<string> |  | 启动时自动打开的 http/https 网址 |
 | `color_scheme` | light / dark / no-preference |  |  |
 | `tags` | array<string> |  | 标签（文字） |
+| `notes` | string |  | 备注（自由文本） |
+| `warmup_persona` | string |  | 养号人设（一句话） |
+| `cookies_json` | string |  | 要导入的 Cookie（JSON 数组字符串）；环境在运行时请用 browser_cookies |
+| `proxy` | string |  | 直接写代理地址，如 socks5://user:pass@host:port；想复用代理库里的就用 proxy_id |
+| `launch_args` | array<string> |  | 额外的浏览器启动参数 |
+| `headless` | boolean |  |  |
+| `humanize` | boolean |  | 拟人化输入/鼠标 |
+| `human_preset` | default / careful |  |  |
+| `geoip` | boolean |  | 时区/语言是否跟随出口 IP |
+| `auto_launch` | boolean |  | Manager 启动时自动打开 |
 
 ### `update_profile`
 
-修改画像的名称、分组、代理、设备系统/模板、时区、语言、账号平台、启动网址、颜色模式或标签。只给要改的字段。运行中的画像改动要先 stop_profile。不能改 Cookie、备注。
+修改画像的名称、分组、代理、设备系统/模板、时区、语言、账号平台、启动网址、颜色模式或标签。只给要改的字段。运行中的画像改动要先 stop_profile。备注、养号人设、Cookie（cookies_json）、直连代理地址也能改。
 
 *Change a profile's name, group, proxy, platform, device template, timezone, locale, startup URLs, color scheme or tags. Stop it first if it is running.*
 
@@ -404,7 +414,7 @@ Manager 总览：应用版本、内核版本、运行中的浏览器数、画像
 | --- | --- | --- | --- |
 | `profile_id` | string | 是 | 画像 id（先用 list_profiles 查） |
 | `name` | string |  | 画像名称（只用来自己识别） |
-| `platform` | windows / macos / linux |  | 设备系统 |
+| `platform` | windows / macos / linux |  | 设备系统；新建时不填就用本机系统（本地版只能启动和本机同系统的画像） |
 | `group_name` | string |  | 分组名称（先用 list_groups 查；没有就先 create_group） |
 | `proxy_id` | string |  | list_proxies 里的 proxy_id；不填表示不改/直连 |
 | `device_profile` | string |  | 设备模板 id（list_device_templates 查） |
@@ -414,6 +424,16 @@ Manager 总览：应用版本、内核版本、运行中的浏览器数、画像
 | `startup_urls` | array<string> |  | 启动时自动打开的 http/https 网址 |
 | `color_scheme` | light / dark / no-preference |  |  |
 | `tags` | array<string> |  | 标签（文字） |
+| `notes` | string |  | 备注（自由文本） |
+| `warmup_persona` | string |  | 养号人设（一句话） |
+| `cookies_json` | string |  | 要导入的 Cookie（JSON 数组字符串）；环境在运行时请用 browser_cookies |
+| `proxy` | string |  | 直接写代理地址，如 socks5://user:pass@host:port；想复用代理库里的就用 proxy_id |
+| `launch_args` | array<string> |  | 额外的浏览器启动参数 |
+| `headless` | boolean |  |  |
+| `humanize` | boolean |  | 拟人化输入/鼠标 |
+| `human_preset` | default / careful |  |  |
+| `geoip` | boolean |  | 时区/语言是否跟随出口 IP |
+| `auto_launch` | boolean |  | Manager 启动时自动打开 |
 
 ### `apply_device_template`
 
@@ -468,9 +488,9 @@ Manager 总览：应用版本、内核版本、运行中的浏览器数、画像
 
 ### `restore_profile`
 
-把回收站里的画像恢复回来（先用 list_trash 查 id）。永久删除只能由用户在面板里做，没有对应的工具。
+把回收站里的画像恢复回来（先用 list_trash 查 id）。
 
-*Restore a profile from the recycle bin. Permanent deletion is human-only.*
+*Restore a profile from the recycle bin.*
 
 触发词：恢复环境,还原回收站,找回已删除,restore profile,undelete
 
@@ -501,9 +521,59 @@ Manager 总览：应用版本、内核版本、运行中的浏览器数、画像
 
 无参数。
 
-## 浏览器与页面工具（21）
+### `approve_warmup_batch`
 
-需要 `automation` 档（令牌范围 `cdp`）；能读到页面里的 Cookie，只在需要时开
+批准一批 AI 养号剧本，之后 run_warmup 才会用它们。
+
+*Approve a batch of AI warm-up scripts so run_warmup can use them.*
+
+触发词：批准养号剧本,通过剧本,approve warmup
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `profile_id` | string | 是 | 画像 id |
+| `batch_id` | string | 是 | list_warmup_scripts 里的批次 id |
+
+### `reject_warmup_batch`
+
+驳回一批 AI 养号剧本。
+
+*Reject a batch of AI warm-up scripts.*
+
+触发词：驳回养号剧本,拒绝剧本,reject warmup
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `profile_id` | string | 是 | 画像 id |
+| `batch_id` | string | 是 | list_warmup_scripts 里的批次 id |
+
+### `approve_evolution_proposal`
+
+批准一条自对抗进化提案，让它生效。
+
+*Approve a pending self-adversarial evolution proposal.*
+
+触发词：批准进化提案,通过提案,approve proposal
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `proposal_id` | string | 是 | get_evolution 里待批准的提案 id |
+
+### `dismiss_evolution_proposal`
+
+驳回一条自对抗进化提案。
+
+*Dismiss a pending evolution proposal.*
+
+触发词：驳回进化提案,忽略提案,dismiss proposal
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `proposal_id` | string | 是 | get_evolution 里待批准的提案 id |
+
+## 浏览器、页面与删除工具（28）
+
+需要 `automation` 档（令牌范围 `cdp`，默认档）；含 Cookie 读写、执行 JS、删除画像
 
 ### `get_cdp_endpoint`
 
@@ -801,3 +871,99 @@ Manager 总览：应用版本、内核版本、运行中的浏览器数、画像
 | `entry_id` | string | 是 | 条目 id |
 | `status` | new / registered / verified / failed |  |  |
 | `notes` | string |  | 可选备注（不要写密码） |
+
+### `delete_profile`
+
+删除画像：先停掉浏览器，再放进回收站（7 天内可用 restore_profile 恢复）。要彻底删掉用 purge_profile。
+
+*Stop the profile and move it to the recycle bin (restorable for 7 days).*
+
+触发词：删除环境,删掉画像,放进回收站,delete profile,remove profile,trash
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `profile_id` | string | 是 | 画像 id（先用 list_profiles 查） |
+
+### `purge_profile`
+
+彻底删除画像：数据库记录和整个用户数据目录（登录态、Cookie）一并清除，不可恢复。普通删除用 delete_profile。
+
+*Permanently delete a profile and its whole data directory. Not recoverable.*
+
+触发词：彻底删除,永久删除,清除数据,purge profile,delete forever,wipe
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `profile_id` | string | 是 | 画像 id（先用 list_profiles 查） |
+
+### `browser_hover`
+
+把鼠标移到元素上（弹出菜单、悬浮提示）。ref 同 browser_click。
+
+*Move the mouse over an element (menus, tooltips).*
+
+触发词：悬停,鼠标移上去,hover
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `profile` | string | 是 | 画像 id 或名称（需已用 open_browser 以 debug 模式打开） |
+| `ref` | string | 是 | 快照 ref（如 e3）或语义选择器 |
+
+### `browser_drag`
+
+按住 ref 元素拖到 to_ref 元素上松开（滑块、排序、拖放上传区）。
+
+*Drag one element onto another (sliders, sorting, drop zones).*
+
+触发词：拖拽,拖动,滑块,drag and drop,drag
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `profile` | string | 是 | 画像 id 或名称（需已用 open_browser 以 debug 模式打开） |
+| `ref` | string | 是 | 起点：快照 ref 或语义选择器 |
+| `to_ref` | string | 是 | 终点：快照 ref 或语义选择器 |
+
+### `browser_get_html`
+
+读页面（或某个元素）的原始 HTML，分页返回（offset/max_chars，看 next_offset）。找不到元素、要看隐藏属性时用；平时读 browser_snapshot 更省。
+
+*Raw HTML of the page or one element, paged. Prefer browser_snapshot for reading.*
+
+触发词：读 HTML,页面源码,看源码,get html,page source
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `profile` | string | 是 | 画像 id 或名称（需已用 open_browser 以 debug 模式打开） |
+| `ref` | string |  | 可选：只读这个元素的 outerHTML |
+| `offset` | integer |  | （默认 0） |
+| `max_chars` | integer |  | 100~20000（默认 6000） |
+
+### `browser_evaluate`
+
+在页面里执行 JavaScript 并返回结果（可 JSON 化的值，超过 2 万字符会截断）。script 写表达式或箭头函数，如 () => document.title；给了 ref 时函数的参数就是那个元素，如 el => el.value。
+
+*Run JavaScript in the page and return its JSON result; with ref the function receives that element.*
+
+触发词：执行脚本,执行 JS,运行 JavaScript,evaluate,run script
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `profile` | string | 是 | 画像 id 或名称（需已用 open_browser 以 debug 模式打开） |
+| `script` | string | 是 | JS 表达式或箭头函数 |
+| `ref` | string |  | 可选：函数的第一个参数是这个元素 |
+
+### `browser_cookies`
+
+读、写或清空这个画像的 Cookie（整个浏览器，不是单个标签页）。action=get 可用 domain 过滤或 urls 限定；set 传 cookies 数组（每项 name、value，加 url 或 domain+path）；clear 清空全部。
+
+*Read, write or clear the profile's cookies (get / set / clear).*
+
+触发词：读 Cookie,导出 Cookie,导入 Cookie,清 Cookie,cookies,export cookies,import cookies
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `profile` | string | 是 | 画像 id 或名称（需已用 open_browser 以 debug 模式打开） |
+| `action` | get / set / clear |  | （默认 get） |
+| `domain` | string |  | get：只返回域名包含它的 Cookie |
+| `urls` | array<string> |  | get：只返回对这些网址生效的 Cookie |
+| `cookies` | array<object> |  | set：要写入的 Cookie |

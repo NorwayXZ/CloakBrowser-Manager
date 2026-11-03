@@ -2063,11 +2063,12 @@ async def wait_for_mail(body: MailWaitRequest):
 # ── MCP bridge (stdio MCP 接口） ─────────────────────────────────────────────
 # The bridge (backend/mcp_server.py) is a separate process the user's MCP
 # client launches; it reads its mode here and reports every tool call to the
-# audit endpoint below. No tool ever approves proposals or touches cookies.
+# audit endpoint below. The default tier is the unrestricted one: this is a
+# single-user local tool, so agents get everything unless the user narrows it.
 
 MCP_MODE_SETTING_KEY = "mcp.mode"
 MCP_MODES = ("off", "read-only", "full", "automation")
-MCP_DEFAULT_MODE = "read-only"
+MCP_DEFAULT_MODE = "automation"
 
 
 def _mcp_mode() -> str:

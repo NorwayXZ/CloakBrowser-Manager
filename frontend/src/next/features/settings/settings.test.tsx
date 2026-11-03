@@ -344,12 +344,12 @@ describe("settings › API 与 MCP", () => {
   }
 
   beforeEach(() => {
-    mode = "read-only";
+    mode = "automation";
   });
 
   it("shows the current mode and saves a change", async () => {
     const { fetchMock } = await open("/settings/agent", agentRoutes(), "AI agent 权限");
-    expect(await screen.findByRole("radio", { name: "只读（默认）" })).toBeChecked();
+    expect(await screen.findByRole("radio", { name: "全部开放（默认）" })).toBeChecked();
     fireEvent.click(screen.getByRole("radio", { name: "可启停" }));
     expect(await screen.findByText("AI agent 权限已保存")).toBeInTheDocument();
     expect(screen.getByText(/MCP 客户端需要重启/)).toBeInTheDocument();
@@ -358,25 +358,21 @@ describe("settings › API 与 MCP", () => {
     await expectNoAxeViolations(document.body);
   });
 
-  it("warns that page control can read cookies and does nothing when declined", async () => {
+  it("goes back to everything open in one click, with no confirmation or warning", async () => {
+    mode = "read-only";
     const { fetchMock } = await open("/settings/agent", agentRoutes(), "AI agent 权限");
-    fireEvent.click(await screen.findByRole("radio", { name: "可操作页面" }));
-    expect(await within(await screen.findByRole("dialog")).findByText(/全部 Cookie/)).toBeInTheDocument();
-    await cancelDialog();
-    expect(bodies(fetchMock, "PUT", "/api/settings/mcp")).toEqual([]);
-    expect(screen.getByRole("radio", { name: "只读（默认）" })).toBeChecked();
-
-    fireEvent.click(screen.getByRole("radio", { name: "可操作页面" }));
-    await confirmWith("确定开启");
-    expect(await screen.findByText(/当前允许 AI 操作页面/)).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("radio", { name: "全部开放（默认）" }));
+    expect(await screen.findByText("AI agent 权限已保存")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(bodies(fetchMock, "PUT", "/api/settings/mcp")).toEqual([{ mode: "automation" }]);
+    expect(screen.queryByText(/当前允许 AI 操作页面/)).not.toBeInTheDocument();
   });
 
   it("shows why saving the mode failed", async () => {
     await open("/settings/agent", agentRoutes([{ method: "PUT", path: "/api/settings/mcp", status: 500, respond: { detail: "写不进去" } }]), "AI agent 权限");
     fireEvent.click(await screen.findByRole("radio", { name: "关闭" }));
     expect(await screen.findByText("写不进去")).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: "只读（默认）" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "全部开放（默认）" })).toBeChecked();
   });
 
   it("gives a copyable command per client, filled with this Manager's address", async () => {
