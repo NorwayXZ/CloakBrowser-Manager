@@ -203,3 +203,24 @@ export function seedDeviceLabel(profile: { seed_device?: { [key: string]: unknow
   const label = profile?.seed_device?.label;
   return typeof label === "string" && label ? label : null;
 }
+
+export function platformLabel(profile: Pick<Profile, "platform">): string {
+  return profile.platform === "macos" ? "macOS" : profile.platform === "windows" ? "Windows" : profile.platform;
+}
+
+/** The device line of the list: the seed's device, else the chosen model, else the OS alone. */
+export function deviceText(profile: Profile): string {
+  if (profile.seed_device?.applies) return seedDeviceLabel(profile) ?? "首次打开后显示设备";
+  return profile.device_profile || platformLabel(profile);
+}
+
+/** A profile following the display launches with this computer's screen, not the size stored with it. */
+export function screenText(profile: Profile): string {
+  const followsDisplay = profile.browser_engine !== "system_chrome" && (profile.fingerprint_options?.screen ?? "real") === "real" && profile.platform === "macos";
+  return followsDisplay ? "跟随电脑屏幕" : `${profile.screen_width} × ${profile.screen_height}`;
+}
+
+export function timezoneText(profile: Pick<Profile, "geoip" | "timezone" | "locale">): string {
+  if (profile.geoip) return "跟随出口 IP";
+  return [profile.timezone, profile.locale].filter(Boolean).join(" · ") || "未设置";
+}
