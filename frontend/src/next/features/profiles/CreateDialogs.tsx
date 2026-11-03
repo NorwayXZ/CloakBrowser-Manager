@@ -284,7 +284,7 @@ function SentencePreview({
 
   const chip = (active: boolean) =>
     cn(
-      "rounded-full border px-2.5 py-1 text-xs transition-colors duration-fast",
+      "rounded border px-2.5 py-1 text-xs transition-colors duration-fast",
       active ? "border-accent bg-accent-soft text-accent" : "border-border-strong bg-surface text-fg-2 hover:bg-surface-2",
     );
 

@@ -99,7 +99,7 @@ function LinkabilityTab() {
               <ul className="mt-2 flex flex-wrap gap-1.5" aria-label="这组环境">
                 {cluster.profiles.map((profile) => (
                   <li key={profile.id}>
-                    <Link to={`/profiles?p=${encodeURIComponent(profile.id)}`} className="inline-flex rounded-full bg-surface-2 px-2.5 py-1 text-xs font-medium text-fg hover:bg-accent-soft hover:text-accent">
+                    <Link to={`/profiles?p=${encodeURIComponent(profile.id)}`} className="inline-flex rounded bg-surface-2 px-2.5 py-1 text-xs font-medium text-fg hover:bg-accent-soft hover:text-accent">
                       {profile.name}
                     </Link>
                   </li>
