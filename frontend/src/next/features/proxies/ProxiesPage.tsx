@@ -31,7 +31,6 @@ import { editorApi, editorKeys, useProxyPresets } from "../editor/api";
 import { IpQualityPanel } from "../editor/sections/ProxySection";
 import type { ProxyPreset, ProxyTestResult } from "../editor/types";
 import { ProxyIpActions } from "./ProxyIpActions";
-import { RelayNodesPanel } from "./RelayNodesPanel";
 import { RelayRouteFields } from "./RelayRouteFields";
 import { formatDateTime } from "../profiles/format";
 import { buildDirectProxyUrl, isDirectProxyMode, LINK_PROXY_MODES, parseProxyBatchLine, type ProxyMode } from "./proxyInput";
@@ -60,14 +59,6 @@ function message(error: unknown) {
 }
 
 export function ProxiesPage() {
-  const [tab, setTab] = useState("proxies");
-  return <div className="pt-2"><Tabs label="代理分类" value={tab} onValueChange={setTab} tabs={[
-    { value: "proxies", label: "出口代理", content: <ExitProxiesPage /> },
-    { value: "relays", label: "中转服务器", content: <RelayNodesPanel /> },
-  ]} /></div>;
-}
-
-function ExitProxiesPage() {
   const presets = useProxyPresets();
   const queryClient = useQueryClient();
   const toast = useToast();
