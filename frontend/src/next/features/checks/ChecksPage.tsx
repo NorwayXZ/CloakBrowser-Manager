@@ -22,7 +22,7 @@ export function ChecksPage() {
   return (
     <div className="flex flex-col gap-5 pb-8 pt-2">
       <PageHeader title="检测" description="用公开检测网站验收环境，在克隆上验证修复，找出会被关联到一起的环境。" />
-      <nav aria-label="检测分类" className="glass flex w-fit max-w-full gap-1 overflow-x-auto rounded-full p-1.5">
+      <nav aria-label="检测分类" className="flex max-w-full gap-6 overflow-x-auto border-b border-border">
         {tabs.map((item) => (
           <NavLink
             key={item.id}
@@ -30,8 +30,8 @@ export function ChecksPage() {
             end
             aria-current={tab === item.id ? "page" : undefined}
             className={cn(
-              "flex h-9 shrink-0 items-center gap-1.5 rounded-full px-5 text-sm font-medium transition-[background-color,color,box-shadow] duration-fast",
-              tab === item.id ? "bg-surface text-fg shadow-raised" : "text-fg-2 hover:text-fg",
+              "-mb-px flex h-10 shrink-0 items-center gap-1.5 border-b-2 px-0.5 text-sm font-medium transition-[color,border-color] duration-fast",
+              tab === item.id ? "border-accent text-accent" : "border-transparent text-fg-2 hover:text-fg",
             )}
           >
             {item.label}
@@ -99,7 +99,7 @@ function LinkabilityTab() {
               <ul className="mt-2 flex flex-wrap gap-1.5" aria-label="这组环境">
                 {cluster.profiles.map((profile) => (
                   <li key={profile.id}>
-                    <Link to={`/profiles?p=${encodeURIComponent(profile.id)}`} className="inline-flex rounded-full bg-surface-2 px-2.5 py-1 text-xs font-medium text-fg hover:bg-accent-soft hover:text-accent">
+                    <Link to={`/profiles?p=${encodeURIComponent(profile.id)}`} className="inline-flex rounded bg-surface-2 px-2.5 py-1 text-xs font-medium text-fg hover:bg-accent-soft hover:text-accent">
                       {profile.name}
                     </Link>
                   </li>

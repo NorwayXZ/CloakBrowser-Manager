@@ -1,10 +1,26 @@
-import { Bug, Copy, Flame, MapPin, MoreHorizontal, Pencil, Play, Square, Trash2 } from "lucide-react";
-import { useRef, type KeyboardEvent, type MouseEvent } from "react";
+import { Activity, Bug, Copy, Flame, Link2, MapPin, MonitorPlay, MoreHorizontal, Pencil, Play, RefreshCw, Square, Trash2 } from "lucide-react";
+import { lazy, Suspense, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { cn } from "../../shared/lib/cn";
 import { matchesCombo } from "../../shared/lib/hotkeys";
-import { Badge, Button, Checkbox, IconButton, Menu, MenuItem, MenuSeparator, StatusDot, Table, TD, TH, THead, TR, Tooltip } from "../../ui";
+import { Badge, Button, Checkbox, Dialog, IconButton, Menu, MenuItem, MenuSeparator, StatusDot, Table, TD, TH, THead, TR, useToast } from "../../ui";
+import { ProxyIpActions } from "../proxies/ProxyIpActions";
 import { AgentLeaseBadge } from "./AgentLeaseBadge";
-import { engineLabel, groupOf, isRunning, leaseOf, lastState, launchFailureReason, locationText, proxyHost, proxyType } from "./format";
+import {
+  deviceText,
+  engineLabel,
+  formatDateTime,
+  groupOf,
+  isRunning,
+  leaseOf,
+  lastState,
+  launchFailureReason,
+  locationText,
+  platformLabel,
+  proxyHost,
+  proxyType,
+  screenText,
+  timezoneText,
+} from "./format";
 import { NoteField } from "./NoteField";
 import type { LaunchMode, Profile } from "./types";
 
@@ -12,6 +28,7 @@ export interface RowActions {
   launch: (profile: Profile, mode: LaunchMode) => void;
   stop: (profile: Profile) => void;
   edit: (profile: Profile) => void;
+  openViewer: (profile: Profile) => void;
   duplicate: (profile: Profile) => void;
   trash: (profile: Profile) => void;
   burn: (profile: Profile) => void;
@@ -19,10 +36,13 @@ export interface RowActions {
 
 const INTERACTIVE = "button, a, input, textarea, select, [role=checkbox], [role=menuitem]";
 
+const FingerprintReportDialog = lazy(() => import("./FingerprintReportDialog").then((m) => ({ default: m.FingerprintReportDialog })));
+
 /**
- * The environment table. A row is one keyboard stop: ↑/↓ move between rows,
- * Enter opens the details, Space selects, ⌘/Ctrl+Enter opens or closes the
- * browser. Clicking a row (outside its controls) opens the details too.
+ * The environment table: each row says everything needed at a glance, and
+ * the editor holds the rest. A row is one keyboard stop: ↑/↓ move between
+ * rows, Enter (or a double click outside the controls) opens the editor,
+ * Space selects, ⌘/Ctrl+Enter opens or closes the browser.
  */
 export function ProfileTable({
   profiles,
@@ -30,10 +50,10 @@ export function ProfileTable({
   activeId,
   busy,
   showGroup,
+  showDevice,
   showNotes,
   onToggle,
   onToggleAll,
-  onOpen,
   actions,
 }: {
   profiles: Profile[];
@@ -41,12 +61,15 @@ export function ProfileTable({
   activeId: string | null;
   busy: ReadonlySet<string>;
   showGroup: boolean;
+  showDevice: boolean;
   showNotes: boolean;
   onToggle: (id: string) => void;
   onToggleAll: () => void;
-  onOpen: (id: string) => void;
   actions: RowActions;
 }) {
+  const toast = useToast();
+  const [selfCheck, setSelfCheck] = useState<Profile | null>(null);
+  const [rotating, setRotating] = useState<Profile | null>(null);
   const bodyRef = useRef<HTMLTableSectionElement>(null);
   const allSelected = profiles.length > 0 && profiles.every((p) => selected.has(p.id));
   const someSelected = !allSelected && profiles.some((p) => selected.has(p.id));
@@ -65,7 +88,7 @@ export function ProfileTable({
       else actions.launch(profile, "manual");
     } else if (event.key === "Enter") {
       event.preventDefault();
-      onOpen(profile.id);
+      actions.edit(profile);
     } else if (event.key === " ") {
       event.preventDefault();
       onToggle(profile.id);
@@ -84,20 +107,30 @@ export function ProfileTable({
     }
   };
 
-  const onRowClick = (event: MouseEvent<HTMLTableRowElement>, profile: Profile) => {
+  const onRowDoubleClick = (event: MouseEvent<HTMLTableRowElement>, profile: Profile) => {
     if ((event.target as HTMLElement).closest(INTERACTIVE)) return;
-    onOpen(profile.id);
+    actions.edit(profile);
+  };
+
+  const copyCdp = (profile: Profile) => {
+    const value = `${window.location.origin}${profile.cdp_url}`;
+    navigator.clipboard.writeText(value).then(
+      () => toast.show({ tone: "success", title: "已复制 CDP 地址", description: value }),
+      () => toast.show({ tone: "error", title: "没能复制", description: value }),
+    );
   };
 
   return (
+    <>
     <Table flat label="环境列表" className="max-h-full" minWidth={720}>
       <colgroup>
         <col className="w-10" />
         <col className="w-11" />
         <col />
         {showGroup && <col className="w-28" />}
-        <col className="w-52" />
-        <col className="w-32" />
+        <col className="w-56" />
+        {showDevice && <col className="w-60" />}
+        <col className="w-36" />
         {showNotes && <col className="w-48" />}
         <col className="w-32" />
       </colgroup>
@@ -114,6 +147,7 @@ export function ProfileTable({
           <TH>名称</TH>
           {showGroup && <TH>分组</TH>}
           <TH>出口</TH>
+          {showDevice && <TH>设备</TH>}
           <TH>状态</TH>
           {showNotes && <TH>备注</TH>}
           <TH className="text-right">操作</TH>
@@ -138,7 +172,7 @@ export function ProfileTable({
                 activeId === profile.id && !isSelected && "bg-surface-2",
               )}
               onKeyDown={(event) => onRowKeyDown(event, profile, index)}
-              onClick={(event) => onRowClick(event, profile)}
+              onDoubleClick={(event) => onRowDoubleClick(event, profile)}
             >
               <TD className="pl-3 pr-0">
                 <Checkbox aria-label={`选择「${profile.name}」`} checked={isSelected} onCheckedChange={() => onToggle(profile.id)} />
@@ -154,6 +188,15 @@ export function ProfileTable({
                 <div className="truncate text-xs text-fg-3">
                   {[engineLabel(profile), profile.account_platform].filter(Boolean).join(" · ")}
                 </div>
+                {profile.tags && profile.tags.length > 0 && (
+                  <div className="mt-0.5 flex min-w-0 gap-1 overflow-hidden">
+                    {profile.tags.map((tag) => (
+                      <Badge key={tag.tag} className="h-4 shrink-0 px-1 text-[11px]">
+                        {tag.tag}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
                 {lease && <AgentLeaseBadge profile={profile} lease={lease} />}
               </TD>
               {showGroup && (
@@ -174,18 +217,31 @@ export function ProfileTable({
                   </span>
                 </div>
               </TD>
-              <TD>
+              {showDevice && (
+                <TD className="py-2">
+                  <div className="truncate text-xs text-fg" title={deviceText(profile)}>
+                    {deviceText(profile)}
+                  </div>
+                  <div className="truncate text-xs text-fg-3" title={`时区 / 语言：${timezoneText(profile)}`}>
+                    {[platformLabel(profile), screenText(profile), timezoneText(profile) === "跟随出口 IP" ? "时区跟随 IP" : timezoneText(profile)].join(" · ")}
+                  </div>
+                </TD>
+              )}
+              <TD className="py-2">
                 {isBusy ? (
                   <StatusDot status="busy" label={running ? "正在关闭" : "正在启动"} />
                 ) : state.kind === "failed" ? (
-                  <Tooltip content={launchFailureReason(profile)}>
-                    <span tabIndex={0} className="inline-flex max-w-full rounded focus-visible:outline-offset-1">
-                      <StatusDot status="error" label={state.text} />
-                    </span>
-                  </Tooltip>
+                  <StatusDot status="error" label={state.text} />
                 ) : (
                   <StatusDot status={state.kind === "running" ? "running" : "stopped"} label={state.text} />
                 )}
+                <div className={cn("truncate text-xs", state.kind === "failed" && !isBusy ? "text-danger" : "text-fg-3")} title={state.kind === "failed" ? launchFailureReason(profile) : undefined}>
+                  {state.kind === "failed" && !isBusy
+                    ? launchFailureReason(profile)
+                    : running
+                      ? profile.launch_mode === "debug" ? "调试模式（CDP）" : "日常模式"
+                      : `创建 ${formatDateTime(profile.created_at)}`}
+                </div>
               </TD>
               {showNotes && (
                 <TD className="py-1.5">
@@ -204,6 +260,21 @@ export function ProfileTable({
                     </Button>
                   )}
                   <Menu trigger={<IconButton size="sm" label={`「${profile.name}」的更多操作`} icon={<MoreHorizontal className="h-4 w-4" />} />}>
+                    {running && profile.viewer_mode === "vnc" && (
+                      <MenuItem icon={<MonitorPlay className="h-4 w-4" />} onSelect={() => actions.openViewer(profile)}>
+                        打开远程画面
+                      </MenuItem>
+                    )}
+                    {running && (
+                      <MenuItem icon={<Activity className="h-4 w-4" />} onSelect={() => setSelfCheck(profile)}>
+                        指纹自检
+                      </MenuItem>
+                    )}
+                    {running && profile.launch_mode === "debug" && profile.cdp_url && (
+                      <MenuItem icon={<Link2 className="h-4 w-4" />} onSelect={() => copyCdp(profile)}>
+                        复制 CDP 地址
+                      </MenuItem>
+                    )}
                     {!running && (
                       <MenuItem icon={<Bug className="h-4 w-4" />} onSelect={() => actions.launch(profile, "debug")} disabled={isBusy}>
                         调试启动（开启 CDP）
@@ -212,6 +283,11 @@ export function ProfileTable({
                     <MenuItem icon={<Pencil className="h-4 w-4" />} onSelect={() => actions.edit(profile)}>
                       编辑
                     </MenuItem>
+                    {profile.proxy?.toLowerCase().startsWith("socks5://") && (
+                      <MenuItem icon={<RefreshCw className="h-4 w-4" />} onSelect={() => setRotating(profile)}>
+                        一键切换 IP
+                      </MenuItem>
+                    )}
                     <MenuItem icon={<Copy className="h-4 w-4" />} onSelect={() => actions.duplicate(profile)}>
                       复制
                     </MenuItem>
@@ -232,5 +308,22 @@ export function ProfileTable({
         })}
       </tbody>
     </Table>
+    {selfCheck && (
+      <Suspense fallback={null}>
+        <FingerprintReportDialog profileId={selfCheck.id} profileName={selfCheck.name} onClose={() => setSelfCheck(null)} />
+      </Suspense>
+    )}
+    {rotating && (
+      <Dialog
+        open
+        onOpenChange={(open) => !open && setRotating(null)}
+        title={`切换 IP · ${rotating.name}`}
+        description={`当前出口 ${proxyHost(rotating)}`}
+        footer={<Button onClick={() => setRotating(null)}>关闭</Button>}
+      >
+        <ProxyIpActions profileId={rotating.id} />
+      </Dialog>
+    )}
+    </>
   );
 }

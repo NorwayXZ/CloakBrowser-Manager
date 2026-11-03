@@ -123,7 +123,7 @@ describe("app shell", () => {
     expect(screen.queryByText("CloakBrowser")).not.toBeInTheDocument();
     const link = screen.getByRole("link", { name: "设置" });
     // The tooltip wrapper must not turn the link's class into function source.
-    expect(link.className).toContain("h-10");
+    expect(link.className).toContain("h-full");
     expect(link.className).not.toContain("=>");
     expect(link).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "环境" })).not.toHaveAttribute("aria-current");

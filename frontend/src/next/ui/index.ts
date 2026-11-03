@@ -1,8 +1,8 @@
 export { Button, buttonClass, IconButton, type ButtonProps, type ButtonVariant } from "./Button";
 export { ConfirmProvider, useConfirm, type ConfirmOptions } from "./Confirm";
-export { CopyField } from "./CopyField";
+export { CodeBlock, CopyField } from "./CopyField";
 export { Badge, Banner, EmptyState, ErrorState, ProgressBar, Skeleton, StatusDot, type Status, type Tone } from "./Feedback";
-export { Checkbox, FormField, Hint, Input, Segmented, Select, Switch, Textarea } from "./Form";
+export { Checkbox, FormField, FormLayoutProvider, Hint, Input, Segmented, Select, Switch, Textarea } from "./Form";
 export { Kbd } from "./Kbd";
 export { Card, KeyValueList, PageHeader, Section } from "./Layout";
 export { Dialog, Menu, MenuItem, MenuRadioGroup, MenuSeparator, Popover, Tabs } from "./Overlay";

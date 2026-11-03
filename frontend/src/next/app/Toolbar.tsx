@@ -21,48 +21,50 @@ export function Toolbar({ onShowShortcuts }: { onShowShortcuts: () => void }) {
   const compact = useMediaQuery(COMPACT_QUERY);
 
   return (
-    <header className="mx-auto flex h-20 w-full max-w-[1320px] shrink-0 items-center gap-4 px-6 lg:px-10">
-      <div className="flex min-w-0 shrink-0 items-center gap-2.5">
-        <div aria-hidden className="flex h-9 w-9 items-center justify-center rounded-[12px] bg-gradient-to-br from-accent-fill to-accent-fill-2 text-md font-bold text-accent-on shadow-raised">
-          C
+    <header className="shrink-0 border-b border-border bg-surface">
+      <div className="mx-auto flex h-14 w-full max-w-[1320px] items-center gap-4 px-6 lg:px-10">
+        <div className="flex min-w-0 shrink-0 items-center gap-2">
+          <div aria-hidden className="flex h-7 w-7 items-center justify-center rounded bg-accent-fill text-sm font-bold text-accent-on">
+            C
+          </div>
+          {!compact && <span className="text-base font-semibold tracking-tight text-fg">CloakBrowser</span>}
         </div>
-        {!compact && <span className="text-md font-semibold tracking-tight text-fg">CloakBrowser</span>}
-      </div>
 
-      <nav aria-label="页面" className="glass-strong mx-auto flex min-w-0 items-center gap-1 rounded-full p-1.5">
-        {NAV_ITEMS.map((item) => {
-          const link = (
-            <NavLink
-              to={item.path}
-              aria-label={compact ? item.label : undefined}
-              // A plain string, not NavLink's function form: the tooltip's Slot would
-              // stringify a function. NavLink sets aria-current on the active link.
-              className={cn(
-                "flex h-10 items-center justify-center gap-2 rounded-full text-sm font-medium text-fg-2 transition-[background-color,color,box-shadow] duration-fast hover:text-fg",
-                "aria-[current=page]:bg-surface aria-[current=page]:font-semibold aria-[current=page]:text-fg aria-[current=page]:shadow-raised",
-                compact ? "w-10" : "px-5",
-              )}
-            >
-              {compact && <item.icon className="h-[18px] w-[18px]" aria-hidden />}
-              {!compact && <span>{item.label}</span>}
-            </NavLink>
-          );
-          return compact ? (
-            <Tooltip key={item.path} content={item.label} shortcut={formatShortcut(`mod+${item.key}`)}>
-              {link}
-            </Tooltip>
-          ) : (
-            <span key={item.path}>{link}</span>
-          );
-        })}
-      </nav>
+        <nav aria-label="页面" className="mx-6 flex min-w-0 items-stretch gap-1 self-stretch">
+          {NAV_ITEMS.map((item) => {
+            const link = (
+              <NavLink
+                to={item.path}
+                aria-label={compact ? item.label : undefined}
+                // A plain string, not NavLink's function form: the tooltip's Slot would
+                // stringify a function. NavLink sets aria-current on the active link.
+                className={cn(
+                  "flex h-full items-center justify-center gap-2 border-b-2 border-transparent text-sm font-medium text-fg-2 transition-[color,border-color] duration-fast hover:text-fg",
+                  "aria-[current=page]:border-accent aria-[current=page]:font-semibold aria-[current=page]:text-accent",
+                  compact ? "w-10" : "px-4",
+                )}
+              >
+                {compact && <item.icon className="h-[18px] w-[18px]" aria-hidden />}
+                {!compact && <span>{item.label}</span>}
+              </NavLink>
+            );
+            return compact ? (
+              <Tooltip key={item.path} content={item.label} shortcut={formatShortcut(`mod+${item.key}`)}>
+                {link}
+              </Tooltip>
+            ) : (
+              <span key={item.path} className="flex">{link}</span>
+            );
+          })}
+        </nav>
 
-      <div className="flex shrink-0 items-center gap-1.5">
-        <UpdateIndicator />
-        <AutomationIndicator />
-        <RunningIndicator />
-        <ThemeMenu />
-        <IconButton label="快捷键" shortcut="?" icon={<Keyboard className="h-4 w-4" />} onClick={onShowShortcuts} />
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          <UpdateIndicator />
+          <AutomationIndicator />
+          <RunningIndicator />
+          <ThemeMenu />
+          <IconButton label="快捷键" shortcut="?" icon={<Keyboard className="h-4 w-4" />} onClick={onShowShortcuts} />
+        </div>
       </div>
     </header>
   );

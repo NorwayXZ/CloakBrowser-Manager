@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { KeyRound, RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "../../shared/lib/cn";
-import { Badge, Banner, Button, CopyField, ErrorState, FormField, IconButton, Input, Section, Select, Skeleton, Table, TD, TH, THead, TR, useConfirm, useToast } from "../../ui";
+import { Badge, Banner, Button, CodeBlock, CopyField, ErrorState, FormField, IconButton, Input, Section, Select, Skeleton, Table, TD, TH, THead, Tabs, TR, useConfirm, useToast } from "../../ui";
 import {
   message,
   settingsApi,
@@ -36,11 +36,13 @@ function formatTime(value: string | number): string {
 
 /** 设置 › AI 接入: what AI agents may do, the addresses they connect to, their tokens and what they did. */
 export function AgentAccessSection() {
+  // The token just issued: shown once, and used to fill the connection commands.
+  const [issued, setIssued] = useState<AgentTokenCreated | null>(null);
   return (
     <div className="flex flex-col gap-6">
       <PermissionSection />
-      <AddressSection />
-      <TokenSection />
+      <TokenSection created={issued} onCreated={setIssued} />
+      <ConnectSection token={issued?.token ?? null} />
       <AuditSection />
     </div>
   );
@@ -145,39 +147,116 @@ function PermissionSection() {
   );
 }
 
-function AddressSection() {
-  const origin = window.location.origin;
-  const rows: { label: string; value: string }[] = [
-    { label: "HTTP MCP", value: `${origin}/api/agent/mcp` },
-    { label: "工具接口", value: `${origin}/api/agent/tools?format=openai` },
-    { label: "使用指南", value: `${origin}/api/agent/guide` },
-    { label: "stdio MCP", value: "python -m backend.mcp_server" },
-    { label: "命令行", value: "./bin/cloak open <环境名称>" },
+const TOKEN_PLACEHOLDER = "<你的令牌>";
+
+function connectionSnippets(origin: string, token: string | null, enforced: boolean) {
+  const mcpUrl = `${origin}/api/agent/mcp`;
+  const bearer = token ?? TOKEN_PLACEHOLDER;
+  return [
+    {
+      id: "claude-code",
+      label: "Claude Code",
+      note: "在终端里执行一次即可。",
+      code: enforced
+        ? `claude mcp add --transport http cloakbrowser-manager ${mcpUrl} \\\n  --header "Authorization: Bearer ${bearer}"`
+        : `claude mcp add --transport http cloakbrowser-manager ${mcpUrl}`,
+    },
+    {
+      id: "codex",
+      label: "Codex",
+      note: enforced ? "写进 ~/.codex/config.toml，令牌放在环境变量里。" : "写进 ~/.codex/config.toml。",
+      code: enforced
+        ? `[mcp_servers.cloakbrowser-manager]\nurl = "${mcpUrl}"\nbearer_token_env_var = "CLOAK_AGENT_TOKEN"\n\n# 终端里：\nexport CLOAK_AGENT_TOKEN=${bearer}`
+        : `[mcp_servers.cloakbrowser-manager]\nurl = "${mcpUrl}"`,
+    },
+    {
+      id: "json",
+      label: "Cursor / 通用 JSON",
+      note: "Cursor 的 mcp.json，或任何支持 streamable HTTP 的 MCP 客户端。",
+      code: JSON.stringify(
+        { mcpServers: { "cloakbrowser-manager": { url: mcpUrl, ...(enforced ? { headers: { Authorization: `Bearer ${bearer}` } } : {}) } } },
+        null,
+        2,
+      ),
+    },
+    {
+      id: "rest",
+      label: "命令行 / REST",
+      note: "不支持 MCP 的 AI 工具，用函数调用或 shell 即可。",
+      code: [
+        `# 当前档位下可用的工具（OpenAI 函数格式）`,
+        `curl -s ${origin}/api/agent/tools?format=openai${enforced ? ` \\\n  -H "Authorization: Bearer ${bearer}"` : ""}`,
+        ``,
+        `# 调用一个工具`,
+        `curl -s -X POST ${origin}/api/agent/tools/list_profiles \\\n  -H "Content-Type: application/json"${enforced ? ` \\\n  -H "Authorization: Bearer ${bearer}"` : ""} -d '{}'`,
+        ``,
+        `# 仓库里的命令行`,
+        `./bin/cloak profiles --json`,
+      ].join("\n"),
+    },
   ];
+}
+
+function ConnectSection({ token }: { token: string | null }) {
+  const tokens = useAgentTokens();
+  const origin = window.location.origin;
+  const enforced = tokens.data?.enforced ?? false;
+  const snippets = connectionSnippets(origin, token, enforced);
+  const [snippetTab, setSnippetTab] = useState("claude-code");
   return (
-    <Section id="agent-addresses" title="接入地址" description="Codex、Claude Desktop 等客户端的具体配置写法见 docs/AGENT.md 和 docs/MCP.md。">
-      <dl className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-[6rem_minmax(0,1fr)] sm:items-center">
-        {rows.map((row) => (
-          <div key={row.label} className="contents">
-            <dt className="text-xs text-fg-3">{row.label}</dt>
-            <dd className="m-0 min-w-0">
-              <CopyField label={row.label} value={row.value} />
-            </dd>
-          </div>
-        ))}
-      </dl>
+    <Section
+      id="agent-connect"
+      title="连接 AI 工具"
+      description="选一个客户端，复制下面的命令。地址已经填好；开启了登录保护时，先在上面签发令牌，命令里的令牌会自动替换。"
+    >
+      <div className="flex flex-col gap-5">
+        {enforced && !token && (
+          <Banner tone="info">命令里的「{TOKEN_PLACEHOLDER}」要换成令牌。令牌只在签发那一刻显示，刚签发的会自动填进来。</Banner>
+        )}
+        <Tabs
+          label="选择 AI 工具"
+          value={snippetTab}
+          onValueChange={setSnippetTab}
+          tabs={snippets.map((item) => ({
+            value: item.id,
+            label: item.label,
+            content: (
+              <div className="flex flex-col gap-2">
+                <p className="text-sm text-fg-2">{item.note}</p>
+                <CodeBlock label={`${item.label}配置`} value={item.code} />
+              </div>
+            ),
+          }))}
+        />
+        <div className="flex flex-col gap-2">
+          <h3 className="m-0 text-base font-semibold text-fg">技能包（推荐）</h3>
+          <p className="m-0 text-sm text-fg-2">
+            让 AI 先学会怎么用再动手：什么时候用哪个工具、标准流程、红线、错误怎么处理。支持 Claude Code、Codex、Cursor 等。
+          </p>
+          <CodeBlock label="技能包安装命令" value={`npx skills add https://github.com/NorwayXZ/CloakBrowser-Manager --skill cloakbrowser-manager`} />
+        </div>
+        <dl className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-[6rem_minmax(0,1fr)] sm:items-center">
+          <dt className="text-xs text-fg-3">HTTP MCP</dt>
+          <dd className="m-0 min-w-0">
+            <CopyField label="HTTP MCP 地址" value={`${origin}/api/agent/mcp`} />
+          </dd>
+          <dt className="text-xs text-fg-3">使用指南</dt>
+          <dd className="m-0 min-w-0">
+            <CopyField label="使用指南地址" value={`${origin}/api/agent/guide`} />
+          </dd>
+        </dl>
+      </div>
     </Section>
   );
 }
 
-function TokenSection() {
+function TokenSection({ created, onCreated }: { created: AgentTokenCreated | null; onCreated: (token: AgentTokenCreated | null) => void }) {
   const tokens = useAgentTokens();
   const queryClient = useQueryClient();
   const confirm = useConfirm();
   const toast = useToast();
   const [name, setName] = useState("");
   const [scope, setScope] = useState<AgentTokenScope>("control");
-  const [created, setCreated] = useState<AgentTokenCreated | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -190,7 +269,7 @@ function TokenSection() {
     setError(null);
     try {
       const result = await settingsApi.createAgentToken(trimmed, scope);
-      setCreated(result);
+      onCreated(result);
       setName("");
       await refresh();
     } catch (err) {
@@ -212,7 +291,7 @@ function TokenSection() {
     setError(null);
     try {
       await settingsApi.revokeAgentToken(token.id);
-      if (created?.record.id === token.id) setCreated(null);
+      if (created?.record.id === token.id) onCreated(null);
       await refresh();
       toast.show({ tone: "success", title: `已撤销「${token.name}」` });
     } catch (err) {
@@ -253,7 +332,7 @@ function TokenSection() {
             tone="success"
             title={`「${created.record.name}」的 token 只显示这一次，请立刻保存`}
             action={
-              <Button size="sm" onClick={() => setCreated(null)}>
+              <Button size="sm" onClick={() => onCreated(null)}>
                 我已保存，关闭
               </Button>
             }

@@ -45,17 +45,6 @@ def run(page: Page, base: str) -> None:
     expect(page.get_by_role("navigation", name="分组").get_by_role("button", name="冒烟测试组")).to_be_visible()
     assert any(g["name"] == "冒烟测试组" for g in call(base, "GET", "/api/groups"))
 
-    step("save a note from the details panel")
-    page.get_by_role("row", name="Etsy UK").locator("td").nth(2).click()
-    panel = page.get_by_role("complementary", name="Etsy UK")
-    note = panel.get_by_role("textbox", name="「Etsy UK」的备注")
-    note.fill("冒烟测试备注")
-    note.press("Enter")
-    expect(panel.get_by_label("正在保存备注")).to_have_count(0)
-    page.wait_for_timeout(500)
-    assert profiles_by_name(base)["Etsy UK"]["notes"] == "冒烟测试备注"
-    page.keyboard.press("Escape")
-
     step("copy an environment")
     page.get_by_role("button", name="「Etsy UK」的更多操作").click()
     page.get_by_role("menuitem", name="复制").click()
@@ -81,22 +70,27 @@ def run(page: Page, base: str) -> None:
     expect(preview.get_by_text("关键词解析", exact=True)).to_be_visible()
     preview.get_by_label("名称", exact=False).first.fill("冒烟测试东京号")
     preview.get_by_role("button", name="确认创建").click()
-    expect(page.get_by_role("complementary", name="冒烟测试东京号")).to_be_visible()
+    page.goto(base + "/profiles")
+    expect(page.get_by_role("row", name="冒烟测试东京号")).to_be_visible()
     made = profiles_by_name(base)["冒烟测试东京号"]
     assert made["timezone"] == "Asia/Tokyo", made["timezone"]
 
     step("disposable identity, then burn it")
     page.keyboard.press("Escape")
+    before = set(profiles_by_name(base))
     page.get_by_role("button", name="新建", exact=True).click()
     page.get_by_role("menuitem", name="一次性身份").click()
     dialog = page.get_by_role("dialog", name="新建一次性身份")
     dialog.get_by_label("地区").select_option("GB")
     dialog.get_by_role("button", name="创建").click()
-    panel = page.locator("aside[aria-labelledby=profile-drawer-title]")
-    expect(panel.get_by_text("一次性", exact=True)).to_be_visible()
-    name = panel.locator("#profile-drawer-title").inner_text()
+    page.goto(base + "/profiles")
+    created = sorted(set(profiles_by_name(base)) - before)
+    assert len(created) == 1, created
+    name = created[0]
+    expect(page.get_by_role("row", name=name)).to_be_visible()
     assert profiles_by_name(base)[name]["timezone"] == "Europe/London"
-    panel.get_by_role("button", name="永久删除").click()
+    page.get_by_role("button", name=f"「{name}」的更多操作").click()
+    page.get_by_role("menuitem", name="永久删除").click()
     page.get_by_role("dialog", name=f"永久删除「{name}」？").get_by_role("button", name="永久删除").click()
     expect(page.get_by_role("row", name=name)).to_have_count(0)
     assert name not in profiles_by_name(base)
@@ -114,7 +108,7 @@ def run(page: Page, base: str) -> None:
     page.get_by_label("代理账号").fill("smoke")
     page.get_by_label("代理密码").fill("p@ss word")
     page.get_by_role("button", name="创建").click()
-    expect(page.get_by_role("complementary", name="编辑器创建的环境")).to_be_visible()
+    expect(page.get_by_role("row", name="编辑器创建的环境")).to_be_visible()
     made = profiles_by_name(base)["编辑器创建的环境"]
     assert made["proxy"] == "socks5://smoke:p%40ss%20word@203.0.113.77:1080", made["proxy"]
     assert made["group_name"] == "冒烟测试组" and made["notes"] == "由新编辑页创建"
@@ -126,7 +120,7 @@ def run(page: Page, base: str) -> None:
     page.get_by_role("button", name="取消").click()
     page.get_by_role("dialog", name="放弃没保存的修改？").get_by_role("button", name="继续编辑").click()
     page.keyboard.press("ControlOrMeta+s")
-    expect(page.get_by_role("complementary", name="编辑器创建的环境")).to_be_visible()
+    expect(page.get_by_role("row", name="编辑器创建的环境")).to_be_visible()
     assert profiles_by_name(base)["编辑器创建的环境"]["notes"] == "改过的备注"
 
     step("typing stays responsive with a large cookie field")

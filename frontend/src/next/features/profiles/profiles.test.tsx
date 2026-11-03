@@ -104,8 +104,7 @@ describe("environment list", () => {
     profiles = [makeProfile({ id: "f", name: "失败号", last_exit_reason: "异常退出（代码 76）" })];
     await renderList();
     expect(within(row("失败号")).getByText("上次启动失败")).toBeInTheDocument();
-    fireEvent.click(within(row("失败号")).getByText("失败号"));
-    expect(await screen.findByText("授权并发已满，请先关闭其他防检测浏览器")).toBeInTheDocument();
+    expect(within(row("失败号")).getByText("授权并发已满，请先关闭其他防检测浏览器")).toBeInTheDocument();
   });
 
   it("searches notes, proxy and UA, and offers to clear a search that matches nothing", async () => {
@@ -170,9 +169,13 @@ describe("environment list", () => {
     expect(await screen.findByRole("row", { name: "Amazon Seller #1" })).toBeInTheDocument();
   });
 
-  it("has no accessibility violations, with the details panel open", async () => {
+  it("shows device, screen and time zone in the row, and has no accessibility violations", async () => {
+    profiles = [makeProfile({ id: "w", name: "Win 号", platform: "windows", device_profile: "Dell XPS 13", screen_width: 1920, screen_height: 1080, geoip: false, timezone: "America/New_York", locale: "en-US" }), AMAZON];
     const { container } = await renderList([], "/profiles?p=a");
-    await screen.findByRole("heading", { name: "Amazon Seller #1" });
+    expect(within(row("Win 号")).getByText("Dell XPS 13")).toBeInTheDocument();
+    expect(within(row("Win 号")).getByText("Windows · 1920 × 1080 · America/New_York · en-US")).toBeInTheDocument();
+    expect(within(row("Amazon Seller #1")).getByText("macOS · 跟随电脑屏幕 · 时区跟随 IP")).toBeInTheDocument();
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
     await expectNoAxeViolations(container);
   });
 });
@@ -223,7 +226,7 @@ describe("selection and keyboard", () => {
     await waitFor(() => expect(calls(fetchMock, "GET", /\/api\/profiles$/).length).toBeGreaterThan(before));
   });
 
-  it("moves with the arrow keys, selects with Space and opens with Enter", async () => {
+  it("moves with the arrow keys, selects with Space and edits with Enter", async () => {
     const { router } = await renderList();
     const first = row("Amazon Seller #1");
     first.focus();
@@ -232,8 +235,7 @@ describe("selection and keyboard", () => {
     fireEvent.keyDown(row("Etsy UK"), { key: " " });
     expect(screen.getByRole("checkbox", { name: "选择「Etsy UK」" })).toBeChecked();
     fireEvent.keyDown(row("Etsy UK"), { key: "Enter" });
-    expect(await screen.findByRole("heading", { name: "Etsy UK" })).toBeInTheDocument();
-    expect(router.state.location.search).toContain("p=e");
+    await waitFor(() => expect(router.state.location.pathname).toBe("/profiles/e/edit"));
   });
 
   it("focuses the search with / and ⌘/Ctrl+F", async () => {
@@ -346,8 +348,8 @@ describe("launching", () => {
   });
 });
 
-describe("details panel", () => {
-  it("shows the CDP address and runs the fingerprint self-check of a debug launch", async () => {
+describe("row details", () => {
+  it("copies the CDP address and runs the fingerprint self-check of a debug launch from the menu", async () => {
     profiles = [{ ...ETSY, status: "running", launch_mode: "debug", cdp_url: "/api/profiles/e/cdp" }];
     await renderList([
       {
@@ -362,10 +364,15 @@ describe("details panel", () => {
           raw: {},
         },
       },
-    ], "/profiles?p=e");
-    const panel = await screen.findByRole("complementary", { name: "Etsy UK" });
-    expect(within(panel).getByText(`${window.location.origin}/api/profiles/e/cdp`)).toBeInTheDocument();
-    fireEvent.click(within(panel).getByRole("button", { name: "指纹自检" }));
+    ]);
+    expect(within(row("Etsy UK")).getByText("调试模式（CDP）")).toBeInTheDocument();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    openMenu(screen.getByRole("button", { name: "「Etsy UK」的更多操作" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "复制 CDP 地址" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/api/profiles/e/cdp`));
+    openMenu(screen.getByRole("button", { name: "「Etsy UK」的更多操作" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "指纹自检" }));
     const report = await screen.findByRole("dialog", { name: "指纹自检 · Etsy UK" });
     expect(await within(report).findByText("Worker · timezone")).toBeInTheDocument();
     expect(within(report).getByText("Asia/Tokyo")).toBeInTheDocument();
@@ -376,7 +383,7 @@ describe("details panel", () => {
     let fail = false;
     const { fetchMock } = await renderList([
       { method: "PUT", path: "/api/profiles/e", status: 200, respond: (body: unknown) => (fail ? undefined : { ...ETSY, ...(body as object) }) },
-    ], "/profiles?p=e");
+    ]);
     const notes = await screen.findAllByRole("textbox", { name: "「Etsy UK」的备注" });
     const field = notes[notes.length - 1]!;
     fireEvent.focus(field);

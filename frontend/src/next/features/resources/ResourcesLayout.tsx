@@ -10,14 +10,14 @@ const TABS = [
 export function ResourcesLayout() {
   return (
     <div className="flex flex-col pt-2">
-      <nav aria-label="资源分类" className="glass flex w-fit max-w-full gap-1 overflow-x-auto rounded-full p-1.5">
+      <nav aria-label="资源分类" className="flex max-w-full gap-6 overflow-x-auto border-b border-border">
         {TABS.map((tab) => (
           <NavLink
             key={tab.to}
             to={tab.to}
             className={cn(
-              "flex h-9 shrink-0 items-center rounded-full px-5 text-sm font-medium text-fg-2 transition-[background-color,color,box-shadow] duration-fast hover:text-fg",
-              "aria-[current=page]:bg-surface aria-[current=page]:text-fg aria-[current=page]:shadow-raised",
+              "-mb-px flex h-10 shrink-0 items-center border-b-2 border-transparent px-0.5 text-sm font-medium text-fg-2 transition-[color,border-color] duration-fast hover:text-fg",
+              "aria-[current=page]:border-accent aria-[current=page]:text-accent",
             )}
           >
             {tab.label}

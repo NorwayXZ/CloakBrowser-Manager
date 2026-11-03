@@ -10,6 +10,16 @@ Manager 本体是唯一的执行者。
 
 > 给 agent 看的使用说明（概念、标准流程、禁忌、错误码）在 [AGENT.md](AGENT.md)；桥连接时也会通过 MCP `instructions` 把要点发给 agent。
 
+## 给 AI 装技能包（推荐）
+
+仓库里的 `skills/cloakbrowser-manager/` 是一份写给 AI 的技能包：什么时候该用、怎么连、标准流程、红线、错误怎么处理，加一份自动生成的工具参考。装上后 AI 先读它再动手，比只看工具列表少走弯路。
+
+```bash
+npx skills add https://github.com/NorwayXZ/CloakBrowser-Manager --skill cloakbrowser-manager
+```
+
+适用于 Claude Code、Codex、Cursor、OpenCode、Gemini CLI 等支持 Skills 的工具。工具参考由 `python scripts/gen_skill_reference.py` 生成，测试会检查它和 Manager 实际的工具一致。
+
 ## 使用前提
 
 1. **先打开 Manager**（面板后端在跑）。桥连不上 Manager 时，所有工具只会回结构化错误 `manager_unreachable`，不会假装成功。
@@ -27,7 +37,7 @@ Manager 本体是唯一的执行者。
 | `full` | 只读 14 个 + 动作 5 个（启动/关闭画像、跑检测、跑养号、跑进化）；`launch_profile` 只能 `manual` 模式 |
 | `automation` | `full` 的全部，再加浏览器工具 21 个（`open_browser`、`get_cdp_endpoint`、15 个页面工具和 4 个保险库工具），`launch_profile` 可用 `debug` 模式——这一档会把页面控制和 CDP 端点交给 agent |
 
-查看 / 修改：面板「设置 → AI 接入」页（旧界面在左侧「AI 接入」）可以直接切换（切到「可操作页面」会先弹出 Cookie 风险确认）；也可以用命令行或 API：
+查看 / 修改：面板「设置 → API 与 MCP」页（旧界面在左侧「AI 接入」）可以直接切换（切到「可操作页面」会先弹出 Cookie 风险确认）；也可以用命令行或 API：
 
 ```bash
 ./bin/cloak mode                # 查看
@@ -89,7 +99,17 @@ Codex 的配置见 [AGENT.md](AGENT.md#在-codex-里配置)（stdio 和 HTTP 两
 
 只读（14）：`manager_status`、`list_profiles`、`get_profile`、`get_profile_preflight`、`list_device_templates`、`get_linkability`、`list_site_check_reports`、`get_site_check_report`、`get_current_site_check`、`get_fingerprint_report`、`get_warmup_state`、`list_warmup_scripts`、`get_evolution`、`get_kernel_info`。
 
-动作（5，需 `full` 或 `automation`）：`launch_profile`、`stop_profile`、`run_site_check`、`run_warmup`、`run_evolution`。
+只读里还有 `list_groups`（分组和各自画像数）、`list_running`（正在运行的画像）、`list_trash`（回收站）；`list_profiles` 现在分页（默认每页 200 个，`total_pages` 大于 1 时要翻完再对“全部”做事），可按 `group_name`、`query`、`status` 筛选。
+
+动作（需 `full` 或 `automation`）：`launch_profile`、`stop_profile`、`run_site_check`、`run_warmup`、`run_evolution`，以及管理类：
+- `create_profile`、`update_profile`：新建 / 修改画像，只允许白名单字段（名称、分组、代理 `proxy_id`、系统、设备模板、时区、语言、账号平台、启动网址、颜色模式、标签）；不能写 Cookie、备注，代理账密永远不经过 agent（`proxy_id` 在 Manager 内部换成地址）。
+- `apply_device_template`、`regenerate_fingerprint`：套设备模板、换新指纹种子（账号在用的画像别换）。
+- `create_group`、`move_profiles`：新建分组、批量移组（逐个返回结果）。
+- `create_proxy`：把代理存进代理库，账密只写不读。
+- `restore_profile`：从回收站恢复。
+- `stop_all_profiles`：关掉全部正在运行的画像。
+
+每个工具的描述末尾都有「触发词 / Triggers」，列出用户常用说法（如“新建环境、add profile”），agent 据此选工具。
 
 浏览器（17，需 `automation`）：
 - `open_browser(profile)`：画像 id 或名称。确保以 `debug` 模式在跑并返回 CDP 连接信息；已经以 `debug` 在跑就直接返回（`started=false`），以 `manual` 在跑则回 `already_running`，不会替你重启。

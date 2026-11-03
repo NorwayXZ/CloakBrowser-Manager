@@ -1,18 +1,14 @@
 import { ChevronDown, Copy, Inbox, Pencil, Play, RefreshCw, Search, SearchX, Sparkles, Square, Trash2, UserRoundPlus, X } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
-import { formatShortcut, useHotkeys, useMediaQuery } from "../../shared/lib/hotkeys";
-import { Button, EmptyState, ErrorState, IconButton, Input, Kbd, Menu, MenuItem, Select, Skeleton } from "../../ui";
-import { NARROW_QUERY } from "../../app/nav";
+import { formatShortcut, useHotkeys } from "../../shared/lib/hotkeys";
+import { Button, EmptyState, ErrorState, IconButton, Input, Kbd, Menu, MenuItem, Skeleton } from "../../ui";
 import { useGroups, useProfiles } from "./api";
 import { useProfileActions } from "./actions";
-import { ALL_GROUPS, countByGroup, filterProfiles, isRunning, UNGROUPED } from "./format";
-import { GroupRail } from "./GroupRail";
+import { ALL_GROUPS, countByGroup, filterProfiles, isRunning } from "./format";
+import { GroupBar } from "./GroupBar";
 import { useLaunch } from "./launch";
-import { ProfileDrawer } from "./ProfileDrawer";
 import { ProfileTable, type RowActions } from "./ProfileTable";
-
-const WIDE_QUERY = "(min-width: 1440px)";
 
 // Only needed after a click: kept out of the first load.
 const SentenceDialog = lazy(() => import("./CreateDialogs").then((m) => ({ default: m.SentenceDialog })));
@@ -51,14 +47,11 @@ export function ProfilesPage() {
   const { duplicate, trash, burn } = useProfileActions();
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const searchRef = useRef<HTMLInputElement>(null);
-  const narrow = useMediaQuery(NARROW_QUERY);
-  const wide = useMediaQuery(WIDE_QUERY);
   const [tableRef, tableWidth] = useWidth<HTMLDivElement>();
 
   const all = useMemo(() => profiles.data ?? [], [profiles.data]);
   const visible = useMemo(() => filterProfiles(all, query, group), [all, query, group]);
   const counts = useMemo(() => countByGroup(all), [all]);
-  const active = activeId ? all.find((p) => p.id === activeId) ?? null : null;
   const chosen = useMemo(() => all.filter((p) => selected.has(p.id)), [all, selected]);
   const runningCount = all.filter(isRunning).length;
 
@@ -103,21 +96,14 @@ export function ProfilesPage() {
       return next;
     });
 
-  const open = (id: string | null) => setParam("p", id);
-
   const actions: RowActions = {
     launch: (profile, mode) => void launch([profile], mode),
     stop: (profile) => void stop([profile]),
     edit: (profile) => navigate(`/profiles/${profile.id}/edit`),
+    openViewer: (profile) => navigate(`/profiles/${profile.id}/viewer`),
     duplicate: (profile) => void duplicate([profile]),
-    trash: (profile) =>
-      void trash([profile]).then((done) => {
-        if (done && activeId === profile.id) open(null);
-      }),
-    burn: (profile) =>
-      void burn(profile).then((done) => {
-        if (done && activeId === profile.id) open(null);
-      }),
+    trash: (profile) => void trash([profile]),
+    burn: (profile) => void burn(profile),
   };
 
   useHotkeys([
@@ -128,14 +114,16 @@ export function ProfilesPage() {
       combo: "escape",
       handler: () => {
         if (overlayOpen()) return;
-        if (activeId) open(null);
+        if (activeId) setParam("p", null);
         else if (selected.size) setSelected(new Set());
       },
     },
   ]);
 
-  const showNotes = tableWidth === 0 || tableWidth >= 900;
-  const showGroup = group === ALL_GROUPS && (tableWidth === 0 || tableWidth >= 1040);
+  // Columns join as the window widens; 0 is jsdom, which shows everything.
+  const showDevice = tableWidth === 0 || tableWidth >= 960;
+  const showNotes = tableWidth === 0 || tableWidth >= 1160;
+  const showGroup = group === ALL_GROUPS && (tableWidth === 0 || tableWidth >= 1280);
   const filtered = query.trim() !== "" || group !== ALL_GROUPS;
 
   return (
@@ -170,6 +158,8 @@ export function ProfilesPage() {
               </Menu>
             </div>
           </div>
+
+          <GroupBar groups={groups.data ?? []} loading={groups.isPending} counts={counts} total={all.length} value={group} onChange={(value) => setParam("g", value === ALL_GROUPS ? null : value)} />
 
           {selected.size > 0 ? (
             <div role="toolbar" aria-label="批量操作" className="flex min-h-10 flex-wrap items-center gap-2 rounded-md border border-accent/40 bg-accent-soft px-3 py-1">
@@ -225,26 +215,11 @@ export function ProfilesPage() {
                   <Kbd>/</Kbd>
                 </span>
               </div>
-              {narrow && (
-                <Select aria-label="按分组筛选" className="w-40" value={group} onChange={(event) => setParam("g", event.target.value === ALL_GROUPS ? null : event.target.value)}>
-                  <option value={ALL_GROUPS}>全部分组（{all.length}）</option>
-                  <option value={UNGROUPED}>未分组（{counts.get(UNGROUPED) ?? 0}）</option>
-                  {(groups.data ?? []).filter((g) => g.name !== UNGROUPED).map((g) => (
-                    <option key={g.id} value={g.name}>
-                      {g.name}（{counts.get(g.name) ?? 0}）
-                    </option>
-                  ))}
-                </Select>
-              )}
             </div>
           )}
         </div>
 
-      <div className="flex min-h-0 flex-1 gap-6">
-        {!narrow && (
-          <GroupRail groups={groups.data ?? []} loading={groups.isPending} counts={counts} total={all.length} value={group} onChange={(value) => setParam("g", value === ALL_GROUPS ? null : value)} />
-        )}
-      <div className="relative flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div ref={tableRef} className="min-h-0 flex-1 pb-6">
           {profiles.isPending ? (
             <ListSkeleton />
@@ -302,23 +277,14 @@ export function ProfilesPage() {
               activeId={activeId}
               busy={busy}
               showGroup={showGroup}
+              showDevice={showDevice}
               showNotes={showNotes}
               onToggle={toggle}
               onToggleAll={toggleAll}
-              onOpen={(id) => open(id)}
               actions={actions}
             />
           )}
         </div>
-
-        {active && !wide && (
-          <ProfileDrawer profile={active} busy={busy.has(active.id)} overlay onClose={() => open(null)} onOpenViewer={() => navigate(`/profiles/${active.id}/viewer`)} actions={actions} />
-        )}
-      </div>
-
-      {active && wide && (
-        <ProfileDrawer profile={active} busy={busy.has(active.id)} overlay={false} onClose={() => open(null)} onOpenViewer={() => navigate(`/profiles/${active.id}/viewer`)} actions={actions} />
-      )}
       </div>
 
       <Suspense fallback={null}>

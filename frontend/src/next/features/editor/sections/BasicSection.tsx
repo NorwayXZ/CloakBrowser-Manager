@@ -35,8 +35,8 @@ export const BasicSection = forwardRef<HTMLInputElement, {
 
   return (
     <Section id="form-basic" title="基础设置" description="名称、分组、账号平台只用于管理；浏览器、设备型号、User-Agent、Cookie 和启动页面会影响实际打开的浏览器。">
-      <div className="grid max-w-form grid-cols-1 gap-4 md:grid-cols-2">
-        <FormField label="名称" required error={nameError ?? undefined} description="只用于你自己识别这个环境，不会写进网页指纹。" className="md:col-span-2">
+      <div className="grid max-w-form grid-cols-1 gap-4 md:grid-cols-1">
+        <FormField label="名称" required error={nameError ?? undefined} description="只用于你自己识别这个环境，不会写进网页指纹。" >
           <Input
             ref={nameRef}
             value={form.name}
@@ -87,7 +87,7 @@ export const BasicSection = forwardRef<HTMLInputElement, {
         </div>
         <FormField
           label="设备型号"
-          className="md:col-span-2"
+          
           description={
             seedDerived
               ? `在这台 Mac 上，内核按稳定种子生成整套 Apple 设备（GPU、核心数、内存），这里的选择只作记录、不会生效。网站实际看到：${seedDeviceLabel ?? "首次打开后显示"}。`
@@ -106,10 +106,10 @@ export const BasicSection = forwardRef<HTMLInputElement, {
             ))}
           </Select>
         </FormField>
-        <FormField label="User-Agent" className="md:col-span-2" description="建议留空，跟随真实浏览器；手动改错版本、系统或架构，反而会和真实能力对不上。">
+        <FormField label="User-Agent"  description="建议留空，跟随真实浏览器；手动改错版本、系统或架构，反而会和真实能力对不上。">
           <Input mono className="text-xs" value={form.user_agent ?? ""} placeholder="留空则跟随真实浏览器" onChange={(event) => set("user_agent", event.target.value || null)} />
         </FormField>
-        <FormField label="启动页面" className="md:col-span-2" description="没有恢复上次的标签页时打开这些网址；留空会打开本地的 IP、时间、语言自检页。">
+        <FormField label="启动页面"  description="没有恢复上次的标签页时打开这些网址；留空会打开本地的 IP、时间、语言自检页。">
           <Textarea
             mono
             rows={3}
@@ -120,10 +120,10 @@ export const BasicSection = forwardRef<HTMLInputElement, {
             onChange={(event) => editor.setStartupUrlsText(event.target.value)}
           />
         </FormField>
-        <div className="md:col-span-2">
+        <div >
           <CookieField editor={editor} profileId={profileId} />
         </div>
-        <FormField label="备注" className="md:col-span-2" description="只保存在 Manager 里，记录账号用途、注意事项或代理来源。">
+        <FormField label="备注"  description="只保存在 Manager 里，记录账号用途、注意事项或代理来源。">
           <Textarea rows={3} value={form.notes ?? ""} placeholder="可选，写一些这个环境的用途…" onChange={(event) => set("notes", event.target.value || null)} />
         </FormField>
       </div>

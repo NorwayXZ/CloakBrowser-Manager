@@ -60,7 +60,7 @@ export function AdvancedSection({ editor, profileId, hostOS }: { editor: Editor;
           {form.warmup_enabled && <WarmupPanel editor={editor} profileId={profileId} />}
         </fieldset>
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-1">
           <FormField label="颜色偏好" description="网页里的 prefers-color-scheme；不确定就选跟随系统。">
             <Select value={form.color_scheme ?? ""} onChange={(event) => set("color_scheme", event.target.value || null)}>
               <option value="">跟随系统</option>
@@ -162,7 +162,7 @@ function WarmupPanel({ editor, profileId }: { editor: Editor; profileId: string 
                 aria-pressed={active}
                 onClick={() => set("warmup_targets", active ? selected.filter((id) => id !== target.id) : [...selected, target.id])}
                 className={cn(
-                  "rounded-full border px-2.5 py-1 text-xs transition-colors duration-fast",
+                  "rounded border px-2.5 py-1 text-xs transition-colors duration-fast",
                   active ? "border-accent-fill bg-accent-fill text-accent-on" : "border-border-strong bg-surface text-fg-2 hover:bg-surface-3",
                 )}
               >

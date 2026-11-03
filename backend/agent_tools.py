@@ -35,6 +35,7 @@ import asyncio
 import json
 import os
 import re
+import secrets
 import time
 import uuid
 from dataclasses import dataclass
@@ -150,6 +151,11 @@ class RestClient:
         self, path: str, *, json_body: dict | None = None, timeout: float = READ_TIMEOUT_S
     ) -> tuple[int, Any]:
         return await self.request("POST", path, json_body=json_body, timeout=timeout)
+
+    async def put(
+        self, path: str, *, json_body: dict | None = None, timeout: float = READ_TIMEOUT_S
+    ) -> tuple[int, Any]:
+        return await self.request("PUT", path, json_body=json_body, timeout=timeout)
 
 
 # ── Structured error mapping ─────────────────────────────────────────────────
@@ -558,13 +564,46 @@ def _profile_id_arg(args: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
     return profile_id, None
 
 
-@register("list_profiles", "列出全部画像的摘要（id、名称、平台、设备模板、时区/语言、指纹配置、养号与进化开关、运行状态）。代理只回出口端点不带账密，备注与 Cookie 不回。", NO_ARGS, "read")
+LIST_PROFILES_ARGS: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "page": {"type": "integer", "default": 1, "minimum": 1, "description": "第几页（从 1 开始）"},
+        "limit": {"type": "integer", "default": 200, "minimum": 1, "maximum": 500, "description": "每页多少个，默认 200"},
+        "group_name": {"type": "string", "description": "只看这个分组"},
+        "query": {"type": "string", "description": "名称里包含这段文字（不区分大小写）"},
+        "status": {"type": "string", "enum": ["running", "stopped"], "description": "只看运行中或已停止的"},
+    },
+}
+
+
+@register("list_profiles", "列出画像的摘要（id、名称、平台、设备模板、时区/语言、指纹配置、养号与进化开关、运行状态），默认每页 200 个，可按分组、名称、运行状态筛选。total_pages 大于 1 时必须翻完所有页再对“全部画像”做事。代理只回出口端点不带账密，备注与 Cookie 不回。", LIST_PROFILES_ARGS, "read")
 async def _list_profiles(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
     payload, err = await _get_or_error(client, "/api/profiles", "list_profiles")
     if err:
         return err
-    profiles = [shape_profile(p) for p in payload if isinstance(p, dict)]
-    return {"ok": True, "count": len(profiles), "profiles": profiles}
+    rows = [p for p in payload if isinstance(p, dict)]
+    group = str(args.get("group_name") or "").strip()
+    if group:
+        rows = [p for p in rows if p.get("group_name") == group]
+    query = str(args.get("query") or "").strip().lower()
+    if query:
+        rows = [p for p in rows if query in str(p.get("name") or "").lower()]
+    wanted = str(args.get("status") or "").strip()
+    if wanted:
+        rows = [p for p in rows if (p.get("status") == "running") == (wanted == "running")]
+    limit = max(1, min(500, int(args.get("limit") or 200)))
+    total = len(rows)
+    pages = max(1, -(-total // limit))
+    page = max(1, int(args.get("page") or 1))
+    chunk = rows[(page - 1) * limit : page * limit]
+    return {
+        "ok": True,
+        "count": len(chunk),
+        "total": total,
+        "page": page,
+        "total_pages": pages,
+        "profiles": [shape_profile(p) for p in chunk],
+    }
 
 
 @register("get_profile", "看单个画像的完整配置（字段政策同 list_profiles）加实时运行状态。", PROFILE_ID_ARGS, "read")
@@ -819,6 +858,53 @@ async def _get_proxy_rotation_result(client,args):
     status,payload=await client.get(f'/api/proxy-rotations/{quote(job_id,safe="")}')
     if status>=300:return error_result(status,payload,tool="get_proxy_rotation_result")
     return {"ok":True,"job":payload}
+
+
+@register("list_groups", "列出全部分组（id、名称、颜色）和每个分组里有多少个画像。新建画像、移动画像前先看这里。", NO_ARGS, "read")
+async def _list_groups(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    payload, err = await _get_or_error(client, "/api/groups", "list_groups")
+    if err:
+        return err
+    profiles, perr = await _get_or_error(client, "/api/profiles", "list_groups")
+    if perr:
+        return perr
+    counts: dict[str, int] = {}
+    for item in profiles:
+        if isinstance(item, dict):
+            name = str(item.get("group_name") or "未分组")
+            counts[name] = counts.get(name, 0) + 1
+    groups = [
+        {"id": g.get("id"), "name": g.get("name"), "color": g.get("color"), "profiles": counts.get(str(g.get("name")), 0)}
+        for g in payload
+        if isinstance(g, dict)
+    ]
+    return {"ok": True, "count": len(groups), "groups": groups}
+
+
+@register("list_running", "现在正在运行的画像（id、名称、启动模式）。想知道占了几个授权座位、要不要先关几个时看这里。", NO_ARGS, "read")
+async def _list_running(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    payload, err = await _get_or_error(client, "/api/profiles", "list_running")
+    if err:
+        return err
+    running = [
+        {"id": p.get("id"), "name": p.get("name"), "runtime_mode": p.get("runtime_mode")}
+        for p in payload
+        if isinstance(p, dict) and p.get("status") == "running"
+    ]
+    return {"ok": True, "count": len(running), "profiles": running}
+
+
+@register("list_trash", "回收站里的画像（7 天内删除的，可用 restore_profile 恢复）。只回摘要。", NO_ARGS, "read")
+async def _list_trash(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    payload, err = await _get_or_error(client, "/api/profiles/trash", "list_trash")
+    if err:
+        return err
+    items = [
+        {"id": p.get("id"), "name": p.get("name"), "group_name": p.get("group_name"), "deleted_at": p.get("deleted_at")}
+        for p in payload
+        if isinstance(p, dict)
+    ]
+    return {"ok": True, "count": len(items), "profiles": items}
 
 
 # ── Tools: action layer (registered only when mcp.mode == "full") ────────────
@@ -1195,6 +1281,304 @@ async def _mail_list_messages(client: RestClient, args: dict[str, Any]) -> dict[
         return _mail_error(status, payload, tool="mail_list_messages")
     messages = [_mail_summary(m, text_limit=500) for m in payload.get("messages") or []]
     return {"ok": True, "address": address, "count": len(messages), "messages": messages}
+
+
+# ── Tools: profile / group / proxy management (action layer) ─────────────────
+#
+# Writes go through a field whitelist: an agent can shape an environment, but
+# never write cookies or notes, read proxy credentials, or delete for good.
+
+_WRITABLE_PROFILE_FIELDS = (
+    "name", "platform", "group_name", "proxy_id", "device_profile", "timezone",
+    "locale", "account_platform", "startup_urls", "color_scheme", "tags",
+)
+
+_PROFILE_WRITE_PROPS: dict[str, Any] = {
+    "name": {"type": "string", "description": "画像名称（只用来自己识别）"},
+    "platform": {"type": "string", "enum": ["windows", "macos", "linux"], "description": "设备系统"},
+    "group_name": {"type": "string", "description": "分组名称（先用 list_groups 查；没有就先 create_group）"},
+    "proxy_id": {"type": "string", "description": "list_proxies 里的 proxy_id；不填表示不改/直连"},
+    "device_profile": {"type": "string", "description": "设备模板 id（list_device_templates 查）"},
+    "timezone": {"type": "string", "description": "例如 America/New_York；不填跟随出口 IP"},
+    "locale": {"type": "string", "description": "例如 en-US；不填跟随出口 IP"},
+    "account_platform": {"type": "string", "description": "这个画像对应的账号平台，如 Amazon"},
+    "startup_urls": {"type": "array", "items": {"type": "string"}, "maxItems": 20, "description": "启动时自动打开的 http/https 网址"},
+    "color_scheme": {"type": "string", "enum": ["light", "dark", "no-preference"]},
+    "tags": {"type": "array", "items": {"type": "string"}, "maxItems": 20, "description": "标签（文字）"},
+}
+
+CREATE_PROFILE_ARGS: dict[str, Any] = {
+    "type": "object",
+    "properties": dict(_PROFILE_WRITE_PROPS),
+    "required": ["name"],
+}
+
+UPDATE_PROFILE_ARGS: dict[str, Any] = {
+    "type": "object",
+    "properties": {"profile_id": {"type": "string", "description": "画像 id（先用 list_profiles 查）"}, **_PROFILE_WRITE_PROPS},
+    "required": ["profile_id"],
+}
+
+
+def _profile_write_body(args: dict[str, Any], *, creating: bool) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    allowed = set(_WRITABLE_PROFILE_FIELDS) | ({"profile_id"} if not creating else set())
+    unknown = sorted(set(args) - allowed)
+    if unknown:
+        return {}, {
+            "ok": False,
+            "reason": "invalid_argument",
+            "detail": f"不支持的字段：{', '.join(unknown)}。可改的字段只有：{', '.join(_WRITABLE_PROFILE_FIELDS)}。",
+        }
+    body: dict[str, Any] = {}
+    for key in _WRITABLE_PROFILE_FIELDS:
+        if key not in args or args[key] is None:
+            continue
+        value = args[key]
+        if key == "startup_urls":
+            urls = [str(u).strip() for u in value] if isinstance(value, list) else []
+            bad = [u for u in urls if not u.lower().startswith(("http://", "https://"))]
+            if bad:
+                return {}, {"ok": False, "reason": "invalid_argument", "detail": f"启动网址只允许 http/https：{bad[0]}"}
+            body[key] = urls
+        elif key == "tags":
+            body[key] = [{"tag": str(t).strip()} for t in value if str(t).strip()] if isinstance(value, list) else []
+        else:
+            body[key] = value
+    return body, None
+
+
+async def _with_proxy_from_library(client: RestClient, body: dict[str, Any], *, tool: str) -> dict[str, Any] | None:
+    """Pair ``proxy_id`` with the saved proxy's address (the Manager requires both).
+
+    The address, credentials included, is read and written server-side; it never
+    appears in what the agent sees. Returns an error result, or None on success.
+    """
+    proxy_id = body.get("proxy_id")
+    if not proxy_id:
+        return None
+    presets, err = await _get_or_error(client, "/api/proxy-presets", tool)
+    if err:
+        return err
+    match = next((p for p in presets if isinstance(p, dict) and p.get("id") == proxy_id), None)
+    if match is None:
+        return {"ok": False, "reason": "not_found", "detail": f"找不到代理 {proxy_id}：先用 list_proxies 查 proxy_id，或 create_proxy 新建。"}
+    body["proxy"] = match.get("proxy")
+    return None
+
+
+@register(
+    "create_profile",
+    "新建一个画像（环境）。只需要名称，其余有默认值；可选分组、代理（proxy_id）、设备系统、设备模板、时区、语言、账号平台、启动网址、标签。不能写 Cookie、备注，也不能直接填代理账密（要用代理先 create_proxy）。受授权环境数量限制。",
+    CREATE_PROFILE_ARGS,
+    "action",
+)
+async def _create_profile(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    body, err = _profile_write_body(args, creating=True)
+    if err:
+        return err
+    if not str(body.get("name") or "").strip():
+        return {"ok": False, "reason": "invalid_argument", "detail": "缺少 name。"}
+    err = await _with_proxy_from_library(client, body, tool="create_profile")
+    if err:
+        return err
+    status, payload = await client.post("/api/profiles", json_body=body, timeout=ACTION_TIMEOUT_S)
+    if status >= 300:
+        return error_result(status, payload, tool="create_profile")
+    return {"ok": True, "profile": shape_profile(payload)}
+
+
+@register(
+    "update_profile",
+    "修改画像的名称、分组、代理、设备系统/模板、时区、语言、账号平台、启动网址、颜色模式或标签。只给要改的字段。运行中的画像改动要先 stop_profile。不能改 Cookie、备注。",
+    UPDATE_PROFILE_ARGS,
+    "action",
+)
+async def _update_profile(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    profile_id, err = _profile_id_arg(args)
+    if err:
+        return err
+    body, err = _profile_write_body(args, creating=False)
+    if err:
+        return err
+    if not body:
+        return {"ok": False, "reason": "invalid_argument", "detail": "没有要改的字段。"}
+    err = await _with_proxy_from_library(client, body, tool="update_profile")
+    if err:
+        return err
+    status, payload = await client.put(f"/api/profiles/{quote(profile_id, safe='')}", json_body=body, timeout=ACTION_TIMEOUT_S)
+    if status >= 300:
+        return error_result(status, payload, tool="update_profile")
+    return {"ok": True, "profile": shape_profile(payload)}
+
+
+@register(
+    "apply_device_template",
+    "把一个设备模板（屏幕、显卡、CPU、内存）套到画像上；模板 id 用 list_device_templates 查。运行中的画像要先 stop_profile。",
+    {
+        "type": "object",
+        "properties": {
+            "profile_id": {"type": "string", "description": "画像 id"},
+            "template_id": {"type": "string", "description": "list_device_templates 里的模板 id"},
+        },
+        "required": ["profile_id", "template_id"],
+    },
+    "action",
+)
+async def _apply_device_template(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    profile_id, err = _profile_id_arg(args)
+    if err:
+        return err
+    template_id = str(args.get("template_id") or "").strip()
+    if not template_id:
+        return {"ok": False, "reason": "invalid_argument", "detail": "缺少 template_id，先用 list_device_templates 查。"}
+    status, payload = await client.post(
+        f"/api/profiles/{quote(profile_id, safe='')}/apply-device-template",
+        json_body={"template_id": template_id},
+        timeout=ACTION_TIMEOUT_S,
+    )
+    if status >= 300:
+        return error_result(status, payload, tool="apply_device_template")
+    return {"ok": True, "profile": shape_profile(payload)}
+
+
+@register(
+    "regenerate_fingerprint",
+    "给画像换一个新的指纹种子（Canvas、WebGL、音频、字体等噪声随之变化）。账号已经在用的画像别随便换：网站会看到“设备变了”。运行中的画像要先 stop_profile。",
+    PROFILE_ID_ARGS,
+    "action",
+)
+async def _regenerate_fingerprint(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    profile_id, err = _profile_id_arg(args)
+    if err:
+        return err
+    seed = secrets.randbelow(2**31 - 1) + 1
+    status, payload = await client.put(
+        f"/api/profiles/{quote(profile_id, safe='')}", json_body={"fingerprint_seed": seed}, timeout=ACTION_TIMEOUT_S
+    )
+    if status >= 300:
+        return error_result(status, payload, tool="regenerate_fingerprint")
+    return {"ok": True, "profile": shape_profile(payload)}
+
+
+@register(
+    "create_group",
+    "新建一个分组。名称已存在会回 conflict。",
+    {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "分组名称（1~64 个字）"},
+            "color": {"type": "string", "description": "可选：十六进制颜色，如 #3b82f6"},
+        },
+        "required": ["name"],
+    },
+    "action",
+)
+async def _create_group(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    name = str(args.get("name") or "").strip()
+    if not name:
+        return {"ok": False, "reason": "invalid_argument", "detail": "缺少 name。"}
+    body: dict[str, Any] = {"name": name}
+    if args.get("color"):
+        body["color"] = str(args["color"])
+    status, payload = await client.post("/api/groups", json_body=body)
+    if status >= 300:
+        return error_result(status, payload, tool="create_group")
+    return {"ok": True, "group": {"id": payload.get("id"), "name": payload.get("name"), "color": payload.get("color")}}
+
+
+@register(
+    "move_profiles",
+    "把一批画像移到某个分组（先用 list_groups 确认分组存在）。单个失败不影响其他，结果里逐个说明。",
+    {
+        "type": "object",
+        "properties": {
+            "profile_ids": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 100},
+            "group_name": {"type": "string", "description": "目标分组名称"},
+        },
+        "required": ["profile_ids", "group_name"],
+    },
+    "action",
+)
+async def _move_profiles(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    ids = [str(i).strip() for i in (args.get("profile_ids") or []) if str(i).strip()]
+    group = str(args.get("group_name") or "").strip()
+    if not ids or not group:
+        return {"ok": False, "reason": "invalid_argument", "detail": "需要 profile_ids 和 group_name。"}
+    moved: list[str] = []
+    failed: list[dict[str, Any]] = []
+    for profile_id in ids[:100]:
+        status, payload = await client.put(
+            f"/api/profiles/{quote(profile_id, safe='')}", json_body={"group_name": group}, timeout=ACTION_TIMEOUT_S
+        )
+        if status < 300:
+            moved.append(profile_id)
+        else:
+            failed.append({"profile_id": profile_id, **{k: v for k, v in error_result(status, payload, tool="move_profiles").items() if k != "ok"}})
+    return {"ok": not failed, "moved": moved, "failed": failed}
+
+
+@register(
+    "restore_profile",
+    "把回收站里的画像恢复回来（先用 list_trash 查 id）。永久删除只能由用户在面板里做，没有对应的工具。",
+    PROFILE_ID_ARGS,
+    "action",
+)
+async def _restore_profile(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    profile_id, err = _profile_id_arg(args)
+    if err:
+        return err
+    status, payload = await client.post(f"/api/profiles/{quote(profile_id, safe='')}/restore")
+    if status >= 300:
+        return error_result(status, payload, tool="restore_profile")
+    return {"ok": True, "profile": shape_profile(payload)}
+
+
+@register(
+    "create_proxy",
+    "保存一个代理到代理库（之后用 proxy_id 绑定到画像）。账号密码只写不读：保存后任何工具都看不到它。格式如 socks5://user:pass@host:port。",
+    {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "代理名称（1~64 个字）"},
+            "proxy": {"type": "string", "description": "代理地址，如 socks5://user:pass@host:port 或 http://host:port"},
+        },
+        "required": ["name", "proxy"],
+    },
+    "action",
+)
+async def _create_proxy(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    name = str(args.get("name") or "").strip()
+    proxy = str(args.get("proxy") or "").strip()
+    if not name or not proxy:
+        return {"ok": False, "reason": "invalid_argument", "detail": "需要 name 和 proxy。"}
+    status, payload = await client.post("/api/proxy-presets", json_body={"name": name, "proxy": proxy, "mode": "custom"})
+    if status >= 300:
+        return error_result(status, payload, tool="create_proxy")
+    return {"ok": True, "proxy": {"proxy_id": payload.get("id"), "name": payload.get("name"), "endpoint": sanitize_proxy(payload.get("proxy"))}}
+
+
+@register(
+    "stop_all_profiles",
+    "关闭所有正在运行的画像浏览器（逐个关，结果里逐个说明）。有人在接管的画像会被跳过并说明。",
+    NO_ARGS,
+    "action",
+)
+async def _stop_all_profiles(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    payload, err = await _get_or_error(client, "/api/profiles", "stop_all_profiles")
+    if err:
+        return err
+    stopped: list[str] = []
+    failed: list[dict[str, Any]] = []
+    for item in payload:
+        if not isinstance(item, dict) or item.get("status") != "running":
+            continue
+        profile_id = str(item.get("id"))
+        status, body = await client.post(f"/api/profiles/{quote(profile_id, safe='')}/stop", timeout=ACTION_TIMEOUT_S)
+        if status < 300:
+            stopped.append(profile_id)
+        else:
+            failed.append({"profile_id": profile_id, **{k: v for k, v in error_result(status, body, tool="stop_profile").items() if k != "ok"}})
+    return {"ok": not failed, "stopped": stopped, "failed": failed}
 
 
 # ── Tools: browser layer (registered only when mcp.mode == "automation") ─────
@@ -1740,13 +2124,25 @@ async def _vault_mark(client: RestClient, args: dict[str, Any]) -> dict[str, Any
 # ── English summaries (tool lists show "中文 | English") ──────────────────────
 
 TOOL_EN: dict[str, str] = {
+    "list_groups": "List groups with how many profiles each holds.",
+    "list_running": "Profiles that are running now (id, name, mode); shows how many license seats are used.",
+    "list_trash": "Profiles in the recycle bin (deleted within 7 days), recoverable with restore_profile.",
+    "create_profile": "Create a profile (name required; optional group, proxy_id, platform, device template, timezone, locale, startup URLs, tags). No cookies or notes; subject to the license's profile limit.",
+    "update_profile": "Change a profile's name, group, proxy, platform, device template, timezone, locale, startup URLs, color scheme or tags. Stop it first if it is running.",
+    "apply_device_template": "Apply a device template (screen, GPU, CPU, memory) to a profile.",
+    "regenerate_fingerprint": "Give a profile a new fingerprint seed. Do not use it on profiles whose account is already live.",
+    "create_group": "Create a group.",
+    "move_profiles": "Move up to 100 profiles into a group; per-profile results.",
+    "restore_profile": "Restore a profile from the recycle bin. Permanent deletion is human-only.",
+    "create_proxy": "Save a proxy to the proxy library (credentials are write-only); bind it to profiles via proxy_id.",
+    "stop_all_profiles": "Stop every running profile browser; per-profile results.",
     "check_proxy_exit_ip": "Check a new connection through the selected proxy route without rotating its IP.",
     "list_proxies": "List saved proxy endpoints and their rotation capabilities without credentials.",
     "get_proxy_capabilities": "Discover IP rotation support, cooldown and affected profiles.",
     "get_proxy_rotation_result": "Read a rotation job without triggering another refresh request.",
     "rotate_proxy_ip": "Rotate a SOCKS5 exit via its configured supplier link and verify the actual route.",
     "manager_status": "Overview: versions, running browsers, profile count, active automation. Call this first.",
-    "list_profiles": "List all profiles (id, name, platform, device, timezone/locale, fingerprint config, state). Proxy shown as endpoint only; no notes or cookies.",
+    "list_profiles": "List profiles, 200 per page (page/limit; filter by group_name, query, status). Walk every page before acting on \"all\". Proxy shown as endpoint only; no notes or cookies.",
     "get_profile": "One profile's full config (same field policy) plus live run state.",
     "get_profile_preflight": "Pre-launch consistency check: can this profile launch now, and what is wrong.",
     "list_device_templates": "Device template library summary (id, screen, GPU, CPU, cores, memory).",
@@ -1791,9 +2187,77 @@ TOOL_EN: dict[str, str] = {
 }
 
 
+# Words people actually say, in Chinese and English, so the right tool is picked
+# even when the user's phrasing does not match the tool's name.
+TRIGGERS: dict[str, str] = {
+    "manager_status": "状态,概览,版本,先看看,status,overview,health",
+    "list_profiles": "列出环境,所有画像,搜索环境,查询环境,list profiles,search profiles,show all",
+    "get_profile": "环境详情,画像配置,查看配置,profile details,show config",
+    "get_profile_preflight": "能不能启动,启动前检查,preflight,can it launch",
+    "list_device_templates": "设备模板,设备型号,device templates",
+    "get_linkability": "关联,会不会被关联,同一个人,linkability,linked accounts",
+    "list_site_check_reports": "检测报告列表,历史检测,check reports",
+    "get_site_check_report": "检测报告详情,对比上一次,check report",
+    "get_current_site_check": "检测进度,检测到哪了,check progress",
+    "get_fingerprint_report": "指纹自检,指纹报告,本地探针,fingerprint report",
+    "get_warmup_state": "养号状态,养号进度,warmup state",
+    "list_warmup_scripts": "养号剧本,待审核剧本,warmup scripts",
+    "get_evolution": "进化状态,进化提案,evolution",
+    "get_kernel_info": "内核版本,授权信息,kernel,license tier",
+    "list_proxies": "代理列表,代理库,list proxies",
+    "get_proxy_capabilities": "能否换 IP,换 IP 冷却,rotation support",
+    "check_proxy_exit_ip": "检测代理,出口 IP,代理通不通,check proxy,exit ip",
+    "get_proxy_rotation_result": "换 IP 结果,rotation result",
+    "list_groups": "分组列表,有哪些分组,list groups",
+    "list_running": "正在运行,已打开,开着的环境,opened browsers,running profiles",
+    "list_trash": "回收站,最近删除,已删除环境,recycle bin,trash",
+    "launch_profile": "打开环境,启动浏览器,启动画像,open profile,launch,start browser",
+    "rotate_proxy_ip": "换 IP,切换 IP,刷新代理,rotate ip,change ip",
+    "stop_profile": "关闭环境,关闭浏览器,停止画像,close browser,stop profile",
+    "run_site_check": "跑检测,指纹检测,验收环境,run check,fingerprint test",
+    "run_warmup": "养号,跑一轮养号,run warmup",
+    "run_evolution": "进化,跑一轮进化,run evolution",
+    "create_profile": "新建环境,创建画像,添加浏览器,新开环境,create profile,new profile,add browser",
+    "update_profile": "修改环境,改配置,改代理,改时区,编辑画像,update profile,edit settings,change proxy",
+    "apply_device_template": "套用设备模板,换设备型号,apply template,change device",
+    "regenerate_fingerprint": "换新指纹,重新生成指纹,new fingerprint,regenerate fingerprint",
+    "create_group": "新建分组,创建分组,create group,new group",
+    "move_profiles": "移动分组,换组,归类,move to group,regroup",
+    "restore_profile": "恢复环境,还原回收站,找回已删除,restore profile,undelete",
+    "create_proxy": "添加代理,保存代理,新建代理,add proxy,save proxy",
+    "stop_all_profiles": "全部关闭,关掉所有浏览器,close all,stop all",
+    "mail_get_address": "收件邮箱,注册邮箱,get email address",
+    "mail_wait_code": "等验证码,收验证码,wait verification code",
+    "mail_list_messages": "收到的邮件,看邮件,list mail",
+    "get_cdp_endpoint": "CDP 地址,调试端口,playwright 连接,cdp endpoint",
+    "open_browser": "打开并接管,调试模式打开,open for automation",
+    "browser_navigate": "打开网址,访问网页,go to url,navigate",
+    "browser_snapshot": "看页面,页面快照,读取页面结构,snapshot,read page",
+    "browser_get_text": "读文字,页面文字,get text",
+    "browser_click": "点击,点按钮,click",
+    "browser_type": "输入,填表单,type,fill input",
+    "browser_press_key": "按键,回车,press key",
+    "browser_scroll": "滚动,scroll",
+    "browser_screenshot": "截图,screenshot",
+    "browser_wait_for": "等待,等出现,wait for",
+    "browser_dialog": "弹窗,确认框,dialog,alert",
+    "browser_batch": "批量步骤,一次做多步,batch steps",
+    "browser_upload": "上传文件,upload file",
+    "browser_downloads": "下载的文件,downloads",
+    "browser_back": "后退,返回上一页,go back",
+    "browser_tabs": "标签页,新开标签,tabs",
+    "account_prepare": "注册准备,生成密码,准备账号,prepare sign-up",
+    "vault_create": "保险库新建,保存账号密码,vault create",
+    "vault_list": "保险库列表,vault list",
+    "vault_mark": "标记账号状态,vault mark",
+}
+
+
 def tool_description(tool: ToolDef) -> str:
     en = TOOL_EN.get(tool.name)
-    return f"{tool.description}\n{en}" if en else tool.description
+    text = f"{tool.description}\n{en}" if en else tool.description
+    words = TRIGGERS.get(tool.name)
+    return f"{text}\n触发词 / Triggers: {words}" if words else text
 
 
 def tool_specs(mode: str, token_scope: str | None = None, *, fmt: str = "raw") -> list[dict[str, Any]]:

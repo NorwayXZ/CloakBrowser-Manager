@@ -36,6 +36,10 @@ function useField(id?: string, invalid?: boolean, describedBy?: string) {
   };
 }
 
+/** "stacked" (label above, the default) or "inline" (label left, control right: the environment editor). */
+const FormLayoutCtx = createContext<"stacked" | "inline">("stacked");
+export const FormLayoutProvider = FormLayoutCtx.Provider;
+
 export function FormField({
   label,
   description,
@@ -55,31 +59,50 @@ export function FormField({
   const descId = description ? `${id}-desc` : undefined;
   const errId = error ? `${id}-err` : undefined;
   const describedBy = [errId, descId].filter(Boolean).join(" ") || undefined;
+  const inline = useContext(FormLayoutCtx) === "inline";
+  const labelNode = (
+    <label htmlFor={id} className={cn("text-sm font-medium text-fg", inline && "md:pt-1.5 md:text-right")}>
+      {label}
+      {required && <span className="ml-0.5 text-danger" aria-hidden>*</span>}
+    </label>
+  );
+  const extras = (
+    <>
+      {error && (
+        <p id={errId} className="text-xs text-danger" role="alert">
+          {error}
+        </p>
+      )}
+      {description && (
+        <p id={descId} className="text-xs text-fg-3">
+          {description}
+        </p>
+      )}
+    </>
+  );
   return (
     <FieldCtx.Provider value={{ id, describedBy, invalid: Boolean(error) }}>
-      <div className={cn("flex min-w-0 flex-col gap-1.5", className)}>
-        <label htmlFor={id} className="text-sm font-medium text-fg">
-          {label}
-          {required && <span className="ml-0.5 text-danger" aria-hidden>*</span>}
-        </label>
-        {children}
-        {error && (
-          <p id={errId} className="text-xs text-danger" role="alert">
-            {error}
-          </p>
-        )}
-        {description && (
-          <p id={descId} className="text-xs text-fg-3">
-            {description}
-          </p>
-        )}
-      </div>
+      {inline ? (
+        <div className={cn("grid min-w-0 grid-cols-1 gap-x-4 gap-y-1.5 md:grid-cols-[128px_minmax(0,1fr)]", className)}>
+          {labelNode}
+          <div className="flex min-w-0 flex-col gap-1.5">
+            {children}
+            {extras}
+          </div>
+        </div>
+      ) : (
+        <div className={cn("flex min-w-0 flex-col gap-1.5", className)}>
+          {labelNode}
+          {children}
+          {extras}
+        </div>
+      )}
     </FieldCtx.Provider>
   );
 }
 
 const control =
-  "w-full min-w-0 rounded border border-border-strong/70 bg-surface/80 text-sm text-fg placeholder:text-fg-3 " +
+  "w-full min-w-0 rounded border border-border-strong/60 bg-surface text-sm text-fg placeholder:text-fg-3 " +
   "transition-[border-color,box-shadow] duration-fast hover:border-fg-3 focus:border-accent focus:outline-none focus:ring-[3px] focus:ring-accent/25 " +
   "disabled:cursor-not-allowed disabled:bg-surface-2 disabled:text-fg-3 " +
   "aria-[invalid=true]:border-danger aria-[invalid=true]:focus:ring-danger/25";
@@ -87,7 +110,7 @@ const control =
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement> & { mono?: boolean }>(
   function Input({ className, id, mono, "aria-invalid": invalid, "aria-describedby": describedBy, ...rest }, ref) {
     const field = useField(id, invalid === true || invalid === "true" ? true : undefined, describedBy);
-    return <input ref={ref} {...field} className={cn(control, "h-10 px-3.5", mono && "font-mono", className)} {...rest} />;
+    return <input ref={ref} {...field} className={cn(control, "h-8 px-3", mono && "font-mono", className)} {...rest} />;
   },
 );
 
@@ -114,7 +137,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSel
   const field = useField(id, invalid === true || invalid === "true" ? true : undefined, describedBy);
   return (
     <div className={cn("relative min-w-0", className)}>
-      <select ref={ref} {...field} className={cn(control, "h-10 cursor-pointer appearance-none pl-3.5 pr-9")} {...rest}>
+      <select ref={ref} {...field} className={cn(control, "h-8 cursor-pointer appearance-none pl-3 pr-9")} {...rest}>
         {children}
       </select>
       <ChevronDown aria-hidden className="pointer-events-none absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-3" />
@@ -154,7 +177,7 @@ export function Checkbox({
       aria-describedby={description ? `${boxId}-desc` : undefined}
       onCheckedChange={(value) => onCheckedChange(value === true)}
       className={cn(
-        "flex h-5 w-5 shrink-0 items-center justify-center rounded-[7px] border border-border-strong bg-surface text-accent-on",
+        "flex h-5 w-5 shrink-0 items-center justify-center rounded-[4px] border border-border-strong bg-surface text-accent-on",
         "transition-colors duration-fast hover:border-fg-3 disabled:cursor-not-allowed disabled:opacity-50",
         "data-[state=checked]:border-accent-fill data-[state=checked]:bg-accent-fill",
         "data-[state=indeterminate]:border-accent-fill data-[state=indeterminate]:bg-accent-fill",
@@ -218,7 +241,7 @@ export function Segmented<T extends string>({
     buttons?.[(index + delta + options.length) % options.length]?.focus();
   };
   return (
-    <div role="radiogroup" aria-label={label} className={cn("inline-flex max-w-full flex-wrap gap-0.5 rounded-full border border-border/70 bg-surface-3/60 p-1", className)}>
+    <div role="radiogroup" aria-label={label} className={cn("inline-flex max-w-full flex-wrap gap-0.5 rounded-md bg-surface-3 p-0.5", className)}>
       {options.map(([option, text]) => {
         const checked = value === option;
         return (
@@ -239,8 +262,8 @@ export function Segmented<T extends string>({
               }
             }}
             className={cn(
-              "h-8 rounded-full px-4 text-sm transition-[background-color,color,box-shadow] duration-fast",
-              checked ? "bg-surface font-medium text-fg shadow-raised" : "text-fg-2 hover:text-fg",
+              "h-7 rounded px-3.5 text-sm transition-[background-color,color,box-shadow] duration-fast",
+              checked ? "bg-surface font-medium text-accent shadow-raised" : "text-fg-2 hover:text-fg",
             )}
           >
             {text}
@@ -301,11 +324,11 @@ export function Switch({
         onCheckedChange={onCheckedChange}
         aria-describedby={description ? `${id}-desc` : undefined}
         className={cn(
-          "relative h-[30px] w-[52px] shrink-0 rounded-full bg-surface-3 ring-1 ring-inset ring-border-strong/60 transition-colors duration-base",
+          "relative h-5 w-9 shrink-0 rounded-full bg-surface-3 ring-1 ring-inset ring-border-strong/60 transition-colors duration-base",
           "data-[state=checked]:bg-switch-on data-[state=checked]:ring-0 disabled:cursor-not-allowed disabled:opacity-50",
         )}
       >
-        <RadixSwitch.Thumb className="block h-6 w-6 translate-x-[3px] rounded-full bg-white shadow-[0_2px_5px_rgb(0_0_0/0.3)] transition-transform duration-base data-[state=checked]:translate-x-[25px]" />
+        <RadixSwitch.Thumb className="block h-4 w-4 translate-x-[2px] rounded-full bg-white shadow-[0_1px_2px_rgb(0_0_0/0.3)] transition-transform duration-base data-[state=checked]:translate-x-[18px]" />
       </RadixSwitch.Root>
       </span>
     </div>
