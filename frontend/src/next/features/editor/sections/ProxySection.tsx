@@ -82,8 +82,8 @@ export function ProxySection({ editor, presets }: { editor: Editor; presets: Pro
 
   return (
     <Section id="form-proxy" title="代理信息" description="直连使用这台电脑的网络，不启动代理或 Xray。HTTP / HTTPS / SOCKS5 填主机和端口；VLESS、VMess、Trojan、Shadowsocks 粘贴链接。">
-      <fieldset disabled={testing} className="m-0 grid max-w-form grid-cols-1 gap-4 border-0 p-0 md:grid-cols-2">
-        <FormField label="代理方式" className="md:col-span-2" description="自定义代理适合 HTTP/HTTPS/SOCKS5；Xray 链接会在本机启动内核，转成一个本机 SOCKS5。">
+      <fieldset disabled={testing} className="m-0 grid max-w-form grid-cols-1 gap-4 border-0 p-0 md:grid-cols-1">
+        <FormField label="代理方式"  description="自定义代理适合 HTTP/HTTPS/SOCKS5；Xray 链接会在本机启动内核，转成一个本机 SOCKS5。">
           <Segmented<ProxyKind>
             label="代理方式"
             value={proxyParts.kind}
@@ -95,7 +95,7 @@ export function ProxySection({ editor, presets }: { editor: Editor; presets: Pro
             ]}
           />
         </FormField>
-        <FormField label="已保存代理" className="md:col-span-2" description="在“代理”页保存的代理，选中后填入这个环境。">
+        <FormField label="已保存代理"  description="在“代理”页保存的代理，选中后填入这个环境。">
           <Select
             value=""
             onChange={(event) => {
@@ -113,13 +113,13 @@ export function ProxySection({ editor, presets }: { editor: Editor; presets: Pro
         </FormField>
 
         {proxyParts.kind === "none" ? (
-          <div className="md:col-span-2">
+          <div >
             <Banner tone="success" title="直连已启用">
               浏览器直接使用这台电脑的网络出口，不经过已保存的代理，也不会启动 Xray。
             </Banner>
           </div>
         ) : proxyParts.kind === "xray" ? (
-          <FormField label="代理链接" className="md:col-span-2" description="启动时为这个环境建一条独立的本机 SOCKS5 通道。">
+          <FormField label="代理链接"  description="启动时为这个环境建一条独立的本机 SOCKS5 通道。">
             <Textarea mono rows={3} className="text-xs" spellCheck={false} value={proxyParts.raw} placeholder="粘贴 ss://、vmess://、vless:// 或 trojan:// 链接" onChange={(event) => editor.setProxyPart("raw", event.target.value)} />
           </FormField>
         ) : (
@@ -131,14 +131,12 @@ export function ProxySection({ editor, presets }: { editor: Editor; presets: Pro
                 <option value="socks5">SOCKS5</option>
               </Select>
             </FormField>
-            <div className="grid grid-cols-[minmax(0,1fr)_96px] gap-2">
-              <FormField label="主机">
+            <FormField label="主机">
+              <div className="grid grid-cols-[minmax(0,1fr)_96px] gap-2">
                 <Input mono value={proxyParts.host} placeholder="192.168.100.1" onChange={(event) => editor.setProxyPart("host", event.target.value)} />
-              </FormField>
-              <FormField label="端口">
-                <Input mono inputMode="numeric" value={proxyParts.port} placeholder="1090" onChange={(event) => editor.setProxyPart("port", event.target.value)} />
-              </FormField>
-            </div>
+                <Input mono id="proxy-port" aria-label="端口" inputMode="numeric" value={proxyParts.port} placeholder="1090" onChange={(event) => editor.setProxyPart("port", event.target.value)} />
+              </div>
+            </FormField>
             <FormField label="代理账号" description="没有认证就留空；会自动拼进代理地址。">
               <Input value={proxyParts.username} placeholder="可选" autoComplete="off" onChange={(event) => editor.setProxyPart("username", event.target.value)} />
             </FormField>
@@ -151,8 +149,9 @@ export function ProxySection({ editor, presets }: { editor: Editor; presets: Pro
         <RelayRouteFields mode={form.proxy_connection_mode ?? "direct"} relayId={form.relay_id}
           isSocks={proxyParts.kind === "custom" && proxyParts.scheme === "socks5"}
           onMode={mode => { editor.setRouteMode(mode); setComparisons([]); }} onRelay={id => { editor.setRelay(id); setComparisons([]); }} />
-        <div className="flex flex-col gap-2 md:col-span-2">
-          <span className="text-sm font-medium text-fg">出口检测</span>
+        <div className="grid grid-cols-1 gap-x-4 gap-y-1.5 md:grid-cols-[128px_minmax(0,1fr)]">
+          <span className="text-sm font-medium text-fg md:pt-1.5 md:text-right">出口检测</span>
+          <div className="flex min-w-0 flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <Button icon={<Wifi className="h-3.5 w-3.5" />} loading={testing} disabled={needsAddress} onClick={() => void check()}>
               {proxyParts.kind === "none" ? "检查直连出口" : "检查代理"}
@@ -185,6 +184,7 @@ export function ProxySection({ editor, presets }: { editor: Editor; presets: Pro
             </div>
           )}
           {proxyTest?.ip_quality && <IpQualityPanel quality={proxyTest.ip_quality} />}
+          </div>
         </div>
 
         <FormField label="时区" description="IANA 时区，例如 Asia/Hong_Kong；留空按出口 IP 补全。">
@@ -193,7 +193,7 @@ export function ProxySection({ editor, presets }: { editor: Editor; presets: Pro
         <FormField label="语言区域" description="浏览器语言，例如 zh-HK；留空按出口 IP 补全。">
           <Input mono value={form.locale ?? ""} placeholder="zh-CN" onChange={(event) => editor.set("locale", event.target.value || null)} />
         </FormField>
-        <div className="md:col-span-2">
+        <div className="md:pl-[144px]">
           <Checkbox
             checked={form.geoip ?? false}
             onCheckedChange={(value) => editor.set("geoip", value)}
@@ -203,7 +203,7 @@ export function ProxySection({ editor, presets }: { editor: Editor; presets: Pro
         </div>
         <FormField
           label="浏览器语言"
-          className="md:col-span-2"
+          
           description={
             <Hint>
               想看懂菜单和设置页时选中文：浏览器界面、网页读到的语言和日期格式会一起换成中文，时区仍按出口 IP。只换界面、网页语言不变会被检测网站判为语言不一致，所以三者一起换。也可以在浏览器设置页“语言”里加中文：放在第一位后浏览器会在几秒内自动重启并恢复标签页；放在后面只作备用语言。

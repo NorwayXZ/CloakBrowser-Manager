@@ -60,7 +60,7 @@ export function AdvancedSection({ editor, profileId, hostOS }: { editor: Editor;
           {form.warmup_enabled && <WarmupPanel editor={editor} profileId={profileId} />}
         </fieldset>
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-1">
           <FormField label="颜色偏好" description="网页里的 prefers-color-scheme；不确定就选跟随系统。">
             <Select value={form.color_scheme ?? ""} onChange={(event) => set("color_scheme", event.target.value || null)}>
               <option value="">跟随系统</option>

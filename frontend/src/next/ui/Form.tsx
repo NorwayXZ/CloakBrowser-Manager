@@ -36,6 +36,10 @@ function useField(id?: string, invalid?: boolean, describedBy?: string) {
   };
 }
 
+/** "stacked" (label above, the default) or "inline" (label left, control right: the environment editor). */
+const FormLayoutCtx = createContext<"stacked" | "inline">("stacked");
+export const FormLayoutProvider = FormLayoutCtx.Provider;
+
 export function FormField({
   label,
   description,
@@ -55,25 +59,44 @@ export function FormField({
   const descId = description ? `${id}-desc` : undefined;
   const errId = error ? `${id}-err` : undefined;
   const describedBy = [errId, descId].filter(Boolean).join(" ") || undefined;
+  const inline = useContext(FormLayoutCtx) === "inline";
+  const labelNode = (
+    <label htmlFor={id} className={cn("text-sm font-medium text-fg", inline && "md:pt-1.5 md:text-right")}>
+      {label}
+      {required && <span className="ml-0.5 text-danger" aria-hidden>*</span>}
+    </label>
+  );
+  const extras = (
+    <>
+      {error && (
+        <p id={errId} className="text-xs text-danger" role="alert">
+          {error}
+        </p>
+      )}
+      {description && (
+        <p id={descId} className="text-xs text-fg-3">
+          {description}
+        </p>
+      )}
+    </>
+  );
   return (
     <FieldCtx.Provider value={{ id, describedBy, invalid: Boolean(error) }}>
-      <div className={cn("flex min-w-0 flex-col gap-1.5", className)}>
-        <label htmlFor={id} className="text-sm font-medium text-fg">
-          {label}
-          {required && <span className="ml-0.5 text-danger" aria-hidden>*</span>}
-        </label>
-        {children}
-        {error && (
-          <p id={errId} className="text-xs text-danger" role="alert">
-            {error}
-          </p>
-        )}
-        {description && (
-          <p id={descId} className="text-xs text-fg-3">
-            {description}
-          </p>
-        )}
-      </div>
+      {inline ? (
+        <div className={cn("grid min-w-0 grid-cols-1 gap-x-4 gap-y-1.5 md:grid-cols-[128px_minmax(0,1fr)]", className)}>
+          {labelNode}
+          <div className="flex min-w-0 flex-col gap-1.5">
+            {children}
+            {extras}
+          </div>
+        </div>
+      ) : (
+        <div className={cn("flex min-w-0 flex-col gap-1.5", className)}>
+          {labelNode}
+          {children}
+          {extras}
+        </div>
+      )}
     </FieldCtx.Provider>
   );
 }

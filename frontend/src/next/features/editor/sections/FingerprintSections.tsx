@@ -29,7 +29,7 @@ export function FingerprintSection({ editor, hostOS, hostScreen, isEdit }: { edi
       <div className="mb-5 max-w-form rounded-md border border-border bg-surface-2 p-3">
         <KeyValueList items={preview.map(([label, value]) => ({ label, value }))} />
       </div>
-      <div className="grid max-w-form grid-cols-1 gap-4 md:grid-cols-2">
+      <div className="grid max-w-form grid-cols-1 gap-4 md:grid-cols-1">
         <FormField
           label="稳定种子"
           description={
@@ -82,7 +82,7 @@ export function FingerprintSection({ editor, hostOS, hostScreen, isEdit }: { edi
           </Select>
         </FormField>
         {!follows && resolution === "custom" && (
-          <div className="grid grid-cols-2 gap-2 md:col-span-2">
+          <div className="grid grid-cols-2 gap-2">
             <FormField label="宽" description="会直接影响窗口尺寸和 screen 相关字段，建议只填真实设备常见的比例。">
               <Input type="number" inputMode="numeric" value={form.screen_width ?? 1920} onChange={(event) => set("screen_width", Number(event.target.value))} />
             </FormField>
@@ -102,7 +102,7 @@ export function FingerprintSection({ editor, hostOS, hostScreen, isEdit }: { edi
             <option value="8">8 GB</option>
           </Select>
         </FormField>
-        <FormField label="GPU 预设" className="md:col-span-2" description="同时填入厂商和渲染器，避免厂商、芯片和 WebGL 信息互相矛盾。">
+        <FormField label="GPU 预设"  description="同时填入厂商和渲染器，避免厂商、芯片和 WebGL 信息互相矛盾。">
           <Select
             value=""
             onChange={(event) => {
@@ -118,10 +118,10 @@ export function FingerprintSection({ editor, hostOS, hostScreen, isEdit }: { edi
             ))}
           </Select>
         </FormField>
-        <FormField label="GPU 厂商" className="md:col-span-2" description="通常不用改；只有用防检测浏览器并且明确知道目标设备时才填。">
+        <FormField label="GPU 厂商"  description="通常不用改；只有用防检测浏览器并且明确知道目标设备时才填。">
           <Input value={form.gpu_vendor ?? ""} placeholder="按设备型号或真实设备" onChange={(event) => set("gpu_vendor", event.target.value || null)} />
         </FormField>
-        <FormField label="GPU 渲染器" className="md:col-span-2" description="WebGL 元数据里最显眼的硬件信息，必须和当前设备型号一致。">
+        <FormField label="GPU 渲染器"  description="WebGL 元数据里最显眼的硬件信息，必须和当前设备型号一致。">
           <Input value={form.gpu_renderer ?? ""} placeholder="按设备型号或真实设备" onChange={(event) => set("gpu_renderer", event.target.value || null)} />
         </FormField>
       </div>
@@ -146,7 +146,7 @@ export function MoreFingerprintSection({ editor, hostOS }: { editor: Editor; hos
   const geolocation = options.geolocation ?? "ip";
   return (
     <Section id="form-more-fingerprint" title="更多指纹" description="CloakBrowser 内核自带的额外伪装项。全部留默认时由内核按稳定种子生成，已经是一套一致的指纹；只在明确需要时才改。">
-      <div className="grid max-w-form grid-cols-1 gap-5 md:grid-cols-2">
+      <div className="grid max-w-form grid-cols-1 gap-5 md:grid-cols-1">
         <FormField label="浏览器品牌" description="改 User-Agent 和 Client Hints 里的浏览器名称，内核本身不变。">
           <Select value={options.brand ?? ""} onChange={(event) => setOption("brand", (event.target.value || null) as FingerprintOptions["brand"])}>
             <option value="">Chrome（默认）</option>
@@ -185,7 +185,7 @@ export function MoreFingerprintSection({ editor, hostOS }: { editor: Editor; hos
         </FormField>
         <FormField
           label="WebRTC"
-          className="md:col-span-2"
+          
           description={options.webrtc === "custom" ? "网页通过 WebRTC 看到的公网 IP 固定为这里填的地址。" : "用代理时网页通过 WebRTC 看到的是代理出口 IP，防止泄露真实 IP；直连时保持真实。"}
         >
           <div className="flex flex-wrap items-center gap-2">
@@ -205,7 +205,7 @@ export function MoreFingerprintSection({ editor, hostOS }: { editor: Editor; hos
             )}
           </div>
         </FormField>
-        <FormField label="指纹噪声" className="md:col-span-2" description={<Hint>噪声让每个环境的 Canvas、WebGL、音频输出各不相同。实测多数现代检测器对噪声净扣分，新建环境默认关闭；想回到内核默认可以切回“自动”；macOS 设备型号默认关闭。</Hint>}>
+        <FormField label="指纹噪声"  description={<Hint>噪声让每个环境的 Canvas、WebGL、音频输出各不相同。实测多数现代检测器对噪声净扣分，新建环境默认关闭；想回到内核默认可以切回“自动”；macOS 设备型号默认关闭。</Hint>}>
           <Segmented
             label="指纹噪声"
             value={options.noise == null ? "auto" : options.noise ? "on" : "off"}
@@ -239,7 +239,7 @@ export function MoreFingerprintSection({ editor, hostOS }: { editor: Editor; hos
             )}
           </div>
         </FormField>
-        <fieldset className="flex flex-col gap-3 md:col-span-2">
+        <fieldset className="flex flex-col gap-3">
           <legend className="mb-2 text-sm font-medium text-fg">兼容选项</legend>
           {form.platform === "windows" && (
             <Checkbox
