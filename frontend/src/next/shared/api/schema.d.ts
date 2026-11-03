@@ -3622,6 +3622,11 @@ export interface components {
         };
         /** ProxyRotationSettings */
         ProxyRotationSettings: {
+            /**
+             * Allow Local
+             * @default false
+             */
+            allow_local: boolean;
             /** Body */
             body?: {
                 [key: string]: unknown;

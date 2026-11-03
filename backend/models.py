@@ -625,6 +625,8 @@ class ProxyRotationSettings(BaseModel):
     shared_group: str = Field(default="", max_length=64)
     headers: dict[str, str] = Field(default_factory=dict)
     body: dict | None = None
+    # Opt-in per proxy: lets a refresh link target this machine (127.0.0.1 / localhost / ::1).
+    allow_local: bool = False
 
 
 class ProxyRotationRequest(BaseModel):
