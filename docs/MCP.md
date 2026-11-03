@@ -10,6 +10,16 @@ Manager 本体是唯一的执行者。
 
 > 给 agent 看的使用说明（概念、标准流程、禁忌、错误码）在 [AGENT.md](AGENT.md)；桥连接时也会通过 MCP `instructions` 把要点发给 agent。
 
+## 给 AI 装技能包（推荐）
+
+仓库里的 `skills/cloakbrowser-manager/` 是一份写给 AI 的技能包：什么时候该用、怎么连、标准流程、红线、错误怎么处理，加一份自动生成的工具参考。装上后 AI 先读它再动手，比只看工具列表少走弯路。
+
+```bash
+npx skills add https://github.com/NorwayXZ/CloakBrowser-Manager --skill cloakbrowser-manager
+```
+
+适用于 Claude Code、Codex、Cursor、OpenCode、Gemini CLI 等支持 Skills 的工具。工具参考由 `python scripts/gen_skill_reference.py` 生成，测试会检查它和 Manager 实际的工具一致。
+
 ## 使用前提
 
 1. **先打开 Manager**（面板后端在跑）。桥连不上 Manager 时，所有工具只会回结构化错误 `manager_unreachable`，不会假装成功。

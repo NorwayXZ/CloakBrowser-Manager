@@ -2142,7 +2142,7 @@ TOOL_EN: dict[str, str] = {
     "get_proxy_rotation_result": "Read a rotation job without triggering another refresh request.",
     "rotate_proxy_ip": "Rotate a SOCKS5 exit via its configured supplier link and verify the actual route.",
     "manager_status": "Overview: versions, running browsers, profile count, active automation. Call this first.",
-    "list_profiles": "List all profiles (id, name, platform, device, timezone/locale, fingerprint config, state). Proxy shown as endpoint only; no notes or cookies.",
+    "list_profiles": "List profiles, 200 per page (page/limit; filter by group_name, query, status). Walk every page before acting on \"all\". Proxy shown as endpoint only; no notes or cookies.",
     "get_profile": "One profile's full config (same field policy) plus live run state.",
     "get_profile_preflight": "Pre-launch consistency check: can this profile launch now, and what is wrong.",
     "list_device_templates": "Device template library summary (id, screen, GPU, CPU, cores, memory).",
