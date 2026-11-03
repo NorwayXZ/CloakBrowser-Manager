@@ -207,7 +207,11 @@ def screens(page: Page, base: str):
         page.get_by_role("button", name="取消").click(),
         page.wait_for_selector("text=放弃没保存的修改？"))), False
     yield "03a-proxies", go("/proxies", "text=美国 SOCKS5"), False
+    yield "03a2-proxies-add", with_action("/proxies", "text=美国 SOCKS5", lambda: (
+        page.get_by_role("button", name="添加代理").click(),
+        page.wait_for_selector("role=dialog"))), False
     yield "03b-proxies-batch", with_action("/proxies", "text=美国 SOCKS5", lambda: (
+        page.get_by_role("button", name="添加代理").click(),
         page.get_by_role("tab", name="批量导入").click(),
         page.get_by_label("批量代理").fill("192.168.0.1:8000\nsocks5://user:pass@10.0.0.1:1080\nvless://uuid@edge.example.com:443?security=tls#东京\n写错的一行"))), False
     yield "04a-data", go("/data", "text=备份记录"), True

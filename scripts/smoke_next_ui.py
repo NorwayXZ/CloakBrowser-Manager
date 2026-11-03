@@ -152,11 +152,13 @@ def run(page: Page, base: str) -> None:
 
     step("proxies: add one, add a batch, delete one")
     page.goto(base + "/proxies")
+    page.get_by_role("button", name="添加代理").click()
     page.get_by_label("代理名称").fill("冒烟 SOCKS5")
     page.get_by_placeholder("192.168.100.1 或 proxy.example.com").fill("203.0.113.88")
     page.get_by_placeholder("1090").fill("1080")
     page.get_by_role("button", name="保存代理").click()
     expect(page.get_by_role("row", name="冒烟 SOCKS5")).to_be_visible()
+    page.get_by_role("button", name="添加代理").click()
     page.get_by_role("tab", name="批量导入").click()
     page.get_by_label("批量代理").fill("198.51.100.20:8000\nsocks5://u:p@198.51.100.21:1080\n乱写的一行")
     expect(page.get_by_text("1 行无法识别，会跳过")).to_be_visible()

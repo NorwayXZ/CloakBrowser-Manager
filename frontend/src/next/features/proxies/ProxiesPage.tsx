@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Globe2, Trash2, Wifi } from "lucide-react";
+import { Globe2, Plus, Trash2, Wifi } from "lucide-react";
 import { useMemo, useState } from "react";
 import { request } from "../../shared/api/client";
 import { maskProxy } from "../../shared/lib/mask";
@@ -73,6 +73,7 @@ function ExitProxiesPage() {
   const toast = useToast();
   const confirm = useConfirm();
   const [testing, setTesting] = useState<SavedPreset | null>(null);
+  const [adding, setAdding] = useState(false);
   const remove = useMutation({
     mutationFn: proxiesApi.remove,
     onSettled: () => queryClient.invalidateQueries({ queryKey: editorKeys.proxyPresets }),
@@ -98,8 +99,16 @@ function ExitProxiesPage() {
 
   return (
     <div className="flex flex-col gap-6 pb-8 pt-2">
-      <PageHeader title="代理" description={presets.isSuccess ? `共 ${list.length} 个保存的代理。新建或编辑环境时可以直接选用。` : "保存常用代理，新建或编辑环境时直接选用。"} />
-      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <PageHeader
+        title="代理"
+        description={presets.isSuccess ? `共 ${list.length} 个保存的代理。新建或编辑环境时可以直接选用。` : "保存常用代理，新建或编辑环境时直接选用。"}
+        actions={
+          <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setAdding(true)}>
+            添加代理
+          </Button>
+        }
+      />
+      <div>
         <div className="min-w-0">
           {presets.isPending ? (
             <Skeleton className="h-48 w-full" />
@@ -107,7 +116,7 @@ function ExitProxiesPage() {
             <ErrorState message={presets.error.message} onRetry={() => void presets.refetch()} />
           ) : list.length === 0 ? (
             <div className="glass rounded-lg">
-              <EmptyState icon={Globe2} title="还没有保存的代理" description="在右边添加一个，或者一次粘贴一批。保存后在新建、编辑环境时可以直接选用。" />
+              <EmptyState icon={Globe2} title="还没有保存的代理" description="点右上角“添加代理”，可以单个添加，也可以一次粘贴一批。保存后在新建、编辑环境时可以直接选用。" />
             </div>
           ) : (
             <Table label="保存的代理" minWidth={540}>
@@ -153,28 +162,28 @@ function ExitProxiesPage() {
             </Table>
           )}
         </div>
-        <AddPanel />
       </div>
+      <AddDialog open={adding} onClose={() => setAdding(false)} />
       {testing && <TestDialog preset={testing} onClose={() => setTesting(null)} />}
     </div>
   );
 }
 
-function AddPanel() {
+function AddDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [tab, setTab] = useState("single");
   return (
-    <div className="glass rounded-lg p-4">
+    <Dialog open={open} onOpenChange={(next) => !next && onClose()} title="添加代理" description="保存后，新建或编辑环境时可以直接选用。">
       <Tabs
         inset
         label="添加代理"
         value={tab}
         onValueChange={setTab}
         tabs={[
-          { value: "single", label: "单个添加", content: <SingleForm /> },
-          { value: "batch", label: "批量导入", content: <BatchForm /> },
+          { value: "single", label: "单个添加", content: <SingleForm onDone={onClose} /> },
+          { value: "batch", label: "批量导入", content: <BatchForm onDone={onClose} /> },
         ]}
       />
-    </div>
+    </Dialog>
   );
 }
 
@@ -183,7 +192,7 @@ function useSaved() {
   return () => queryClient.invalidateQueries({ queryKey: editorKeys.proxyPresets });
 }
 
-function SingleForm() {
+function SingleForm({ onDone }: { onDone: () => void }) {
   const toast = useToast();
   const saved = useSaved();
   const [name, setName] = useState("");
@@ -213,6 +222,7 @@ function SingleForm() {
       setUsername("");
       setPassword("");
       setLink("");
+      onDone();
     } catch (err) {
       setError({ field: "server", text: message(err) });
     } finally {
@@ -276,7 +286,7 @@ function SingleForm() {
   );
 }
 
-function BatchForm() {
+function BatchForm({ onDone }: { onDone: () => void }) {
   const toast = useToast();
   const saved = useSaved();
   const [mode, setMode] = useState<ProxyMode>("socks5");
@@ -303,6 +313,7 @@ function BatchForm() {
       await saved();
       toast.show({ tone: "success", title: `已保存 ${items.length} 个代理` });
       setText("");
+      onDone();
     } catch (err) {
       setError(message(err));
     } finally {

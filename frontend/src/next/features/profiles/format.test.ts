@@ -48,7 +48,8 @@ describe("proxyHost", () => {
 
 describe("locationText", () => {
   it("combines country and city, or says when it will be detected", () => {
-    expect(locationText({ proxy: "http://x:1", proxy_geo: { country_code: "US", country: "United States", region: "WA", city: "Seattle" } })).toBe("US - United States · WA / Seattle");
+    expect(locationText({ proxy: "http://x:1", proxy_geo: { country_code: "US", country: "United States", region: "WA", city: "Seattle" } })).toBe("🇺🇸 WA / Seattle");
+    expect(locationText({ proxy: null, proxy_geo: { country_code: "XYZ", country: "Nowhere" } })).toBe("XYZ - Nowhere");
     expect(locationText({ proxy: "http://x:1", proxy_geo: null })).toBe("打开后检测");
     expect(locationText({ proxy: null, proxy_geo: null })).toBe("启动时检测本地出口");
     expect(locationText({ proxy: null, proxy_geo: {} })).toBe("未知地区");
