@@ -329,7 +329,6 @@ describe("settings › AI", () => {
 
 describe("settings › API 与 MCP", () => {
   const NO_TOKENS = { enforced: true, scopes: ["read", "control", "cdp"], tokens: [] };
-  const TOKEN = { id: "t1", name: "codex 笔记本", scope: "control", created_at: 1_700_000_000 };
   const AUDIT = [{ id: "a1", ts: "2026-10-26T01:00:00+00:00", client_name: "codex", client_version: null, tool: "open_browser", args_summary: {}, ok: false, reason: "profile_leased", duration_ms: 12 }];
   let mode: string;
 
@@ -380,7 +379,7 @@ describe("settings › API 与 MCP", () => {
     const origin = window.location.origin;
     const claude = screen.getByLabelText("Claude Code配置");
     expect(claude).toHaveTextContent(`claude mcp add --transport http cloakbrowser-manager ${origin}/api/agent/mcp`);
-    expect(claude).toHaveTextContent("Authorization: Bearer <你的令牌>");
+    expect(claude).toHaveTextContent("Authorization: Bearer <你的 AUTH_TOKEN>");
     expect(screen.getByRole("button", { name: "复制Claude Code配置" })).toBeInTheDocument();
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Codex" }), { button: 0 });
     expect(screen.getByLabelText("Codex配置")).toHaveTextContent(`url = "${origin}/api/agent/mcp"`);
@@ -397,75 +396,19 @@ describe("settings › API 与 MCP", () => {
     await open("/settings/agent", agentRoutes([], { ...NO_TOKENS, enforced: false }), "连接 AI 工具");
     const claude = screen.getByLabelText("Claude Code配置");
     expect(claude).not.toHaveTextContent("Authorization");
-    expect(screen.queryByText(/要换成令牌/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/AUTH_TOKEN/)).not.toBeInTheDocument();
   });
 
-  it("puts a freshly issued token into the commands", async () => {
-    let tokens: unknown[] = [];
-    await open(
-      "/settings/agent",
-      agentRoutes([
-        { path: "/api/agent/tokens", respond: () => ({ ...NO_TOKENS, tokens }) },
-        { method: "POST", path: "/api/agent/tokens", status: 201, respond: () => ((tokens = [TOKEN]), { token: "cbm_control_SECRET", record: TOKEN, enforced: true, note: "" }) },
-      ]),
-      "连接 AI 工具",
-    );
-    expect(screen.getByLabelText("Claude Code配置")).toHaveTextContent("<你的令牌>");
-    fireEvent.change(await screen.findByLabelText("名称"), { target: { value: "codex 笔记本" } });
-    fireEvent.click(screen.getByRole("button", { name: "签发 token" }));
-    await screen.findByText(/只显示这一次/);
-    expect(screen.getByLabelText("Claude Code配置")).toHaveTextContent("Bearer cbm_control_SECRET");
-    fireEvent.click(screen.getByRole("button", { name: "我已保存，关闭" }));
-    expect(screen.getByLabelText("Claude Code配置")).toHaveTextContent("<你的令牌>");
+  it("has no agent-token section: nothing to issue, the commands need no token", async () => {
+    await open("/settings/agent", agentRoutes([], { ...NO_TOKENS, enforced: false }), "连接 AI 工具");
+    expect(screen.queryByRole("button", { name: "签发 token" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Agent token")).not.toBeInTheDocument();
+    expect(screen.queryByText(/token 不会被检查/)).not.toBeInTheDocument();
   });
 
-  it("issues a token, shows it once, and lists it", async () => {
-    let tokens: unknown[] = [];
-    const { fetchMock } = await open(
-      "/settings/agent",
-      agentRoutes([
-        { path: "/api/agent/tokens", respond: () => ({ ...NO_TOKENS, tokens }) },
-        { method: "POST", path: "/api/agent/tokens", status: 201, respond: () => ((tokens = [TOKEN]), { token: "cbm_control_SECRET", record: TOKEN, enforced: true, note: "" }) },
-      ]),
-      "Agent token",
-    );
-    const issue = await screen.findByRole("button", { name: "签发 token" });
-    expect(issue).toBeDisabled();
-    expect(screen.getByText("还没有签发过 token。")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("名称"), { target: { value: " codex 笔记本 " } });
-    fireEvent.change(screen.getByLabelText("权限范围"), { target: { value: "control" } });
-    fireEvent.click(issue);
-    expect(await screen.findByText("cbm_control_SECRET")).toBeInTheDocument();
-    expect(screen.getByText(/只显示这一次/)).toBeInTheDocument();
-    expect(bodies(fetchMock, "POST", "/api/agent/tokens")).toEqual([{ name: "codex 笔记本", scope: "control" }]);
-    expect(await screen.findByRole("button", { name: "撤销 codex 笔记本" })).toBeInTheDocument();
-    await expectNoAxeViolations(document.body);
-    fireEvent.click(screen.getByRole("button", { name: "我已保存，关闭" }));
-    expect(screen.queryByText("cbm_control_SECRET")).not.toBeInTheDocument();
-  });
-
-  it("revokes a token only after confirmation", async () => {
-    let tokens = [TOKEN];
-    const { fetchMock } = await open(
-      "/settings/agent",
-      agentRoutes([
-        { path: "/api/agent/tokens", respond: () => ({ ...NO_TOKENS, tokens }) },
-        { method: "DELETE", path: "/api/agent/tokens/t1", respond: () => ((tokens = []), { ok: true }) },
-      ]),
-      "Agent token",
-    );
-    fireEvent.click(await screen.findByRole("button", { name: "撤销 codex 笔记本" }));
-    await cancelDialog();
-    expect(bodies(fetchMock, "DELETE", "/api/agent/tokens/t1")).toEqual([]);
-    fireEvent.click(screen.getByRole("button", { name: "撤销 codex 笔记本" }));
-    await confirmWith("撤销");
-    expect(await screen.findByText("还没有签发过 token。")).toBeInTheDocument();
-    expect(bodies(fetchMock, "DELETE", "/api/agent/tokens/t1")).toHaveLength(1);
-  });
-
-  it("tells the user tokens are not checked when the Manager has no sign-in", async () => {
-    await open("/settings/agent", agentRoutes([], { ...NO_TOKENS, enforced: false }), "Agent token");
-    expect(await screen.findByText(/token 不会被检查/)).toBeInTheDocument();
+  it("tells the user to fill in AUTH_TOKEN when the Manager has login protection", async () => {
+    await open("/settings/agent", agentRoutes(), "连接 AI 工具");
+    expect(await screen.findByText(/换成你启动时设的 AUTH_TOKEN/)).toBeInTheDocument();
   });
 
   it("shows recent agent calls, failures with their reason", async () => {

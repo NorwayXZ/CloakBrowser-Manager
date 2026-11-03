@@ -1,8 +1,8 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { KeyRound, RefreshCw, Trash2 } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { cn } from "../../shared/lib/cn";
-import { Badge, Banner, Button, CodeBlock, CopyField, ErrorState, FormField, IconButton, Input, Section, Select, Skeleton, Table, TD, TH, THead, Tabs, TR, useConfirm, useToast } from "../../ui";
+import { Banner, Button, CodeBlock, CopyField, ErrorState, Section, Skeleton, Table, TD, TH, THead, Tabs, TR, useToast } from "../../ui";
 import {
   message,
   settingsApi,
@@ -10,9 +10,6 @@ import {
   useAgentTokens,
   useMcpAudit,
   useMcpMode,
-  type AgentToken,
-  type AgentTokenCreated,
-  type AgentTokenScope,
   type McpMode,
 } from "./api";
 
@@ -23,26 +20,17 @@ const MODES: { id: McpMode; title: string; text: string }[] = [
   { id: "automation", title: "全部开放（默认）", text: "没有限制：操作页面、读写 Cookie、执行脚本、删除环境、批准养号和进化提案，并交出 CDP 端点。" },
 ];
 
-const SCOPES: { id: AgentTokenScope; title: string }[] = [
-  { id: "read", title: "read · 只读" },
-  { id: "control", title: "control · 可启停" },
-  { id: "cdp", title: "cdp · 可操作页面" },
-];
-
 function formatTime(value: string | number): string {
   const date = typeof value === "number" ? new Date(value * 1000) : new Date(value);
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-/** 设置 › AI 接入: what AI agents may do, the addresses they connect to, their tokens and what they did. */
+/** 设置 › AI 接入: the addresses AI agents connect to, what they may do, and what they did. */
 export function AgentAccessSection() {
-  // The token just issued: shown once, and used to fill the connection commands.
-  const [issued, setIssued] = useState<AgentTokenCreated | null>(null);
   return (
     <div className="flex flex-col gap-6">
-      <ConnectSection token={issued?.token ?? null} />
+      <ConnectSection />
       <PermissionSection />
-      <TokenSection created={issued} onCreated={setIssued} />
       <AuditSection />
     </div>
   );
@@ -133,11 +121,12 @@ function PermissionSection() {
   );
 }
 
-const TOKEN_PLACEHOLDER = "<你的令牌>";
+// Only used when the Manager has login protection on: the admin token (AUTH_TOKEN) is the bearer.
+const TOKEN_PLACEHOLDER = "<你的 AUTH_TOKEN>";
 
-function connectionSnippets(origin: string, token: string | null, enforced: boolean) {
+function connectionSnippets(origin: string, enforced: boolean) {
   const mcpUrl = `${origin}/api/agent/mcp`;
-  const bearer = token ?? TOKEN_PLACEHOLDER;
+  const bearer = TOKEN_PLACEHOLDER;
   return [
     {
       id: "claude-code",
@@ -150,9 +139,9 @@ function connectionSnippets(origin: string, token: string | null, enforced: bool
     {
       id: "codex",
       label: "Codex",
-      note: enforced ? "写进 ~/.codex/config.toml，令牌放在环境变量里。" : "写进 ~/.codex/config.toml。",
+      note: enforced ? "写进 ~/.codex/config.toml，AUTH_TOKEN 放在环境变量里。" : "写进 ~/.codex/config.toml。",
       code: enforced
-        ? `[mcp_servers.cloakbrowser-manager]\nurl = "${mcpUrl}"\nbearer_token_env_var = "CLOAK_AGENT_TOKEN"\n\n# 终端里：\nexport CLOAK_AGENT_TOKEN=${bearer}`
+        ? `[mcp_servers.cloakbrowser-manager]\nurl = "${mcpUrl}"\nbearer_token_env_var = "CLOAK_AUTH_TOKEN"\n\n# 终端里：\nexport CLOAK_AUTH_TOKEN=${bearer}`
         : `[mcp_servers.cloakbrowser-manager]\nurl = "${mcpUrl}"`,
     },
     {
@@ -183,22 +172,20 @@ function connectionSnippets(origin: string, token: string | null, enforced: bool
   ];
 }
 
-function ConnectSection({ token }: { token: string | null }) {
+function ConnectSection() {
   const tokens = useAgentTokens();
   const origin = window.location.origin;
   const enforced = tokens.data?.enforced ?? false;
-  const snippets = connectionSnippets(origin, token, enforced);
+  const snippets = connectionSnippets(origin, enforced);
   const [snippetTab, setSnippetTab] = useState("claude-code");
   return (
     <Section
       id="agent-connect"
       title="连接 AI 工具"
-      description="选一个客户端，复制下面的命令。地址已经填好；开启了登录保护时，先在上面签发令牌，命令里的令牌会自动替换。"
+      description="选一个客户端，复制下面的命令，地址已经填好，不需要令牌。"
     >
       <div className="flex flex-col gap-5">
-        {enforced && !token && (
-          <Banner tone="info">命令里的「{TOKEN_PLACEHOLDER}」要换成令牌。令牌只在签发那一刻显示，刚签发的会自动填进来。</Banner>
-        )}
+        {enforced && <Banner tone="info">这个 Manager 开了登录保护：命令里的「{TOKEN_PLACEHOLDER}」换成你启动时设的 AUTH_TOKEN。</Banner>}
         <Tabs
           label="选择 AI 工具"
           value={snippetTab}
@@ -231,148 +218,6 @@ function ConnectSection({ token }: { token: string | null }) {
             <CopyField label="使用指南地址" value={`${origin}/api/agent/guide`} />
           </dd>
         </dl>
-      </div>
-    </Section>
-  );
-}
-
-function TokenSection({ created, onCreated }: { created: AgentTokenCreated | null; onCreated: (token: AgentTokenCreated | null) => void }) {
-  const tokens = useAgentTokens();
-  const queryClient = useQueryClient();
-  const confirm = useConfirm();
-  const toast = useToast();
-  const [name, setName] = useState("");
-  const [scope, setScope] = useState<AgentTokenScope>("control");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = () => queryClient.invalidateQueries({ queryKey: settingsKeys.agentTokens });
-
-  const create = async () => {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await settingsApi.createAgentToken(trimmed, scope);
-      onCreated(result);
-      setName("");
-      await refresh();
-    } catch (err) {
-      setError(message(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const revoke = async (token: AgentToken) => {
-    const ok = await confirm({
-      title: `撤销「${token.name}」？`,
-      description: "使用它的 agent 会立刻失去访问权限。",
-      confirmLabel: "撤销",
-      danger: true,
-    });
-    if (!ok) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await settingsApi.revokeAgentToken(token.id);
-      if (created?.record.id === token.id) onCreated(null);
-      await refresh();
-      toast.show({ tone: "success", title: `已撤销「${token.name}」` });
-    } catch (err) {
-      setError(message(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const title = "Agent token";
-  const description = "给 agent 单独签发的访问令牌，权限比管理员令牌小，并且只能使用已脱敏的 agent 接口，读不到 Cookie 和代理账密。";
-  if (tokens.isPending) {
-    return (
-      <Section id="agent-tokens" title={title} description={description}>
-        <Skeleton className="h-24 w-full" />
-      </Section>
-    );
-  }
-  if (tokens.isError) {
-    return (
-      <Section id="agent-tokens" title={title} description={description}>
-        <ErrorState title="token 列表没有读出来" message={tokens.error.message} onRetry={() => void tokens.refetch()} retrying={tokens.isFetching} />
-      </Section>
-    );
-  }
-
-  const list = tokens.data;
-  return (
-    <Section id="agent-tokens" title={title} description={description} actions={<KeyRound className="h-4 w-4 text-fg-3" aria-hidden />}>
-      <div className="flex flex-col gap-4">
-        {!list.enforced && (
-          <Banner tone="warning">
-            这个 Manager 没有开启登录鉴权，token 不会被检查：本机任何进程本来就等同管理员。需要限制 agent 时，请先在「账号与安全」里设置管理员密码，或用 AUTH_TOKEN 启动。
-          </Banner>
-        )}
-        {created && (
-          <Banner
-            tone="success"
-            title={`「${created.record.name}」的 token 只显示这一次，请立刻保存`}
-            action={
-              <Button size="sm" onClick={() => onCreated(null)}>
-                我已保存，关闭
-              </Button>
-            }
-          >
-            <CopyField label="token" value={created.token} className="mt-1.5" />
-          </Banner>
-        )}
-        <form
-          className="flex flex-wrap items-start gap-3"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void create();
-          }}
-        >
-          <FormField label="名称" className="w-full sm:w-56">
-            <Input value={name} placeholder="如：codex 笔记本" maxLength={80} onChange={(event) => setName(event.target.value)} />
-          </FormField>
-          <FormField label="权限范围" className="w-full sm:w-52">
-            <Select value={scope} onChange={(event) => setScope(event.target.value as AgentTokenScope)}>
-              {SCOPES.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.title}
-                </option>
-              ))}
-            </Select>
-          </FormField>
-          <Button type="submit" variant="primary" className="sm:mt-6" loading={busy} disabled={busy || !name.trim()}>
-            签发 token
-          </Button>
-        </form>
-        {error && <Banner tone="danger" title="操作没有成功">{error}</Banner>}
-        {list.tokens.length === 0 ? (
-          <p className="text-sm text-fg-2">还没有签发过 token。</p>
-        ) : (
-          <ul className="divide-y divide-border rounded-md border border-border">
-            {list.tokens.map((token) => (
-              <li key={token.id} className="flex items-center gap-3 px-3 py-2 text-sm">
-                <span className="min-w-0 flex-1 truncate font-medium text-fg" title={token.name}>
-                  {token.name}
-                </span>
-                <Badge className="font-mono">{token.scope}</Badge>
-                <span className="shrink-0 text-xs text-fg-3">{formatTime(token.created_at)}</span>
-                <IconButton
-                  size="sm"
-                  variant="danger-ghost"
-                  label={`撤销 ${token.name}`}
-                  icon={<Trash2 className="h-3.5 w-3.5" />}
-                  disabled={busy}
-                  onClick={() => void revoke(token)}
-                />
-              </li>
-            ))}
-          </ul>
-        )}
       </div>
     </Section>
   );

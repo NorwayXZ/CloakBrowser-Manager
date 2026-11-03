@@ -42,30 +42,10 @@ export interface VaultEntry {
 
 export type McpMode = Schemas["McpSettingsModel"]["mode"];
 export type McpAuditEntry = Schemas["McpAuditResponse"];
-export type AgentTokenScope = "read" | "control" | "cdp";
-
-// /api/agent/tokens answers plain dicts (no response model), matching backend/main.py.
-export interface AgentToken {
-  id: string;
-  name: string;
-  scope: AgentTokenScope;
-  /** Unix seconds. */
-  created_at: number;
-}
-
+// /api/agent/tokens answers a plain dict (no response model). The panel only needs to know whether the
+// Manager has login protection: without it agent tokens are not checked at all.
 export interface AgentTokenList {
-  /** False when the Manager has no authentication: tokens are then not checked. */
   enforced: boolean;
-  scopes: AgentTokenScope[];
-  tokens: AgentToken[];
-}
-
-export interface AgentTokenCreated {
-  /** Plaintext token, shown exactly once. */
-  token: string;
-  record: AgentToken;
-  enforced: boolean;
-  note: string;
 }
 
 export type AppUpdatePhase = "idle" | "checking" | "downloading" | "backing_up" | "preparing" | "restarting" | "failed";
@@ -133,9 +113,6 @@ export const settingsApi = {
   mcpMode: () => request<{ mode: McpMode }>("/api/settings/mcp"),
   saveMcpMode: (mode: McpMode) => request<{ mode: McpMode }>("/api/settings/mcp", { method: "PUT", body: { mode } }),
   agentTokens: () => request<AgentTokenList>("/api/agent/tokens"),
-  createAgentToken: (name: string, scope: AgentTokenScope) =>
-    request<AgentTokenCreated>("/api/agent/tokens", { method: "POST", body: { name, scope } }),
-  revokeAgentToken: (id: string) => request<{ ok: boolean }>(`/api/agent/tokens/${enc(id)}`, { method: "DELETE" }),
   mcpAudit: (limit: number) => request<McpAuditEntry[]>(`/api/mcp/audit?limit=${limit}`),
 
   vault: () => request<{ entries: VaultEntry[] }>("/api/vault"),

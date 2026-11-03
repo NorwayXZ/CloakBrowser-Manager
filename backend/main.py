@@ -3721,7 +3721,9 @@ _NO_CACHE = {"Cache-Control": "no-cache"}
 @app.get("/{full_path:path}")
 async def serve_spa(full_path: str, request: Request):
     """Serve the React panel: every route that is not an API call returns a page."""
-    if full_path.startswith("api/") or not FRONTEND_DIR.exists():
+    # .well-known/* is probed by MCP / OAuth clients: answering with the panel's HTML
+    # makes them think discovery succeeded and fail on parsing, so it must be a plain 404.
+    if full_path.startswith(("api/", ".well-known/")) or not FRONTEND_DIR.exists():
         raise HTTPException(status_code=404, detail="Not found")
     if full_path == "next" or full_path.startswith("next/"):
         # The redesigned panel used to live here while it was in preview.
