@@ -89,7 +89,17 @@ Codex 的配置见 [AGENT.md](AGENT.md#在-codex-里配置)（stdio 和 HTTP 两
 
 只读（14）：`manager_status`、`list_profiles`、`get_profile`、`get_profile_preflight`、`list_device_templates`、`get_linkability`、`list_site_check_reports`、`get_site_check_report`、`get_current_site_check`、`get_fingerprint_report`、`get_warmup_state`、`list_warmup_scripts`、`get_evolution`、`get_kernel_info`。
 
-动作（5，需 `full` 或 `automation`）：`launch_profile`、`stop_profile`、`run_site_check`、`run_warmup`、`run_evolution`。
+只读里还有 `list_groups`（分组和各自画像数）、`list_running`（正在运行的画像）、`list_trash`（回收站）；`list_profiles` 现在分页（默认每页 200 个，`total_pages` 大于 1 时要翻完再对“全部”做事），可按 `group_name`、`query`、`status` 筛选。
+
+动作（需 `full` 或 `automation`）：`launch_profile`、`stop_profile`、`run_site_check`、`run_warmup`、`run_evolution`，以及管理类：
+- `create_profile`、`update_profile`：新建 / 修改画像，只允许白名单字段（名称、分组、代理 `proxy_id`、系统、设备模板、时区、语言、账号平台、启动网址、颜色模式、标签）；不能写 Cookie、备注，代理账密永远不经过 agent（`proxy_id` 在 Manager 内部换成地址）。
+- `apply_device_template`、`regenerate_fingerprint`：套设备模板、换新指纹种子（账号在用的画像别换）。
+- `create_group`、`move_profiles`：新建分组、批量移组（逐个返回结果）。
+- `create_proxy`：把代理存进代理库，账密只写不读。
+- `restore_profile`：从回收站恢复。
+- `stop_all_profiles`：关掉全部正在运行的画像。
+
+每个工具的描述末尾都有「触发词 / Triggers」，列出用户常用说法（如“新建环境、add profile”），agent 据此选工具。
 
 浏览器（17，需 `automation`）：
 - `open_browser(profile)`：画像 id 或名称。确保以 `debug` 模式在跑并返回 CDP 连接信息；已经以 `debug` 在跑就直接返回（`started=false`），以 `manual` 在跑则回 `already_running`，不会替你重启。
