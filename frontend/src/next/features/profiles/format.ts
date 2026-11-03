@@ -64,12 +64,26 @@ export function proxyHost(profile: Pick<Profile, "proxy" | "proxy_geo">): string
   }
 }
 
+/** Regional-indicator emoji for a two-letter country code, or "" when it is not one. */
+export function countryFlag(code?: string | null): string {
+  const value = (code ?? "").trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(value)) return "";
+  return String.fromCodePoint(...[...value].map((ch) => 0x1f1a5 + ch.charCodeAt(0)));
+}
+
 export function locationText(profile: Pick<Profile, "proxy" | "proxy_geo">): string {
   const geo = geoOf(profile);
   if (!geo) return profile.proxy ? "打开后检测" : "启动时检测本地出口";
-  const country = [geo.country_code, geo.country].filter(Boolean).join(" - ");
+  const country = countryFlag(geo.country_code) || [geo.country_code, geo.country].filter(Boolean).join(" - ");
   const city = [geo.region, geo.city].filter(Boolean).join(" / ");
-  return [country, city].filter(Boolean).join(" · ") || "未知地区";
+  return [country, city].filter(Boolean).join(" ") || "未知地区";
+}
+
+/** Hover text: the flag's country spelled out. */
+export function locationTitle(profile: Pick<Profile, "proxy" | "proxy_geo">): string {
+  const geo = geoOf(profile);
+  const country = geo ? [geo.country_code, geo.country].filter(Boolean).join(" - ") : "";
+  return [country, locationText(profile)].filter(Boolean).join(" · ");
 }
 
 export function engineLabel(profile: Pick<Profile, "browser_engine">): string {

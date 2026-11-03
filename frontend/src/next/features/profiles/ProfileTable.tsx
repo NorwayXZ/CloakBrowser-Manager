@@ -15,6 +15,7 @@ import {
   lastState,
   launchFailureReason,
   locationText,
+  locationTitle,
   platformLabel,
   proxyHost,
   proxyType,
@@ -212,7 +213,7 @@ export function ProfileTable({
                   <Badge className="h-4 px-1 text-[11px]">{proxyType(profile)}</Badge>
                   {profile.proxy_connection_mode === "relay" && <Badge className="h-4 max-w-32 truncate px-1 text-[11px]">中转 · {profile.relay_name ?? "已选择"}</Badge>}
                   <MapPin className="h-3 w-3 shrink-0" aria-hidden />
-                  <span className="truncate" title={locationText(profile)}>
+                  <span className="truncate" title={locationTitle(profile)}>
                     {locationText(profile)}
                   </span>
                 </div>

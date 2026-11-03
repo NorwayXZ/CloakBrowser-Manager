@@ -146,9 +146,16 @@ describe("saved proxies", () => {
   });
 });
 
+async function openAdd(routes?: Parameters<typeof open>[0]) {
+  const result = await open(routes);
+  fireEvent.click(await screen.findByRole("button", { name: "添加代理" }));
+  await screen.findByRole("dialog", { name: "添加代理" });
+  return result;
+}
+
 describe("adding", () => {
   it("builds the address from its parts and saves it", async () => {
-    const { fetchMock } = await open([{ method: "POST", path: "/api/proxy-presets", respond: { ...PRESETS[0], id: "p3" } }]);
+    const { fetchMock } = await openAdd([{ method: "POST", path: "/api/proxy-presets", respond: { ...PRESETS[0], id: "p3" } }]);
     fireEvent.change(screen.getByLabelText(/^代理名称/), { target: { value: "新加坡" } });
     fireEvent.change(screen.getByPlaceholderText("192.168.100.1 或 proxy.example.com"), { target: { value: "2001:db8::1" } });
     fireEvent.change(screen.getByPlaceholderText("1090"), { target: { value: "1080" } });
@@ -161,7 +168,7 @@ describe("adding", () => {
   });
 
   it("asks for a name, then for an address", async () => {
-    await open();
+    await openAdd();
     fireEvent.click(screen.getByRole("button", { name: "保存代理" }));
     expect(await screen.findByText("请先填写代理名称")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/^代理名称/), { target: { value: "x" } });
@@ -173,7 +180,7 @@ describe("adding", () => {
   });
 
   it("shows the backend's reason when it refuses", async () => {
-    await open([{ method: "POST", path: "/api/proxy-presets", status: 400, respond: { detail: "代理端口无效" } }]);
+    await openAdd([{ method: "POST", path: "/api/proxy-presets", status: 400, respond: { detail: "代理端口无效" } }]);
     fireEvent.change(screen.getByLabelText(/^代理名称/), { target: { value: "x" } });
     fireEvent.change(screen.getByPlaceholderText("192.168.100.1 或 proxy.example.com"), { target: { value: "1.2.3.4" } });
     fireEvent.change(screen.getByPlaceholderText("1090"), { target: { value: "99999" } });
@@ -182,7 +189,7 @@ describe("adding", () => {
   });
 
   it("previews a batch before saving it, skipping lines it cannot read", async () => {
-    const { fetchMock } = await open([{ method: "POST", path: "/api/proxy-presets/bulk", respond: [] }]);
+    const { fetchMock } = await openAdd([{ method: "POST", path: "/api/proxy-presets/bulk", respond: [] }]);
     fireEvent.mouseDown(screen.getByRole("tab", { name: "批量导入" }), { button: 0 });
     const box = await screen.findByLabelText("批量代理");
     fireEvent.change(box, { target: { value: "192.168.0.1:8000\n# 注释\nsocks5://u:p@10.0.0.1:1080\n不是代理\n10.0.0.2:9000:user:pass" } });
