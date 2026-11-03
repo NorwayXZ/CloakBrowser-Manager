@@ -325,7 +325,7 @@ describe("settings › AI", () => {
   });
 });
 
-describe("settings › AI 接入", () => {
+describe("settings › API 与 MCP", () => {
   const NO_TOKENS = { enforced: true, scopes: ["read", "control", "cdp"], tokens: [] };
   const TOKEN = { id: "t1", name: "codex 笔记本", scope: "control", created_at: 1_700_000_000 };
   const AUDIT = [{ id: "a1", ts: "2026-10-26T01:00:00+00:00", client_name: "codex", client_version: null, tool: "open_browser", args_summary: {}, ok: false, reason: "profile_leased", duration_ms: 12 }];
@@ -377,13 +377,48 @@ describe("settings › AI 接入", () => {
     expect(screen.getByRole("radio", { name: "只读（默认）" })).toBeChecked();
   });
 
-  it("lists connection addresses for this Manager", async () => {
-    await open("/settings/agent", agentRoutes(), "接入地址");
-    expect(screen.getByText(`${window.location.origin}/api/agent/mcp`)).toBeInTheDocument();
-    expect(screen.getByText(`${window.location.origin}/api/agent/tools?format=openai`)).toBeInTheDocument();
-    expect(screen.getByText(`${window.location.origin}/api/agent/guide`)).toBeInTheDocument();
-    expect(screen.getByText("python -m backend.mcp_server")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "复制HTTP MCP" })).toBeInTheDocument();
+  it("gives a copyable command per client, filled with this Manager's address", async () => {
+    await open("/settings/agent", agentRoutes(), "连接 AI 工具");
+    const origin = window.location.origin;
+    const claude = screen.getByLabelText("Claude Code配置");
+    expect(claude).toHaveTextContent(`claude mcp add --transport http cloakbrowser-manager ${origin}/api/agent/mcp`);
+    expect(claude).toHaveTextContent("Authorization: Bearer <你的令牌>");
+    expect(screen.getByRole("button", { name: "复制Claude Code配置" })).toBeInTheDocument();
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Codex" }), { button: 0 });
+    expect(screen.getByLabelText("Codex配置")).toHaveTextContent(`url = "${origin}/api/agent/mcp"`);
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Cursor / 通用 JSON" }), { button: 0 });
+    expect(screen.getByLabelText("Cursor / 通用 JSON配置")).toHaveTextContent('"mcpServers"');
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "命令行 / REST" }), { button: 0 });
+    expect(screen.getByLabelText("命令行 / REST配置")).toHaveTextContent(`${origin}/api/agent/tools?format=openai`);
+    expect(screen.getByLabelText("技能包安装命令")).toHaveTextContent("npx skills add https://github.com/NorwayXZ/CloakBrowser-Manager --skill cloakbrowser-manager");
+    expect(screen.getByRole("button", { name: "复制HTTP MCP 地址" })).toBeInTheDocument();
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("leaves the token out of the commands when the Manager has no login protection", async () => {
+    await open("/settings/agent", agentRoutes([], { ...NO_TOKENS, enforced: false }), "连接 AI 工具");
+    const claude = screen.getByLabelText("Claude Code配置");
+    expect(claude).not.toHaveTextContent("Authorization");
+    expect(screen.queryByText(/要换成令牌/)).not.toBeInTheDocument();
+  });
+
+  it("puts a freshly issued token into the commands", async () => {
+    let tokens: unknown[] = [];
+    await open(
+      "/settings/agent",
+      agentRoutes([
+        { path: "/api/agent/tokens", respond: () => ({ ...NO_TOKENS, tokens }) },
+        { method: "POST", path: "/api/agent/tokens", status: 201, respond: () => ((tokens = [TOKEN]), { token: "cbm_control_SECRET", record: TOKEN, enforced: true, note: "" }) },
+      ]),
+      "连接 AI 工具",
+    );
+    expect(screen.getByLabelText("Claude Code配置")).toHaveTextContent("<你的令牌>");
+    fireEvent.change(await screen.findByLabelText("名称"), { target: { value: "codex 笔记本" } });
+    fireEvent.click(screen.getByRole("button", { name: "签发 token" }));
+    await screen.findByText(/只显示这一次/);
+    expect(screen.getByLabelText("Claude Code配置")).toHaveTextContent("Bearer cbm_control_SECRET");
+    fireEvent.click(screen.getByRole("button", { name: "我已保存，关闭" }));
+    expect(screen.getByLabelText("Claude Code配置")).toHaveTextContent("<你的令牌>");
   });
 
   it("issues a token, shows it once, and lists it", async () => {

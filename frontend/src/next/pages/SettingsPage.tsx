@@ -16,7 +16,7 @@ const SECTIONS = [
   { id: "appearance", label: "外观" },
   { id: "kernel", label: "浏览器内核", desc: "版本、授权密钥和更新方式", icon: Cpu, tile: "from-[#6e8bff] to-[#7b6bff]" },
   { id: "ai", label: "AI 接口", desc: "用来按人设生成一周的浏览剧本", icon: Sparkles, tile: "from-[#c06bff] to-[#ff6bb0]" },
-  { id: "agent", label: "AI 接入", desc: "让外部 AI 工具来操作环境", icon: Plug, tile: "from-[#6bd0ff] to-[#6e8bff]" },
+  { id: "agent", label: "API 与 MCP", desc: "让 Claude Code、Codex 等 AI 工具连接并操作环境", icon: Plug, tile: "from-[#6bd0ff] to-[#6e8bff]" },
   { id: "vault", label: "保险库", desc: "AI 注册账号时生成的密码，AI 只拿到引用", icon: KeyRound, tile: "from-[#8bd35a] to-[#4fb0ff]" },
   { id: "automation", label: "自动化", desc: "定时任务只在这个时间段内运行", icon: Clock, tile: "from-[#ffb36b] to-[#ff7b6b]" },
   { id: "account", label: "账号与安全", desc: "管理员账号、密码和退出登录", icon: ShieldCheck, tile: "from-[#5ad0a0] to-[#4fb0ff]" },
