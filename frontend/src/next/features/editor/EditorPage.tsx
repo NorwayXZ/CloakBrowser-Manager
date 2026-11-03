@@ -5,7 +5,7 @@ import { useBlocker, useNavigate, useParams } from "react-router";
 import { log } from "../../shared/log/logger";
 import { cn } from "../../shared/lib/cn";
 import { formatShortcut, useHotkeys } from "../../shared/lib/hotkeys";
-import { Banner, Button, Dialog, EmptyState, ErrorState, IconButton, Kbd, Skeleton, useToast } from "../../ui";
+import { Banner, Button, Dialog, EmptyState, ErrorState, FormLayoutProvider, IconButton, Kbd, Skeleton, useToast } from "../../ui";
 import { useManagerStatus } from "../app/api";
 import { profileKeys, profilesApi, useGroups, useProfiles } from "../profiles/api";
 import { useProfileActions } from "../profiles/actions";
@@ -185,7 +185,7 @@ function Editor({
       <div className="flex shrink-0 items-center gap-3 py-2.5">
         <IconButton label="回到环境列表" icon={<ArrowLeft className="h-4 w-4" />} onClick={() => navigate("/profiles")} />
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-lg font-semibold tracking-tight text-fg">{title}</h1>
+          <h1 className="truncate text-md font-semibold tracking-tight text-fg">{title}</h1>
           <p className="truncate text-sm text-fg-3">{editor.form.name || "未命名"}</p>
         </div>
         {isEdit && (
@@ -204,24 +204,24 @@ function Editor({
       </div>
 
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
-        <div className={cn("grid grid-cols-1 gap-6 py-5", "xl:grid-cols-[minmax(0,1fr)_300px] 2xl:grid-cols-[160px_minmax(0,1fr)_320px]")}>
-          <nav aria-label="表单分区" className="glass-strong sticky top-0 z-10 -mx-1 flex gap-1 overflow-x-auto rounded-full p-1 xl:col-span-2 2xl:col-span-1 2xl:top-5 2xl:h-fit 2xl:flex-col 2xl:rounded-lg 2xl:p-1.5">
-            {SECTIONS.map((section) => (
-              <button
-                key={section.id}
-                type="button"
-                aria-current={active === section.id ? "true" : undefined}
-                onClick={() => jump(section.id)}
-                className={cn(
-                  "shrink-0 whitespace-nowrap rounded-full px-4 py-2 text-left text-sm transition-colors duration-fast",
-                  active === section.id ? "bg-surface font-semibold text-fg shadow-raised" : "text-fg-2 hover:text-fg",
-                )}
-              >
-                {section.label}
-              </button>
-            ))}
-          </nav>
-
+        <nav aria-label="表单分区" className="sticky top-0 z-10 -mx-1 flex gap-6 overflow-x-auto border-b border-border bg-canvas px-1">
+          {SECTIONS.map((section) => (
+            <button
+              key={section.id}
+              type="button"
+              aria-current={active === section.id ? "true" : undefined}
+              onClick={() => jump(section.id)}
+              className={cn(
+                "-mb-px h-10 shrink-0 whitespace-nowrap border-b-2 px-0.5 text-sm font-medium transition-[color,border-color] duration-fast",
+                active === section.id ? "border-accent text-accent" : "border-transparent text-fg-2 hover:text-fg",
+              )}
+            >
+              {section.label}
+            </button>
+          ))}
+        </nav>
+        <FormLayoutProvider value="inline">
+        <div className="grid grid-cols-1 gap-6 py-5 xl:grid-cols-[minmax(0,1fr)_320px]">
           <div className="flex min-w-0 flex-col gap-5">
             {draft && (
               <Banner
@@ -266,13 +266,14 @@ function Editor({
             <AdvancedSection editor={editor} profileId={profile?.id ?? null} hostOS={hostOS} />
           </div>
 
-          <div className="min-w-0 xl:sticky xl:top-16 xl:h-fit 2xl:top-5">
+          <div className="min-w-0 xl:sticky xl:top-14 xl:h-fit">
             <SummaryPanel editor={editor} hostOS={hostOS} hostScreen={hostScreen} isEdit={isEdit} />
           </div>
         </div>
+        </FormLayoutProvider>
       </div>
 
-      <div className="glass-strong mb-2 flex shrink-0 flex-wrap items-center justify-end gap-3 rounded-full px-5 py-2.5 lg:mx-10">
+      <div className="-mx-6 flex shrink-0 flex-wrap items-center justify-end gap-3 border-t border-border bg-surface px-6 py-2.5 lg:-mx-10 lg:px-10">
         <span className={cn("mr-auto flex items-center gap-2 text-sm", editor.dirty ? "text-fg" : "text-fg-3")} aria-live="polite">
           {editor.dirty && <span aria-hidden className="h-2 w-2 rounded-full bg-warning" />}
           {editor.dirty ? "有改动尚未保存" : isEdit ? "没有修改" : "填好名称即可创建，其余都有默认值"}
