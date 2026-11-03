@@ -222,6 +222,7 @@ def screens(page: Page, base: str):
     yield "02-settings-appearance", go("/settings", "text=主题"), False
     yield "06a-settings-kernel", go("/settings/kernel", "text=已下载的内核", fake({"/api/kernel": KERNEL_FIXTURE})), True
     yield "06b-settings-ai", go("/settings/ai", "text=执行强度"), False
+    yield "06h-settings-agent", go("/settings/agent", "text=连接 AI 工具"), False
     yield "06c-settings-automation", go("/settings/automation", "text=允许的时段"), False
     yield "06d-settings-account", go("/settings/account", "text=没有开启登录保护"), False
     yield "06e-settings-about", go("/settings/about", "text=还没有检查过"), False

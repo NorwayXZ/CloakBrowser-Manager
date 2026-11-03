@@ -37,7 +37,7 @@ npx skills add https://github.com/NorwayXZ/CloakBrowser-Manager --skill cloakbro
 | `full` | 只读 14 个 + 动作 5 个（启动/关闭画像、跑检测、跑养号、跑进化）；`launch_profile` 只能 `manual` 模式 |
 | `automation` | `full` 的全部，再加浏览器工具 21 个（`open_browser`、`get_cdp_endpoint`、15 个页面工具和 4 个保险库工具），`launch_profile` 可用 `debug` 模式——这一档会把页面控制和 CDP 端点交给 agent |
 
-查看 / 修改：面板「设置 → AI 接入」页（旧界面在左侧「AI 接入」）可以直接切换（切到「可操作页面」会先弹出 Cookie 风险确认）；也可以用命令行或 API：
+查看 / 修改：面板「设置 → API 与 MCP」页（旧界面在左侧「AI 接入」）可以直接切换（切到「可操作页面」会先弹出 Cookie 风险确认）；也可以用命令行或 API：
 
 ```bash
 ./bin/cloak mode                # 查看
