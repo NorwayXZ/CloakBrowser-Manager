@@ -14,15 +14,16 @@ Design (see MCP-PLAN.md):
 * Tools are layered. The 14 read tools are always available unless the mode
   is ``off``; the action tools (launch / stop / site-check / warm-up /
   evolution / mail) register when the Manager setting ``mcp.mode`` is ``full`` or
-  ``automation`` (default ``read-only``). The browser tools (CDP handout and
+  ``automation`` (``automation`` by default). The browser tools (CDP handout and
   page control) are a separate tier that only registers in ``automation``.
-  Destructive operations, proposal approvals and Cookie tools are not tools at
-  all — by construction.
-* Field policy: profile payloads are rebuilt from an allowlist, proxies are
-  reduced to ``scheme://host:port`` (credentials stripped), and the user's
-  free-text fields (``notes`` / ``warmup_persona``) plus ``cookies_json``
-  never leave the Manager. The license key value does not exist in any REST
-  response, so it cannot appear here either.
+  ``automation`` is the unrestricted tier (delete / purge profiles, cookies,
+  page JavaScript included) and is the default, because the Manager is a
+  single-user local tool; the lower tiers stay available for people who want
+  to narrow what an agent can do.
+* Field policy: profile payloads are rebuilt from an allowlist and proxies are
+  reduced to ``scheme://host:port`` (credentials stripped). ``get_profile``
+  also returns the user's ``notes`` / ``warmup_persona``. The license key value
+  does not exist in any REST response, so it cannot appear here either.
 * Every dispatched call is reported to ``POST /api/mcp/audit`` with a
   redacted argument summary (best effort: when the Manager is unreachable
   the call itself already failed, so there is nothing unrecorded).
@@ -233,8 +234,8 @@ def not_automation_result() -> dict[str, Any]:
         "ok": False,
         "reason": "mode_not_automation",
         "detail": (
-            "浏览器控制（CDP）只在 mcp.mode=automation 下开放。CDP 能读取画像的 Cookie，"
-            "所以单独成档：在 Manager 设置里把 mcp.mode 改成 automation 并重启客户端。"
+            "页面控制、Cookie、删除画像等只在 mcp.mode=automation 下开放（默认就是 automation，"
+            "这里说明有人把它调低了）：在 Manager 设置「API 与 MCP」里改回 automation 并重启客户端。"
         ),
     }
 
@@ -251,10 +252,10 @@ def sanitize_proxy(proxy: Any) -> str | None:
     return endpoint if endpoint else "configured"
 
 
-# Profile fields an agent may see. Everything else on ProfileResponse is
-# excluded on purpose: notes / warmup_persona (user free text), cookies_json
-# (cookie values), cdp_url / vnc_ws_port / user_data_dir / proxy_geo (local
-# access paths and exit-IP details the agent does not need).
+# Profile fields an agent may see in lists. Everything else on ProfileResponse is
+# left out: cookies_json (read cookies with browser_cookies), cdp_url / vnc_ws_port /
+# user_data_dir / proxy_geo (local access paths and exit-IP details). notes and
+# warmup_persona are added by get_profile only, to keep list output small.
 PROFILE_FIELDS = (
     "id", "name", "browser_engine", "device_profile", "fingerprint_seed",
     "proxy_id", "proxy_connection_mode", "relay_id", "relay_name",
@@ -278,7 +279,7 @@ def shape_profile(profile: dict[str, Any]) -> dict[str, Any]:
 
 
 # `text` is what browser_type types: it can be a password, so the audit keeps only its length.
-_PRIVATE_ARG_KEYS = {"notes", "persona", "warmup_persona", "text"}
+_PRIVATE_ARG_KEYS = {"notes", "persona", "warmup_persona", "text", "cookies", "cookies_json"}
 
 
 def summarize_args(args: dict[str, Any] | None) -> dict[str, Any]:
@@ -606,7 +607,7 @@ async def _list_profiles(client: RestClient, args: dict[str, Any]) -> dict[str, 
     }
 
 
-@register("get_profile", "看单个画像的完整配置（字段政策同 list_profiles）加实时运行状态。", PROFILE_ID_ARGS, "read")
+@register("get_profile", "看单个画像的完整配置（含备注 notes 和养号人设）加实时运行状态。代理只显示地址，不显示账号密码。", PROFILE_ID_ARGS, "read")
 async def _get_profile(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
     profile_id, err = _profile_id_arg(args)
     if err:
@@ -615,7 +616,10 @@ async def _get_profile(client: RestClient, args: dict[str, Any]) -> dict[str, An
     payload, err = await _get_or_error(client, f"/api/profiles/{quoted}", "get_profile")
     if err:
         return err
-    result: dict[str, Any] = {"ok": True, "profile": shape_profile(payload)}
+    shaped = shape_profile(payload)
+    shaped["notes"] = payload.get("notes")
+    shaped["warmup_persona"] = payload.get("warmup_persona")
+    result: dict[str, Any] = {"ok": True, "profile": shaped}
     s_status, p_status = await client.get(f"/api/profiles/{quoted}/status")
     if s_status < 300 and isinstance(p_status, dict):
         result["live_status"] = {
@@ -733,7 +737,7 @@ async def _get_warmup_state(client: RestClient, args: dict[str, Any]) -> dict[st
 
 @register(
     "list_warmup_scripts",
-    "看画像的 AI 养号剧本批次：状态、主题与意图（搜索词）。persona 快照不回。批准/驳回只能在面板里人工操作，这里没有对应工具。",
+    "看画像的 AI 养号剧本批次：状态、主题与意图（搜索词）。persona 快照不回。批准/驳回用 approve_warmup_batch / reject_warmup_batch。",
     PROFILE_ID_ARGS,
     "read",
 )
@@ -764,7 +768,7 @@ async def _list_warmup_scripts(client: RestClient, args: dict[str, Any]) -> dict
 
 @register(
     "get_evolution",
-    "看自对抗进化：引擎状态、待人工批准的提案、实验战报。section 可选 status/proposals/logs/all（默认 all）。批准提案只能在面板里人工操作。",
+    "看自对抗进化：引擎状态、待人工批准的提案、实验战报。section 可选 status/proposals/logs/all（默认 all）。批准提案用 approve_evolution_proposal，驳回用 dismiss_evolution_proposal。",
     {
         "type": "object",
         "properties": {
@@ -1285,17 +1289,18 @@ async def _mail_list_messages(client: RestClient, args: dict[str, Any]) -> dict[
 
 # ── Tools: profile / group / proxy management (action layer) ─────────────────
 #
-# Writes go through a field whitelist: an agent can shape an environment, but
-# never write cookies or notes, read proxy credentials, or delete for good.
+# Writes go through a field whitelist so a typo fails loudly instead of being ignored.
 
 _WRITABLE_PROFILE_FIELDS = (
     "name", "platform", "group_name", "proxy_id", "device_profile", "timezone",
     "locale", "account_platform", "startup_urls", "color_scheme", "tags",
+    "notes", "warmup_persona", "cookies_json", "proxy", "launch_args", "headless",
+    "humanize", "human_preset", "geoip", "auto_launch",
 )
 
 _PROFILE_WRITE_PROPS: dict[str, Any] = {
     "name": {"type": "string", "description": "画像名称（只用来自己识别）"},
-    "platform": {"type": "string", "enum": ["windows", "macos", "linux"], "description": "设备系统"},
+    "platform": {"type": "string", "enum": ["windows", "macos", "linux"], "description": "设备系统；新建时不填就用本机系统（本地版只能启动和本机同系统的画像）"},
     "group_name": {"type": "string", "description": "分组名称（先用 list_groups 查；没有就先 create_group）"},
     "proxy_id": {"type": "string", "description": "list_proxies 里的 proxy_id；不填表示不改/直连"},
     "device_profile": {"type": "string", "description": "设备模板 id（list_device_templates 查）"},
@@ -1305,6 +1310,16 @@ _PROFILE_WRITE_PROPS: dict[str, Any] = {
     "startup_urls": {"type": "array", "items": {"type": "string"}, "maxItems": 20, "description": "启动时自动打开的 http/https 网址"},
     "color_scheme": {"type": "string", "enum": ["light", "dark", "no-preference"]},
     "tags": {"type": "array", "items": {"type": "string"}, "maxItems": 20, "description": "标签（文字）"},
+    "notes": {"type": "string", "description": "备注（自由文本）"},
+    "warmup_persona": {"type": "string", "maxLength": 200, "description": "养号人设（一句话）"},
+    "cookies_json": {"type": "string", "description": "要导入的 Cookie（JSON 数组字符串）；环境在运行时请用 browser_cookies"},
+    "proxy": {"type": "string", "description": "直接写代理地址，如 socks5://user:pass@host:port；想复用代理库里的就用 proxy_id"},
+    "launch_args": {"type": "array", "items": {"type": "string"}, "description": "额外的浏览器启动参数"},
+    "headless": {"type": "boolean"},
+    "humanize": {"type": "boolean", "description": "拟人化输入/鼠标"},
+    "human_preset": {"type": "string", "enum": ["default", "careful"]},
+    "geoip": {"type": "boolean", "description": "时区/语言是否跟随出口 IP"},
+    "auto_launch": {"type": "boolean", "description": "Manager 启动时自动打开"},
 }
 
 CREATE_PROFILE_ARGS: dict[str, Any] = {
@@ -1381,6 +1396,12 @@ async def _create_profile(client: RestClient, args: dict[str, Any]) -> dict[str,
     err = await _with_proxy_from_library(client, body, tool="create_profile")
     if err:
         return err
+    if not body.get("platform"):
+        # The API defaults to windows, which a Mac or Linux install cannot launch.
+        s_status, host = await client.get("/api/status")
+        host_os = host.get("host_os") if s_status < 300 and isinstance(host, dict) else None
+        if host_os in ("windows", "macos", "linux"):
+            body["platform"] = host_os
     status, payload = await client.post("/api/profiles", json_body=body, timeout=ACTION_TIMEOUT_S)
     if status >= 300:
         return error_result(status, payload, tool="create_profile")
@@ -1389,7 +1410,7 @@ async def _create_profile(client: RestClient, args: dict[str, Any]) -> dict[str,
 
 @register(
     "update_profile",
-    "修改画像的名称、分组、代理、设备系统/模板、时区、语言、账号平台、启动网址、颜色模式或标签。只给要改的字段。运行中的画像改动要先 stop_profile。不能改 Cookie、备注。",
+    "修改画像的名称、分组、代理、设备系统/模板、时区、语言、账号平台、启动网址、颜色模式或标签。只给要改的字段。运行中的画像改动要先 stop_profile。备注、养号人设、Cookie（cookies_json）、直连代理地址也能改。",
     UPDATE_PROFILE_ARGS,
     "action",
 )
@@ -1519,7 +1540,7 @@ async def _move_profiles(client: RestClient, args: dict[str, Any]) -> dict[str, 
 
 @register(
     "restore_profile",
-    "把回收站里的画像恢复回来（先用 list_trash 查 id）。永久删除只能由用户在面板里做，没有对应的工具。",
+    "把回收站里的画像恢复回来（先用 list_trash 查 id）。",
     PROFILE_ID_ARGS,
     "action",
 )
@@ -1582,6 +1603,68 @@ async def _stop_all_profiles(client: RestClient, args: dict[str, Any]) -> dict[s
 
 
 # ── Tools: browser layer (registered only when mcp.mode == "automation") ─────
+
+
+_BATCH_ARGS: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "profile_id": {"type": "string", "description": "画像 id"},
+        "batch_id": {"type": "string", "description": "list_warmup_scripts 里的批次 id"},
+    },
+    "required": ["profile_id", "batch_id"],
+}
+
+
+async def _batch_decision(client: RestClient, args: dict[str, Any], verb: str) -> dict[str, Any]:
+    profile_id, err = _profile_id_arg(args)
+    if err:
+        return err
+    batch_id = str(args.get("batch_id") or "").strip()
+    if not batch_id:
+        return {"ok": False, "reason": "invalid_argument", "detail": "缺少 batch_id（list_warmup_scripts 查）。"}
+    status, payload = await client.post(
+        f"/api/profiles/{quote(profile_id, safe='')}/warmup/scripts/batches/{quote(batch_id, safe='')}/{verb}"
+    )
+    if status >= 300:
+        return error_result(status, payload, tool=f"{verb}_warmup_batch")
+    return payload if isinstance(payload, dict) else {"ok": True}
+
+
+@register("approve_warmup_batch", "批准一批 AI 养号剧本，之后 run_warmup 才会用它们。", _BATCH_ARGS, "action")
+async def _approve_warmup_batch(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    return await _batch_decision(client, args, "approve")
+
+
+@register("reject_warmup_batch", "驳回一批 AI 养号剧本。", _BATCH_ARGS, "action")
+async def _reject_warmup_batch(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    return await _batch_decision(client, args, "reject")
+
+
+_PROPOSAL_ARGS: dict[str, Any] = {
+    "type": "object",
+    "properties": {"proposal_id": {"type": "string", "description": "get_evolution 里待批准的提案 id"}},
+    "required": ["proposal_id"],
+}
+
+
+async def _proposal_decision(client: RestClient, args: dict[str, Any], verb: str, tool: str) -> dict[str, Any]:
+    proposal_id = str(args.get("proposal_id") or "").strip()
+    if not proposal_id:
+        return {"ok": False, "reason": "invalid_argument", "detail": "缺少 proposal_id（get_evolution 查）。"}
+    status, payload = await client.post(f"/api/evolution/proposals/{quote(proposal_id, safe='')}/{verb}")
+    if status >= 300:
+        return error_result(status, payload, tool=tool)
+    return {"ok": True, "proposal": payload}
+
+
+@register("approve_evolution_proposal", "批准一条自对抗进化提案，让它生效。", _PROPOSAL_ARGS, "action")
+async def _approve_evolution_proposal(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    return await _proposal_decision(client, args, "approve", "approve_evolution_proposal")
+
+
+@register("dismiss_evolution_proposal", "驳回一条自对抗进化提案。", _PROPOSAL_ARGS, "action")
+async def _dismiss_evolution_proposal(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    return await _proposal_decision(client, args, "dismiss", "dismiss_evolution_proposal")
 
 
 @register(
@@ -2123,6 +2206,129 @@ async def _vault_mark(client: RestClient, args: dict[str, Any]) -> dict[str, Any
 
 # ── English summaries (tool lists show "中文 | English") ──────────────────────
 
+# ── Tools: delete / approve / page extras (no human-only gates) ──────────────
+
+
+@register(
+    "delete_profile",
+    "删除画像：先停掉浏览器，再放进回收站（7 天内可用 restore_profile 恢复）。要彻底删掉用 purge_profile。",
+    PROFILE_ID_ARGS,
+    "browser",
+)
+async def _delete_profile(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    profile_id, err = _profile_id_arg(args)
+    if err:
+        return err
+    status, payload = await client.request("DELETE", f"/api/profiles/{quote(profile_id, safe='')}", timeout=ACTION_TIMEOUT_S)
+    if status >= 300:
+        return error_result(status, payload, tool="delete_profile")
+    return {"ok": True, "profile_id": profile_id, "in_trash": True}
+
+
+@register(
+    "purge_profile",
+    "彻底删除画像：数据库记录和整个用户数据目录（登录态、Cookie）一并清除，不可恢复。普通删除用 delete_profile。",
+    PROFILE_ID_ARGS,
+    "browser",
+)
+async def _purge_profile(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    profile_id, err = _profile_id_arg(args)
+    if err:
+        return err
+    status, payload = await client.request("DELETE", f"/api/profiles/{quote(profile_id, safe='')}/purge", timeout=ACTION_TIMEOUT_S)
+    if status >= 300:
+        return error_result(status, payload, tool="purge_profile")
+    return {"ok": True, "profile_id": profile_id, "purged": True}
+
+
+@register(
+    "browser_hover",
+    "把鼠标移到元素上（弹出菜单、悬浮提示）。ref 同 browser_click。",
+    _page_schema({"ref": {"type": "string", "description": "快照 ref（如 e3）或语义选择器"}}, ("ref",)),
+    "browser",
+)
+async def _browser_hover(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    return await _page_call(client, args, "hover", {"ref": args.get("ref")})
+
+
+@register(
+    "browser_drag",
+    "按住 ref 元素拖到 to_ref 元素上松开（滑块、排序、拖放上传区）。",
+    _page_schema(
+        {
+            "ref": {"type": "string", "description": "起点：快照 ref 或语义选择器"},
+            "to_ref": {"type": "string", "description": "终点：快照 ref 或语义选择器"},
+        },
+        ("ref", "to_ref"),
+    ),
+    "browser",
+)
+async def _browser_drag(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    return await _page_call(client, args, "drag", {"ref": args.get("ref"), "to_ref": args.get("to_ref")})
+
+
+@register(
+    "browser_get_html",
+    "读页面（或某个元素）的原始 HTML，分页返回（offset/max_chars，看 next_offset）。找不到元素、要看隐藏属性时用；平时读 browser_snapshot 更省。",
+    _page_schema(
+        {
+            "ref": {"type": "string", "description": "可选：只读这个元素的 outerHTML"},
+            "offset": {"type": "integer", "default": 0},
+            "max_chars": {"type": "integer", "default": 6000, "description": "100~20000"},
+        }
+    ),
+    "browser",
+)
+async def _browser_get_html(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    return await _page_call(
+        client, args, "get_html",
+        {"ref": args.get("ref"), "offset": args.get("offset") or 0, "max_chars": args.get("max_chars") or 6000},
+    )
+
+
+@register(
+    "browser_evaluate",
+    "在页面里执行 JavaScript 并返回结果（可 JSON 化的值，超过 2 万字符会截断）。script 写表达式或箭头函数，如 () => document.title；"
+    "给了 ref 时函数的参数就是那个元素，如 el => el.value。",
+    _page_schema(
+        {
+            "script": {"type": "string", "description": "JS 表达式或箭头函数"},
+            "ref": {"type": "string", "description": "可选：函数的第一个参数是这个元素"},
+        },
+        ("script",),
+    ),
+    "browser",
+)
+async def _browser_evaluate(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    return await _page_call(client, args, "evaluate", {"script": args.get("script"), "ref": args.get("ref")})
+
+
+@register(
+    "browser_cookies",
+    "读、写或清空这个画像的 Cookie（整个浏览器，不是单个标签页）。action=get 可用 domain 过滤或 urls 限定；"
+    "set 传 cookies 数组（每项 name、value，加 url 或 domain+path）；clear 清空全部。",
+    _page_schema(
+        {
+            "action": {"type": "string", "enum": ["get", "set", "clear"], "default": "get"},
+            "domain": {"type": "string", "description": "get：只返回域名包含它的 Cookie"},
+            "urls": {"type": "array", "items": {"type": "string"}, "description": "get：只返回对这些网址生效的 Cookie"},
+            "cookies": {"type": "array", "items": {"type": "object"}, "description": "set：要写入的 Cookie"},
+        }
+    ),
+    "browser",
+)
+async def _browser_cookies(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    return await _page_call(
+        client, args, "cookies",
+        {
+            "action": args.get("action") or "get",
+            "domain": args.get("domain"),
+            "urls": args.get("urls"),
+            "cookies": args.get("cookies"),
+        },
+    )
+
+
 TOOL_EN: dict[str, str] = {
     "list_groups": "List groups with how many profiles each holds.",
     "list_running": "Profiles that are running now (id, name, mode); shows how many license seats are used.",
@@ -2133,7 +2339,18 @@ TOOL_EN: dict[str, str] = {
     "regenerate_fingerprint": "Give a profile a new fingerprint seed. Do not use it on profiles whose account is already live.",
     "create_group": "Create a group.",
     "move_profiles": "Move up to 100 profiles into a group; per-profile results.",
-    "restore_profile": "Restore a profile from the recycle bin. Permanent deletion is human-only.",
+    "restore_profile": "Restore a profile from the recycle bin.",
+    "delete_profile": "Stop the profile and move it to the recycle bin (restorable for 7 days).",
+    "purge_profile": "Permanently delete a profile and its whole data directory. Not recoverable.",
+    "approve_warmup_batch": "Approve a batch of AI warm-up scripts so run_warmup can use them.",
+    "reject_warmup_batch": "Reject a batch of AI warm-up scripts.",
+    "approve_evolution_proposal": "Approve a pending self-adversarial evolution proposal.",
+    "dismiss_evolution_proposal": "Dismiss a pending evolution proposal.",
+    "browser_hover": "Move the mouse over an element (menus, tooltips).",
+    "browser_drag": "Drag one element onto another (sliders, sorting, drop zones).",
+    "browser_get_html": "Raw HTML of the page or one element, paged. Prefer browser_snapshot for reading.",
+    "browser_evaluate": "Run JavaScript in the page and return its JSON result; with ref the function receives that element.",
+    "browser_cookies": "Read, write or clear the profile's cookies (get / set / clear).",
     "create_proxy": "Save a proxy to the proxy library (credentials are write-only); bind it to profiles via proxy_id.",
     "stop_all_profiles": "Stop every running profile browser; per-profile results.",
     "check_proxy_exit_ip": "Check a new connection through the selected proxy route without rotating its IP.",
@@ -2224,6 +2441,17 @@ TRIGGERS: dict[str, str] = {
     "create_group": "新建分组,创建分组,create group,new group",
     "move_profiles": "移动分组,换组,归类,move to group,regroup",
     "restore_profile": "恢复环境,还原回收站,找回已删除,restore profile,undelete",
+    "delete_profile": "删除环境,删掉画像,放进回收站,delete profile,remove profile,trash",
+    "purge_profile": "彻底删除,永久删除,清除数据,purge profile,delete forever,wipe",
+    "approve_warmup_batch": "批准养号剧本,通过剧本,approve warmup",
+    "reject_warmup_batch": "驳回养号剧本,拒绝剧本,reject warmup",
+    "approve_evolution_proposal": "批准进化提案,通过提案,approve proposal",
+    "dismiss_evolution_proposal": "驳回进化提案,忽略提案,dismiss proposal",
+    "browser_hover": "悬停,鼠标移上去,hover",
+    "browser_drag": "拖拽,拖动,滑块,drag and drop,drag",
+    "browser_get_html": "读 HTML,页面源码,看源码,get html,page source",
+    "browser_evaluate": "执行脚本,执行 JS,运行 JavaScript,evaluate,run script",
+    "browser_cookies": "读 Cookie,导出 Cookie,导入 Cookie,清 Cookie,cookies,export cookies,import cookies",
     "create_proxy": "添加代理,保存代理,新建代理,add proxy,save proxy",
     "stop_all_profiles": "全部关闭,关掉所有浏览器,close all,stop all",
     "mail_get_address": "收件邮箱,注册邮箱,get email address",
@@ -2415,14 +2643,14 @@ CloakBrowser Manager runs isolated fingerprint-browser profiles on this machine.
 注册新账号（automation 档）更省事：account_prepare(profile, site) 一步拿到邮箱、用户名和密码引用 → browser_type 把引用（如 {{vault:ID.password}}）原样填进表单，你拿不到密码明文 → 提交后 mail_wait_code 取验证码 → vault_mark(registered/verified)。登录已注册的网站：vault_list 找引用再填。遇到图形验证码或手机短信验证：停下来，请用户在面板里接管。
 
 规则 / Rules:
-- 权限由 Manager 设置 mcp.mode 决定：read-only 只读；full 加启停、检测/养号/进化和邮箱；automation 再加 open_browser / get_cdp_endpoint / browser_* 页面工具。你的 token 还可能把上限压得更低（scope_denied）。工具列表在连接时协商，改模式后要重启客户端。
+- 权限由 Manager 设置 mcp.mode 决定，默认 automation = 全部开放：读、启停、新建/修改/删除画像、批准养号剧本和进化提案、open_browser / get_cdp_endpoint / browser_* 页面控制、Cookie 读写、执行 JS。用户手动调低后才会看到更少的工具（read-only 只读；full 去掉页面控制和删除）；你的 token 也可能把上限压得更低（scope_denied）。工具列表在连接时协商，改模式后要重启客户端。
 - 页面控制会拿一个「控制租约」。profile_leased 说明用户在接管或别的 agent 在用：停下来等，不要重试轰炸，也不要绕过。
-- CDP/页面控制能碰到 Cookie：只对当前任务需要的画像开，用完就关；不要导出或回显 Cookie、账号、代理凭据。
+- 页面控制和 Cookie 只对当前任务需要的画像开，用完就 stop_profile。
+- delete_profile 进回收站可恢复；purge_profile 不可恢复，只在用户明确要求彻底删除时用。
 - 不要改画像的指纹配置来「绕过」问题；指纹异常先看 get_fingerprint_report / get_profile_preflight，把结论告诉用户。
 - 免费授权只有一个并发座位：同时只开一个画像。seat_busy 表示座位未释放，等几分钟，不要立刻重试。
 - automation_busy 表示另一个自动化（检测/养号/进化）在跑，等它结束。
 - 工具失败回 {ok:false, reason, detail, next_step}，按 reason / next_step 决定下一步，不要盲目重试。
-- 没有删除画像、批准提案、Cookie 读取、备份恢复、执行任意 JS 这类工具，这是设计如此。
 完整说明见资源 cloakbrowser://guide（仓库 docs/AGENT.md）。
 """
 

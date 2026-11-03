@@ -277,6 +277,22 @@ def create_router(deps: AgentDeps) -> APIRouter:
                 )
             elif action == "upload":
                 result = await pages.upload(context, profile_id, str(body.get("ref") or ""), body.get("paths"))
+            elif action == "hover":
+                result = await pages.hover(context, profile_id, str(body.get("ref") or ""))
+            elif action == "drag":
+                result = await pages.drag(context, profile_id, str(body.get("ref") or ""), str(body.get("to_ref") or ""))
+            elif action == "get_html":
+                result = await pages.get_html(
+                    context, profile_id, ref=body.get("ref") or None,
+                    offset=int(body.get("offset") or 0), max_chars=int(body.get("max_chars") or 6000),
+                )
+            elif action == "evaluate":
+                result = await pages.evaluate(context, profile_id, str(body.get("script") or ""), ref=body.get("ref") or None)
+            elif action == "cookies":
+                result = await pages.cookies(
+                    context, profile_id, str(body.get("action") or "get"),
+                    urls=body.get("urls"), domain=body.get("domain") or None, cookies=body.get("cookies"),
+                )
             elif action == "downloads":
                 result = await pages.downloads(context, profile_id)
             elif action == "dialog":

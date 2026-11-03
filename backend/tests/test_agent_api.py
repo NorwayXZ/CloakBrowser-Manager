@@ -559,8 +559,12 @@ def test_page_endpoint_drives_the_context(app_client, profile, monkeypatch):
 
 def test_tool_api_lists_and_runs_tools_under_the_configured_mode(app_client, profile):
     listing = app_client.get("/api/agent/tools").json()
-    assert listing["mode"] == "read-only"
+    assert listing["mode"] == "automation"  # nothing to configure: everything is open by default
     names = [t["name"] for t in listing["tools"]]
+    assert {"list_profiles", "launch_profile", "open_browser", "delete_profile", "browser_cookies"} <= set(names)
+
+    set_mode(app_client, "read-only")
+    names = [t["name"] for t in app_client.get("/api/agent/tools").json()["tools"]]
     assert "list_profiles" in names and "launch_profile" not in names
     openai = app_client.get("/api/agent/tools?format=openai").json()["tools"]
     assert openai[0]["type"] == "function"
@@ -583,7 +587,8 @@ def test_tool_api_applies_the_field_policy(app_client, monkeypatch):
 
     created = db.create_profile(name="Secret", fingerprint_seed=1, proxy="socks5://user:hunter2@10.0.0.9:1080", notes="NOTE_SECRET")
     body = app_client.post("/api/agent/tools/get_profile", json={"arguments": {"profile_id": created["id"]}}).text
-    assert "hunter2" not in body and "NOTE_SECRET" not in body
+    assert "hunter2" not in body  # proxy credentials stay write-only
+    assert "NOTE_SECRET" in body  # the user's own notes are readable by their agent
     assert "10.0.0.9:1080" in body
 
 
@@ -736,7 +741,10 @@ def test_http_mcp_endpoint_lists_and_calls_tools(app_client, profile):
 
     listed = mcp_rpc(app_client, "tools/list", rpc_id=2).json()["result"]["tools"]
     assert "list_profiles" in [t["name"] for t in listed]
-    assert "launch_profile" not in [t["name"] for t in listed]  # read-only by default
+    assert {"launch_profile", "browser_evaluate"} <= {t["name"] for t in listed}  # everything is open by default
+    set_mode(app_client, "read-only")
+    narrowed = mcp_rpc(app_client, "tools/list", rpc_id=4).json()["result"]["tools"]
+    assert "launch_profile" not in [t["name"] for t in narrowed]
 
     call = mcp_rpc(app_client, "tools/call", {"name": "list_profiles", "arguments": {}}, rpc_id=3).json()
     payload = json.loads(call["result"]["content"][0]["text"])
@@ -1532,3 +1540,85 @@ def test_management_tools_work_end_to_end(app_client):
     assert call("list_trash")["count"] == 0
     assert call("list_profiles", group_name="备用")["total"] == 1
     assert call("list_running")["count"] == 0
+
+
+# ── Unrestricted page extras: hover, drag, HTML, JavaScript, cookies ─────────
+
+
+async def test_hover_drag_html_evaluate_and_cookies():
+    pages, ctx = run_controller()
+    page = await ctx.new_page()
+    handle, slot = FakeElement(), FakeElement()
+    hovered: list[bool] = []
+
+    async def hover(**kw):
+        hovered.append(True)
+
+    async def box_a():
+        return {"x": 10, "y": 20, "width": 20, "height": 20}
+
+    async def box_b():
+        return {"x": 110, "y": 20, "width": 40, "height": 20}
+
+    handle.hover, handle.bounding_box, slot.bounding_box = hover, box_a, box_b
+    page.snapshot_handle = FakeSnapshotHandle(['[e0] button "Slider"', '[e1] button "Slot"'], [handle, slot])
+    await pages.snapshot(ctx, "p1")
+
+    await pages.hover(ctx, "p1", "e0")
+    assert hovered == [True]
+
+    page.mouse.move, page.mouse.down, page.mouse.up = AsyncMock(), AsyncMock(), AsyncMock()
+    await pages.drag(ctx, "p1", "e0", "e1")
+    assert page.mouse.move.await_args_list[0].args == (20.0, 30.0)  # centre of the source
+    assert page.mouse.move.await_args_list[1].args == (130.0, 30.0)  # centre of the target
+    page.mouse.down.assert_awaited_once()
+    page.mouse.up.assert_awaited_once()
+
+    page.content = AsyncMock(return_value="<html>" + "x" * 300 + "</html>")
+    first = await pages.get_html(ctx, "p1", max_chars=100)
+    assert len(first["html"]) == 100 and first["next_offset"] == 100 and first["total_chars"] == 313
+    last = await pages.get_html(ctx, "p1", offset=300, max_chars=100)
+    assert last["html"].endswith("</html>") and last["next_offset"] is None
+
+    result = await pages.evaluate(ctx, "p1", "() => document.title")
+    assert result["result"] == "body text" and result["truncated"] is False
+    with pytest.raises(PageControlError) as err:
+        await pages.evaluate(ctx, "p1", "  ")
+    assert err.value.reason == "invalid_argument"
+
+    ctx.cookies = AsyncMock(return_value=[{"name": "a", "domain": ".example.com", "value": "1"}, {"name": "b", "domain": ".other.org", "value": "2"}])
+    ctx.add_cookies, ctx.clear_cookies = AsyncMock(), AsyncMock()
+    everything = await pages.cookies(ctx, "p1", "get")
+    assert everything["count"] == 2
+    only = await pages.cookies(ctx, "p1", "get", domain="example.com")
+    assert [c["name"] for c in only["cookies"]] == ["a"]
+    assert (await pages.cookies(ctx, "p1", "set", cookies=[{"name": "c", "value": "3", "url": "https://example.com"}]))["set"] == 1
+    ctx.add_cookies.assert_awaited_once()
+    assert (await pages.cookies(ctx, "p1", "clear"))["cleared"] is True
+    for bad in ({"action": "set"}, {"action": "nope"}):
+        with pytest.raises(PageControlError) as err:
+            await pages.cookies(ctx, "p1", **bad)
+        assert err.value.reason == "invalid_argument"
+
+
+async def test_evaluate_truncates_huge_results():
+    pages, ctx = run_controller()
+    page = await ctx.new_page()
+    page.body_text = "y" * 50_000
+    result = await pages.evaluate(ctx, "p1", "() => 'y'.repeat(50000)")
+    assert result["truncated"] is True and len(result["result"]) == 20_000 and result["total_chars"] > 50_000
+
+
+def test_page_endpoint_serves_the_extra_actions(app_client, profile, monkeypatch):
+    from backend import main
+
+    ctx = FakeContext()
+    monkeypatch.setitem(main.browser_mgr.running, profile, MagicMock(cdp_port=9222, context=ctx))
+    app_client.post(f"/api/profiles/{profile}/page/navigate", json={"url": "https://example.com/"})
+    ctx.cookies = AsyncMock(return_value=[{"name": "sid", "domain": ".example.com", "value": "abc"}])
+    cookies = app_client.post(f"/api/profiles/{profile}/page/cookies", json={"action": "get"})
+    assert cookies.status_code == 200 and cookies.json()["cookies"][0]["value"] == "abc"
+    bad = app_client.post(f"/api/profiles/{profile}/page/evaluate", json={"script": ""})
+    assert bad.status_code == 400 and bad.json()["reason"] == "invalid_argument"
+    result = app_client.post(f"/api/profiles/{profile}/page/evaluate", json={"script": "() => document.title"})
+    assert result.status_code == 200 and result.json()["result"] == "body text"
