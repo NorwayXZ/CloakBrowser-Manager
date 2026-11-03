@@ -89,7 +89,9 @@ def test_private_addresses_and_dns_rebinding_are_rejected(monkeypatch):
     for url in ("file:///tmp/secret","http://127.0.0.1/","http://localhost/","http://169.254.169.254/"):
         with pytest.raises(ValueError):rotation.validate_settings({"url":url})
     monkeypatch.setattr(socket,"getaddrinfo",lambda *a,**k:[(socket.AF_INET,socket.SOCK_STREAM,6,"",("127.0.0.1",80))])
-    with pytest.raises(ValueError,match="内网"):rotation.send_refresh({"url":URL})
+    with pytest.raises(ValueError,match="允许本机链接"):rotation.send_refresh({"url":URL})
+    monkeypatch.setattr(socket,"getaddrinfo",lambda *a,**k:[(socket.AF_INET,socket.SOCK_STREAM,6,"",("10.0.0.5",80))])
+    with pytest.raises(ValueError,match="内网"):rotation.send_refresh({"url":URL,"allow_local":True})
 
 
 def test_control_request_is_pinned_and_redirects_are_not_followed(monkeypatch):
@@ -183,3 +185,83 @@ async def test_agents_discover_and_rotate_without_receiving_secrets(app_client,m
     assert result["job"]["state"]=="verified" and sent==[True]
     assert "PRIVATE_REFRESH_SECRET" not in json.dumps([visible,accepted,result])
     assert "user:pass" not in json.dumps(visible)
+
+
+@pytest.mark.parametrize("url",["http://127.0.0.1:9000/rotate","http://localhost:9000/","http://[::1]:9000/","http://127.8.9.10/","http://LOCALHOST./x","http://api.localhost/"])
+def test_local_links_need_the_opt_in(url):
+    with pytest.raises(ValueError,match="允许本机链接"):rotation.validate_settings({"url":url})
+    rotation.validate_settings({"url":url,"allow_local":True})
+
+
+@pytest.mark.parametrize("url",["http://169.254.169.254/latest/meta-data","http://10.0.0.1/","http://192.168.1.1/","http://[fe80::1]/","http://0.0.0.0/","http://[::ffff:169.254.169.254]/"])
+def test_opt_in_keeps_other_private_addresses_blocked(url):
+    with pytest.raises(ValueError,match="内网"):rotation.validate_settings({"url":url,"allow_local":True})
+
+
+def test_local_link_api_explains_the_option_and_saves_when_on(app_client):
+    p=db.create_proxy_preset("Local",SOCKS,"socks5")
+    path=f'/api/proxy-presets/{p["id"]}/rotation-settings'
+    refused=app_client.put(path,json={"url":"http://127.0.0.1:9000/rotate"})
+    assert refused.status_code==400 and "允许本机链接" in refused.json()["detail"]
+    assert app_client.get(path).json()["allow_local"] is False
+    assert app_client.put(path,json={"url":"http://127.0.0.1:9000/rotate","allow_local":True}).status_code==200
+    assert app_client.get(path).json()["allow_local"] is True
+    assert db.get_proxy_rotation_settings(p["id"])["allow_local"] is True
+
+
+class _Supplier:
+    """A real rotation endpoint on 127.0.0.1 that records every request it receives."""
+    def __enter__(self):
+        import http.server,threading
+        hits=self.hits=[]
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                hits.append(self.path)
+                if self.path.startswith("/redirect"):
+                    self.send_response(302);self.send_header("Location",f"http://127.0.0.1:{self.server.server_port}/target")
+                    self.send_header("Content-Length","0");self.end_headers();return
+                body=b'{"success":true}'
+                self.send_response(200);self.send_header("Content-Type","application/json")
+                self.send_header("Content-Length",str(len(body)));self.end_headers();self.wfile.write(body)
+            def log_message(self,*a):pass
+        self.server=http.server.ThreadingHTTPServer(("127.0.0.1",0),Handler)
+        self.url=f"http://127.0.0.1:{self.server.server_port}"
+        threading.Thread(target=self.server.serve_forever,daemon=True).start()
+        return self
+    def __exit__(self,*a):
+        self.server.shutdown();self.server.server_close()
+
+
+def test_real_local_endpoint_is_called_only_with_the_opt_in():
+    with _Supplier() as supplier:
+        with pytest.raises(ValueError,match="允许本机链接"):rotation.send_refresh({"url":supplier.url+"/rotate"})
+        assert supplier.hits==[]
+        rotation.send_refresh({"url":supplier.url+"/rotate?key=1","allow_local":True})
+        assert supplier.hits==["/rotate?key=1"]
+
+
+def test_local_redirects_are_still_not_followed():
+    with _Supplier() as supplier:
+        with pytest.raises(rotation.RotationError,match="302"):
+            rotation.send_refresh({"url":supplier.url+"/redirect","allow_local":True})
+        assert supplier.hits==["/redirect"]
+
+
+@pytest.mark.asyncio
+async def test_agents_rotate_through_an_opted_in_local_link(app_client,monkeypatch):
+    import httpx
+    from backend import main
+    with _Supplier() as supplier:
+        p=db.create_proxy_preset("Local",SOCKS,"socks5")
+        db.save_proxy_rotation_settings(p["id"],{"url":supplier.url+"/rotate","allow_local":True})
+        db.set_setting("mcp.mode","full")
+        client=agent_tools.RestClient(transport=httpx.ASGITransport(app=main.app),base_url="http://testserver")
+        caps=await agent_tools.dispatch(client,"get_proxy_capabilities",{"proxy_id":p["id"]})
+        assert caps["can_rotate_ip"]
+        monkeypatch.setattr(main,"_test_proxy",AsyncMock(side_effect=[SimpleNamespace(ip="203.0.113.1"),SimpleNamespace(ip="203.0.113.2")]))
+        accepted=await agent_tools.dispatch(client,"rotate_proxy_ip",{"proxy_id":p["id"],"wait_seconds":0,"request_id":"local-intent"})
+        assert accepted["ok"]
+        if rotation.TASKS:await __import__('asyncio').gather(*tuple(rotation.TASKS))
+        result=await agent_tools.dispatch(client,"get_proxy_rotation_result",{"job_id":accepted["job"]["id"]})
+        assert result["job"]["state"]=="verified" and supplier.hits==["/rotate"]
+        assert supplier.url not in json.dumps([caps,accepted,result])

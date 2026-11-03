@@ -26,11 +26,31 @@ class RotationError(ValueError):
     """A controlled message that is safe to return without supplier credentials."""
 
 
-def public_address(value: str) -> bool:
+LOCAL_HINT = "切换链接指向本机（127.0.0.1 / localhost）。如果这是本机运行的换 IP 服务，请打开「允许本机链接」后再保存"
+
+
+def _address(value: str):
     address = ipaddress.ip_address(value)
     if isinstance(address,ipaddress.IPv6Address) and address.ipv4_mapped:
         address = address.ipv4_mapped
-    return address.is_global
+    return address
+
+
+def public_address(value: str) -> bool:
+    return _address(value).is_global
+
+
+def loopback_address(value: str) -> bool:
+    return _address(value).is_loopback
+
+
+def check_address(value: str, allow_local: bool) -> None:
+    """Loopback is opt-in per proxy; private, link-local and metadata addresses stay blocked."""
+    if public_address(value): return
+    if loopback_address(value):
+        if allow_local: return
+        raise RotationError(LOCAL_HINT)
+    raise RotationError("切换链接不能指向内网、链路本地或云元数据地址")
 
 
 def validate_settings(config: dict) -> None:
@@ -42,10 +62,14 @@ def validate_settings(config: dict) -> None:
     try: port = u.port
     except ValueError: raise ValueError("切换链接端口无效") from None
     if port is not None and not 1 <= port <= 65535: raise ValueError("切换链接端口无效")
-    if u.hostname.lower() == "localhost": raise ValueError("切换链接不能指向本机或内网地址")
-    try: address = ipaddress.ip_address(u.hostname)
-    except ValueError: address = None
-    if address is not None and not public_address(u.hostname): raise ValueError("切换链接不能指向本机或内网地址")
+    allow_local = bool(config.get("allow_local"))
+    host = u.hostname.lower().rstrip(".")
+    if host == "localhost" or host.endswith(".localhost"):
+        if not allow_local: raise RotationError(LOCAL_HINT)
+    else:
+        try: ipaddress.ip_address(host)
+        except ValueError: pass
+        else: check_address(host,allow_local)
     if config.get("method", "GET") not in {"GET", "POST"}: raise ValueError("只支持 GET 和 POST")
     for name, value in config.get("headers", {}).items():
         if name.lower() in {"host", "content-length", "connection", "transfer-encoding"} or any(c in name+value for c in "\r\n"):
@@ -68,14 +92,17 @@ def rotation_key(config: dict) -> str:
 
 
 def send_refresh(config: dict) -> None:
-    """Resolve and pin a public address. Never follow a redirect or expose response text."""
+    """Resolve and pin a public (or opted-in loopback) address. Never follow a redirect or expose response text."""
     validate_settings(config)
     started = time.monotonic()
     u = urlsplit(config["url"])
     port = u.port or (443 if u.scheme == "https" else 80)
     addresses = socket.getaddrinfo(u.hostname,port,type=socket.SOCK_STREAM)
-    if not addresses or any(not public_address(a[4][0]) for a in addresses):
-        raise RotationError("刷新地址解析到不可访问的内网地址")
+    if not addresses: raise RotationError("刷新地址无法解析")
+    try:
+        for a in addresses: check_address(a[4][0],bool(config.get("allow_local")))
+    except RotationError as exc:
+        raise RotationError(f"刷新地址解析到受限地址：{exc}") from None
     remaining = 15-(time.monotonic()-started)
     if remaining <= 0: raise TimeoutError()
     # One attempt only: a refresh request must not be automatically replayed.

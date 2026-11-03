@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { isApiError, request } from "../../shared/api/client";
-import { Banner, Button, Dialog, FormField, Input, Select, Textarea } from "../../ui";
+import { Banner, Button, Dialog, FormField, Input, Select, Switch, Textarea } from "../../ui";
 import { editorKeys } from "../editor/api";
 
 type Caps = { proxy_id: string | null; can_rotate_ip: boolean; reason?: string; affected_profile_ids?: string[]; shared?: boolean };
 type Job = { id: string; state: string; proxy_id?: string; profile_id?: string | null; before_ip?: string | null; after_ip?: string | null; message?: string; affected_profile_ids?: string[]; shared?: boolean; requires_reconnect?: boolean; created_at?: number };
-type Settings = { url: string; method: "GET" | "POST"; cooldown_seconds: number; shared_group: string; headers: Record<string,string>; body: object | null };
+type Settings = { url: string; method: "GET" | "POST"; cooldown_seconds: number; shared_group: string; headers: Record<string,string>; body: object | null; allow_local: boolean };
 const labels: Record<string,string> = { queued:"等待处理",running:"正在切换并验证",verified:"已确认换 IP",unchanged:"IP 未变化",accepted_unverified:"结果尚未确认",failed:"切换失败" };
 const enc = encodeURIComponent;
 
@@ -106,10 +106,10 @@ export function ProxyIpActions({ proxyId, profileId, configured, editable = fals
 }
 
 function RotationSettings({proxyId,onClose,onSaved}:{proxyId:string;onClose:()=>void;onSaved:()=>void}) {
-  const [form,setForm]=useState<Settings>({url:"",method:"GET",cooldown_seconds:60,shared_group:"",headers:{},body:null});
+  const [form,setForm]=useState<Settings>({url:"",method:"GET",cooldown_seconds:60,shared_group:"",headers:{},body:null,allow_local:false});
   const [headers,setHeaders]=useState("{}");const [body,setBody]=useState("");
   const [error,setError]=useState("");const [loading,setLoading]=useState(true);const [saving,setSaving]=useState(false);
-  useEffect(()=>{let active=true;request<Settings>(`/api/proxy-presets/${enc(proxyId)}/rotation-settings`).then(v=>{if(active){setForm(v);setHeaders(JSON.stringify(v.headers));setBody(v.body?JSON.stringify(v.body):"");}}).catch(e=>{if(active)setError(e.message);}).finally(()=>{if(active)setLoading(false);});return()=>{active=false;};},[proxyId]);
+  useEffect(()=>{let active=true;request<Settings>(`/api/proxy-presets/${enc(proxyId)}/rotation-settings`).then(v=>{if(active){setForm({...v,allow_local:Boolean(v.allow_local)});setHeaders(JSON.stringify(v.headers));setBody(v.body?JSON.stringify(v.body):"");}}).catch(e=>{if(active)setError(e.message);}).finally(()=>{if(active)setLoading(false);});return()=>{active=false;};},[proxyId]);
   const save=async()=>{
     setSaving(true);setError("");
     try{
@@ -121,6 +121,7 @@ function RotationSettings({proxyId,onClose,onSaved}:{proxyId:string;onClose:()=>
   return <Dialog open onOpenChange={v=>{if(!v)onClose();}} title="配置一键换 IP" description="粘贴供应商提供的刷新链接。保存不会调用链接；清空链接保存可关闭此能力。" dismissible={!saving} footer={<><Button variant="ghost" disabled={saving} onClick={onClose}>取消</Button><Button disabled={loading} loading={saving} onClick={()=>void save()}>保存切换设置</Button></>}>
     <div className="flex flex-col gap-4">
       <FormField label="换 IP 链接"><Textarea value={form.url} autoComplete="off" spellCheck={false} rows={3} placeholder="粘贴供应商的 http(s):// 刷新链接" onChange={e=>setForm({...form,url:e.target.value})} /></FormField>
+      <Switch checked={form.allow_local} onCheckedChange={v=>setForm({...form,allow_local:v})} label="允许本机链接" description="仅当换 IP 服务就运行在这台电脑上（127.0.0.1 / localhost）时打开；内网和云元数据地址始终拒绝。" />
       <p className="text-xs text-fg-2">链接与认证信息加密保存。Agent 工具仅返回能力和操作结果，不返回原始链接。链接由 Manager 的管理网络发起，不通过正在切换的 SOCKS5。</p>
       <FormField label="冷却时间（秒）"><Input type="number" min={5} max={3600} value={form.cooldown_seconds} onChange={e=>setForm({...form,cooldown_seconds:Number(e.target.value)})} /></FormField>
       <FormField label="共享切换组（可选）" description="不同链接会切换同一批出口时，填写相同组名。相同链接自动共用锁和冷却时间。"><Input value={form.shared_group} maxLength={64} onChange={e=>setForm({...form,shared_group:e.target.value})} /></FormField>
