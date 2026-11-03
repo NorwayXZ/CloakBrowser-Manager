@@ -67,7 +67,7 @@ export function GroupBar({
         aria-current={value === key ? "true" : undefined}
         onClick={() => onChange(key)}
         className={cn(
-          "flex h-8 max-w-56 items-center gap-1.5 rounded-full border px-3 text-sm transition-colors duration-fast",
+          "flex h-7 max-w-56 items-center gap-1.5 rounded border px-2.5 text-sm transition-colors duration-fast",
           value === key ? "border-accent/40 bg-accent-soft font-medium text-accent" : "border-border bg-surface text-fg-2 hover:bg-surface-2 hover:text-fg",
           group && "pr-7",
         )}
@@ -81,7 +81,7 @@ export function GroupBar({
           size="sm"
           label={`删除分组「${group.name}」`}
           icon={<X className="h-3 w-3" />}
-          className="invisible absolute right-1 top-1 h-6 w-6 rounded-full group-hover/item:visible group-focus-within/item:visible focus-visible:visible"
+          className="invisible absolute right-0.5 top-0.5 h-6 w-6 rounded group-hover/item:visible group-focus-within/item:visible focus-visible:visible"
           onClick={() => void remove(group)}
         />
       )}
@@ -95,8 +95,8 @@ export function GroupBar({
         {item(UNGROUPED, UNGROUPED, counts.get(UNGROUPED) ?? 0)}
         {loading ? (
           <li className="flex gap-1.5">
-            <Skeleton className="h-8 w-20 rounded-full" />
-            <Skeleton className="h-8 w-16 rounded-full" />
+            <Skeleton className="h-7 w-20 rounded" />
+            <Skeleton className="h-7 w-16 rounded" />
           </li>
         ) : (
           groups.filter((group) => group.name !== UNGROUPED).map((group) => item(group.name, group.name, counts.get(group.name) ?? 0, group))
