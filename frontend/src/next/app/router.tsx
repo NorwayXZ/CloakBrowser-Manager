@@ -11,6 +11,7 @@ import { APP_BASENAME, MOVED_PAGES } from "./nav";
 const Gallery = lazy(() => import("../dev/Gallery").then((m) => ({ default: m.Gallery })));
 const ViewerPage = lazy(() => import("../features/profiles/ViewerPage").then((m) => ({ default: m.ViewerPage })));
 const EditorPage = lazy(() => import("../features/editor/EditorPage").then((m) => ({ default: m.EditorPage })));
+const RelayNodesPanel = lazy(() => import("../features/proxies/RelayNodesPanel").then((m) => ({ default: m.RelayNodesPanel })));
 const ProxiesPage = lazy(() => import("../features/proxies/ProxiesPage").then((m) => ({ default: m.ProxiesPage })));
 const DataPage = lazy(() => import("../features/data/DataPage").then((m) => ({ default: m.DataPage })));
 const MailPage = lazy(() => import("../features/mail/MailPage").then((m) => ({ default: m.MailPage })));
@@ -58,6 +59,7 @@ export const routes: RouteObject[] = [
         children: [
           { index: true, element: <Navigate to="proxies" replace /> },
           { path: "proxies", element: page(<ProxiesPage />) },
+          { path: "relays", element: page(<RelayNodesPanel />) },
           { path: "mail", element: page(<MailPage />) },
         ],
       },

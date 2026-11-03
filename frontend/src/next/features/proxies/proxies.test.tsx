@@ -39,7 +39,7 @@ describe("relay nodes", () => {
         relays.push(item); return item;
       } },
     ]);
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "中转服务器" }), { button: 0, ctrlKey: false });
+    fireEvent.click(screen.getByRole("link", { name: "中转服务器" }));
     fireEvent.click(await screen.findByRole("button", { name: "添加中转服务器" }));
     const dialog = await screen.findByRole("dialog", { name: "添加中转服务器" });
     fireEvent.change(within(dialog).getByLabelText("中转名称"), { target: { value: "美国中转" } });

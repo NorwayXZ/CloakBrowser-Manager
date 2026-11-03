@@ -2,11 +2,12 @@ import { NavLink, Outlet } from "react-router";
 import { cn } from "../../shared/lib/cn";
 
 const TABS = [
-  { to: "/resources/proxies", label: "代理" },
+  { to: "/resources/proxies", label: "出口代理" },
+  { to: "/resources/relays", label: "中转服务器" },
   { to: "/resources/mail", label: "邮箱" },
 ];
 
-/** 资源: the pools profiles draw from — saved proxies and mailboxes — as two tabs. */
+/** 资源: the pools profiles draw from — saved proxies, relay servers and mailboxes — as one row of tabs. */
 export function ResourcesLayout() {
   return (
     <div className="flex flex-col pt-2">
