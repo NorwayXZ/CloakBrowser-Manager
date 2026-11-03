@@ -1012,6 +1012,14 @@ def test_panel_page_is_always_revalidated(app_client: TestClient):
     assert resp.headers["cache-control"] == "no-cache"
 
 
+def test_well_known_paths_are_404_not_the_panel_page(app_client: TestClient):
+    # MCP / OAuth clients probe these; HTML with a 200 makes them fail on parsing.
+    for path in ("/.well-known/oauth-protected-resource", "/.well-known/oauth-authorization-server", "/.well-known/oauth-protected-resource/api/agent/mcp"):
+        resp = app_client.get(path)
+        assert resp.status_code == 404, path
+        assert "text/html" not in resp.headers.get("content-type", ""), path
+
+
 def test_proxy_test_reports_a_dead_proxy_without_waiting_for_lookups(app_client: TestClient):
     from backend import main
     from backend.proxy_probe import ProbeResult
