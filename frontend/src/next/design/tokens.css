@@ -1,6 +1,6 @@
 /*
- * Design tokens of the panel: soft gradient canvas, translucent "glass" cards,
- * an indigo-to-blue accent gradient, large radii and a roomy type scale.
+ * Design tokens of the panel: a flat light-gray canvas, white cards with a hairline border,
+ * one solid blue accent, small radii and a compact type scale.
  *
  * Colors are RGB channels so Tailwind can add alpha (bg-accent/10). Light
  * values on :root, dark values under [data-theme="dark"]; ThemeProvider always
@@ -12,25 +12,25 @@
  * --c-accent-fill-2 are the two stops of the gradient behind white button text.
  */
 :root {
-  --c-canvas: 238 235 252;        /* #EEEBFC the page's mid tone (the page itself is a gradient) */
+  --c-canvas: 245 246 248;        /* #EEEBFC the page's mid tone (the page itself is a gradient) */
   --c-surface: 255 255 255;       /* #FFFFFF cards, fields */
-  --c-surface-2: 244 243 252;     /* #F4F3FC hover, sunken fields */
-  --c-surface-3: 232 230 248;     /* #E8E6F8 pressed, segmented track */
-  --c-sidebar: 238 235 252;       /* kept for the legacy token set */
-  --c-border: 222 220 240;        /* #DEDCF0 hairlines inside cards */
-  --c-border-strong: 128 128 160; /* #8080A0 field outlines, 3:1 on surface and canvas */
-  --c-glass-border: 255 255 255;
-  --c-fg: 28 28 58;               /* #1C1C3A body text */
-  --c-fg-2: 74 74 110;            /* #4A4A6E secondary text */
-  --c-fg-3: 98 98 134;            /* #626286 captions, placeholders */
-  --c-accent: 79 70 214;          /* #4F46D6 */
-  --c-accent-hover: 62 54 190;    /* #3E36BE */
-  --c-accent-fill: 91 80 232;     /* #5B50E8 */
-  --c-accent-fill-hover: 74 64 214; /* #4A40D6 */
-  --c-accent-fill-2: 50 110 224;  /* #326EE0 */
-  --c-accent-soft: 237 234 255;   /* #EDEAFF */
+  --c-surface-2: 245 246 248;     /* #F4F3FC hover, sunken fields */
+  --c-surface-3: 235 237 241;     /* #E8E6F8 pressed, segmented track */
+  --c-sidebar: 255 255 255;       /* kept for the legacy token set */
+  --c-border: 229 231 236;        /* #DEDCF0 hairlines inside cards */
+  --c-border-strong: 134 139 150; /* #8080A0 field outlines, 3:1 on surface and canvas */
+  --c-glass-border: 229 231 236;
+  --c-fg: 31 35 41;               /* #1C1C3A body text */
+  --c-fg-2: 77 85 97;            /* #4A4A6E secondary text */
+  --c-fg-3: 100 108 120;            /* #626286 captions, placeholders */
+  --c-accent: 37 99 235;          /* #4F46D6 */
+  --c-accent-hover: 29 78 216;    /* #3E36BE */
+  --c-accent-fill: 37 99 235;     /* #5B50E8 */
+  --c-accent-fill-hover: 29 78 216; /* #4A40D6 */
+  --c-accent-fill-2: 37 99 235;  /* #326EE0 */
+  --c-accent-soft: 233 241 254;   /* #EDEAFF */
   --c-on-accent: 255 255 255;
-  --c-switch-on: 52 199 89;       /* #34C759 */
+  --c-switch-on: 37 99 235;       /* #34C759 */
   --c-success: 30 125 55;         /* #1E7D37 */
   --c-success-soft: 230 246 234;  /* #E6F6EA */
   --c-warning: 168 80 0;          /* #A85000 */
@@ -41,16 +41,16 @@
   --c-on-danger: 255 255 255;
   --c-info: 0 98 204;             /* #0062CC */
   --c-info-soft: 230 241 252;     /* #E6F1FC */
-  --c-backdrop: 20 16 60;
+  --c-backdrop: 15 23 42;
 
-  --page-gradient: linear-gradient(135deg, #e3ebff 0%, #f1e6ff 55%, #ffe6ef 100%);
-  --glass-alpha: 0.78;
-  --glass-border-alpha: 0.9;
+  --page-gradient: none;
+  --glass-alpha: 1;
+  --glass-border-alpha: 1;
 
-  --shadow-raised: 0 2px 8px rgb(80 70 160 / 0.1);
-  --shadow-card: 0 10px 30px rgb(80 70 160 / 0.12);
-  --shadow-popover: 0 14px 40px rgb(60 50 140 / 0.22), 0 0 0 0.5px rgb(60 50 140 / 0.1);
-  --shadow-modal: 0 28px 80px rgb(40 30 120 / 0.3), 0 0 0 0.5px rgb(60 50 140 / 0.12);
+  --shadow-raised: 0 1px 2px rgb(15 23 42 / 0.1);
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04);
+  --shadow-popover: 0 6px 20px rgb(15 23 42 / 0.14), 0 0 0 1px rgb(15 23 42 / 0.06);
+  --shadow-modal: 0 16px 48px rgb(15 23 42 / 0.22), 0 0 0 1px rgb(15 23 42 / 0.06);
 
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "PingFang SC", "Hiragino Sans GB",
     "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
@@ -60,25 +60,25 @@
 }
 
 :root[data-theme="dark"] {
-  --c-canvas: 17 17 30;           /* #11111E */
-  --c-surface: 34 34 54;          /* #222236 */
-  --c-surface-2: 46 46 70;        /* #2E2E46 */
-  --c-surface-3: 60 60 88;        /* #3C3C58 */
-  --c-sidebar: 24 24 40;
-  --c-border: 66 66 98;           /* #424262 */
-  --c-border-strong: 140 140 176; /* #8C8CB0 */
-  --c-glass-border: 255 255 255;
-  --c-fg: 240 240 255;            /* #F0F0FF */
-  --c-fg-2: 188 188 214;          /* #BCBCD6 */
-  --c-fg-3: 156 156 186;          /* #9C9CBA */
-  --c-accent: 150 142 255;        /* #968EFF */
-  --c-accent-hover: 180 174 255;  /* #B4AEFF */
-  --c-accent-fill: 91 80 232;     /* #5B50E8 */
-  --c-accent-fill-hover: 78 68 214; /* #4E44D6 */
-  --c-accent-fill-2: 50 110 224;  /* #326EE0 */
-  --c-accent-soft: 40 36 92;      /* #28245C */
+  --c-canvas: 17 18 22;           /* #11111E */
+  --c-surface: 27 29 35;          /* #222236 */
+  --c-surface-2: 36 39 46;        /* #2E2E46 */
+  --c-surface-3: 48 52 61;        /* #3C3C58 */
+  --c-sidebar: 27 29 35;
+  --c-border: 52 56 66;           /* #424262 */
+  --c-border-strong: 140 146 160; /* #8C8CB0 */
+  --c-glass-border: 52 56 66;
+  --c-fg: 236 238 242;            /* #F0F0FF */
+  --c-fg-2: 186 191 201;          /* #BCBCD6 */
+  --c-fg-3: 154 160 172;          /* #9C9CBA */
+  --c-accent: 118 168 255;        /* #968EFF */
+  --c-accent-hover: 154 192 255;  /* #B4AEFF */
+  --c-accent-fill: 37 99 235;     /* #5B50E8 */
+  --c-accent-fill-hover: 29 78 216; /* #4E44D6 */
+  --c-accent-fill-2: 37 99 235;  /* #326EE0 */
+  --c-accent-soft: 24 38 72;      /* #28245C */
   --c-on-accent: 255 255 255;
-  --c-switch-on: 48 209 88;       /* #30D158 */
+  --c-switch-on: 59 130 246;       /* #30D158 */
   --c-success: 48 209 88;         /* #30D158 */
   --c-success-soft: 16 48 28;     /* #10301C */
   --c-warning: 255 159 10;        /* #FF9F0A */
@@ -91,14 +91,14 @@
   --c-info-soft: 14 36 62;        /* #0E243E */
   --c-backdrop: 0 0 0;
 
-  --page-gradient: linear-gradient(135deg, #14142b 0%, #1d1236 55%, #2a1230 100%);
-  --glass-alpha: 0.64;
-  --glass-border-alpha: 0.1;
+  --page-gradient: none;
+  --glass-alpha: 1;
+  --glass-border-alpha: 1;
 
-  --shadow-raised: 0 2px 8px rgb(0 0 0 / 0.4);
-  --shadow-card: 0 12px 34px rgb(0 0 0 / 0.45);
-  --shadow-popover: 0 16px 44px rgb(0 0 0 / 0.6), 0 0 0 0.5px rgb(255 255 255 / 0.1);
-  --shadow-modal: 0 30px 90px rgb(0 0 0 / 0.7), 0 0 0 0.5px rgb(255 255 255 / 0.12);
+  --shadow-raised: 0 1px 2px rgb(0 0 0 / 0.5);
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-popover: 0 8px 24px rgb(0 0 0 / 0.55), 0 0 0 1px rgb(255 255 255 / 0.08);
+  --shadow-modal: 0 20px 60px rgb(0 0 0 / 0.65), 0 0 0 1px rgb(255 255 255 / 0.08);
 
   color-scheme: dark;
 }

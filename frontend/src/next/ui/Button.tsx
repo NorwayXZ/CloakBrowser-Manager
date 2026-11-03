@@ -8,9 +8,8 @@ export type ButtonSize = "sm" | "md";
 
 const VARIANTS: Record<ButtonVariant, string> = {
   primary:
-    "bg-gradient-to-br from-accent-fill to-accent-fill-2 text-accent-on shadow-[0_6px_16px_rgb(91_80_232/0.28)] " +
-    "hover:from-accent-fill-hover hover:to-accent-fill-2 hover:brightness-105 active:brightness-95",
-  secondary: "border border-border-strong/60 bg-surface/70 text-fg hover:bg-surface active:bg-surface-2",
+    "bg-accent-fill text-accent-on hover:bg-accent-fill-hover active:bg-accent-fill-hover",
+  secondary: "border border-border-strong/50 bg-surface text-fg hover:border-accent hover:text-accent active:bg-surface-2",
   ghost: "text-fg-2 hover:bg-surface-2 hover:text-fg active:bg-surface-3",
   danger: "bg-danger text-danger-on hover:bg-danger-hover active:bg-danger-hover",
   /** Destructive but secondary: red text, no fill (e.g. "移到回收站" beside other actions). */
@@ -18,13 +17,13 @@ const VARIANTS: Record<ButtonVariant, string> = {
 };
 
 const SIZES: Record<ButtonSize, string> = {
-  sm: "h-8 gap-1.5 px-3.5 text-xs",
-  md: "h-10 gap-2 px-5 text-sm",
+  sm: "h-7 gap-1.5 px-3 text-xs",
+  md: "h-8 gap-1.5 px-4 text-sm",
 };
 
 export const buttonBase =
-  "inline-flex shrink-0 select-none items-center justify-center whitespace-nowrap rounded-full font-semibold " +
-  "transition-[background-color,border-color,color,box-shadow,transform] duration-fast active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 " +
+  "inline-flex shrink-0 select-none items-center justify-center whitespace-nowrap rounded font-medium " +
+  "transition-[background-color,border-color,color,box-shadow,transform] duration-fast focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 " +
   "focus-visible:outline-accent disabled:pointer-events-none disabled:opacity-50";
 
 /** Button look for elements that must stay links (e.g. "open the old panel"). */
