@@ -21,7 +21,7 @@ claude mcp add --transport http cloakbrowser-manager http://127.0.0.1:8080/api/a
 #   url = "http://127.0.0.1:8080/api/agent/mcp"
 ```
 
-If the Manager has a password / token on, send `Authorization: Bearer <token>` (Claude Code: add `--header "Authorization: Bearer <token>"`; Codex: `bearer_token_env_var = "CLOAK_AGENT_TOKEN"`). Create a scoped token in the panel (设置 → API 与 MCP) or with `./bin/cloak token create <name> <read|control|cdp>`; never ask for the admin password.
+If the Manager has a password / token on, send `Authorization: Bearer <token>` (Claude Code: add `--header "Authorization: Bearer <token>"`; Codex: `bearer_token_env_var = "CLOAK_AGENT_TOKEN"`). Create a scoped token with `./bin/cloak token create <name> <read|control|cdp>`; never ask for the admin password.
 
 **No MCP (shell or function calling)**
 

@@ -251,7 +251,7 @@ curl -X POST http://127.0.0.1:8080/api/agent/tools/open_browser \
 
 ## 范围化 token（Manager 开了鉴权时）
 
-管理员可以签发只给 agent 用的 token，比 `AUTH_TOKEN` 权限小。面板「设置 → API 与 MCP」里可以签发、撤销，也能看到最近的 agent 操作记录；命令行同样可以：
+管理员可以签发只给 agent 用的 token，比 `AUTH_TOKEN` 权限小。面板里不再提供签发入口（自己用不需要），签发和撤销走命令行或 API；面板「设置 → API 与 MCP」只显示最近的 agent 操作记录：
 
 ```bash
 ./bin/cloak token create "codex 笔记本" control     # 输出的 token 只显示一次
