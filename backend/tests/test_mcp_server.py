@@ -100,7 +100,7 @@ EXPECTED_READ_TOOLS = {
             }
         },
     },
-    "list_profiles": NO_ARGS,
+    "list_profiles": agent_tools.LIST_PROFILES_ARGS,
     "get_profile": PROFILE_ID_ARGS,
     "get_profile_preflight": PROFILE_ID_ARGS,
     "list_device_templates": NO_ARGS,
@@ -136,6 +136,9 @@ EXPECTED_READ_TOOLS = {
         "proxy_id":{"type":"string","description":"list_proxies 返回的代理编号"},
         "profile_id":{"type":"string","description":"可改用环境编号，检查该环境真实绑定的代理"}}},
     "get_proxy_rotation_result": {"type":"object","properties":{"job_id":{"type":"string"}},"required":["job_id"]},
+    "list_groups": NO_ARGS,
+    "list_running": NO_ARGS,
+    "list_trash": NO_ARGS,
 }
 
 LAUNCH_PROFILE_ARGS = {
@@ -197,6 +200,15 @@ EXPECTED_ACTION_TOOLS = {
     "mail_get_address": MAIL_ADDRESS_ARGS,
     "mail_wait_code": MAIL_WAIT_ARGS,
     "mail_list_messages": MAIL_LIST_ARGS,
+    "create_profile": agent_tools.CREATE_PROFILE_ARGS,
+    "update_profile": agent_tools.UPDATE_PROFILE_ARGS,
+    "apply_device_template": agent_tools.TOOLS["apply_device_template"].input_schema,
+    "regenerate_fingerprint": PROFILE_ID_ARGS,
+    "create_group": agent_tools.TOOLS["create_group"].input_schema,
+    "move_profiles": agent_tools.TOOLS["move_profiles"].input_schema,
+    "restore_profile": PROFILE_ID_ARGS,
+    "create_proxy": agent_tools.TOOLS["create_proxy"].input_schema,
+    "stop_all_profiles": NO_ARGS,
 }
 
 EXPECTED_BROWSER_TOOLS = {
@@ -1255,3 +1267,131 @@ def test_typed_text_is_not_kept_in_the_audit_log():
     summary = mcp_server.summarize_args({"profile": "p", "ref": "e1", "text": "hunter2-hunter2"})
     assert summary["text"] == {"present": True, "length": 15}
     assert "hunter2" not in json.dumps(summary)
+
+
+# ── Management tools (profiles, groups, proxies, trash) ─────────────────────
+
+
+def test_every_tool_is_documented_for_agents():
+    """Each tool needs a layer, an English summary, trigger words and a sane schema."""
+    for name, tool in agent_tools.TOOLS.items():
+        assert tool.layer in {"read", "action", "browser"}, name
+        assert name in agent_tools.TOOL_EN, f"{name} has no English summary"
+        assert agent_tools.TRIGGERS.get(name), f"{name} has no trigger words"
+        schema = tool.input_schema
+        assert schema.get("type") == "object", name
+        properties = schema.get("properties", {})
+        assert set(schema.get("required", [])) <= set(properties), name
+        assert "触发词 / Triggers:" in agent_tools.tool_description(tool), name
+    assert set(agent_tools.TRIGGERS) == set(agent_tools.TOOLS)
+
+
+def test_destructive_tools_stay_out_of_the_agent_surface():
+    forbidden = {"delete_profile", "purge_profile", "burn_profile", "get_cookies", "export_cookies", "set_license", "restore_backup"}
+    assert not forbidden & set(agent_tools.TOOLS)
+
+
+async def test_list_profiles_pages_and_filters():
+    fake = FakeManager()
+    rows = [
+        {"id": f"p{i}", "name": f"环境{i}", "group_name": "A" if i % 2 else "B", "status": "running" if i == 3 else "stopped", "proxy": "socks5://u:secret@1.2.3.4:1080"}
+        for i in range(1, 8)
+    ]
+    fake.routes[("GET", "/api/profiles")] = (200, rows)
+    client = fake.client()
+    first = await agent_tools.TOOLS["list_profiles"].handler(client, {"limit": 3})
+    assert (first["total"], first["total_pages"], first["page"], first["count"]) == (7, 3, 1, 3)
+    last = await agent_tools.TOOLS["list_profiles"].handler(client, {"limit": 3, "page": 3})
+    assert last["count"] == 1
+    group = await agent_tools.TOOLS["list_profiles"].handler(client, {"group_name": "A"})
+    assert group["total"] == 4
+    running = await agent_tools.TOOLS["list_profiles"].handler(client, {"status": "running"})
+    assert [p["id"] for p in running["profiles"]] == ["p3"]
+    assert "secret" not in json.dumps(first)
+
+
+async def test_create_profile_sends_only_whitelisted_fields():
+    fake = FakeManager()
+    fake.routes[("GET", "/api/proxy-presets")] = (200, [{"id": "px1", "name": "美国", "proxy": "socks5://u:secret@1.2.3.4:1080"}])
+    fake.routes[("POST", "/api/profiles")] = (201, {"id": "new1", "name": "店铺A", "proxy": "socks5://u:secret@1.2.3.4:1080", "group_name": "美国账号"})
+    client = fake.client()
+    result = await agent_tools.TOOLS["create_profile"].handler(
+        client, {"name": "店铺A", "group_name": "美国账号", "proxy_id": "px1", "tags": ["a", " "], "startup_urls": ["https://example.com"]}
+    )
+    assert result["ok"] and result["profile"]["id"] == "new1"
+    assert "secret" not in json.dumps(result)
+    body = fake.bodies[("POST", "/api/profiles")]
+    assert body == {
+        "name": "店铺A", "group_name": "美国账号", "proxy_id": "px1", "proxy": "socks5://u:secret@1.2.3.4:1080",
+        "startup_urls": ["https://example.com"], "tags": [{"tag": "a"}],
+    }
+    missing = await agent_tools.TOOLS["create_profile"].handler(client, {"name": "x", "proxy_id": "nope"})
+    assert missing["ok"] is False and missing["reason"] == "not_found"
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        {"name": "x", "cookies_json": "[]"},
+        {"name": "x", "notes": "n"},
+        {"name": "x", "proxy": "socks5://u:p@h:1"},
+        {"name": "x", "startup_urls": ["file:///etc/passwd"]},
+        {},
+    ],
+)
+async def test_create_profile_rejects_unsafe_or_missing_input(args):
+    fake = FakeManager()
+    result = await agent_tools.TOOLS["create_profile"].handler(fake.client(), args)
+    assert result["ok"] is False and result["reason"] == "invalid_argument"
+    assert not fake.requests
+
+
+async def test_update_profile_needs_fields_and_whitelists():
+    fake = FakeManager()
+    client = fake.client()
+    empty = await agent_tools.TOOLS["update_profile"].handler(client, {"profile_id": "p1"})
+    assert empty["reason"] == "invalid_argument"
+    cookies = await agent_tools.TOOLS["update_profile"].handler(client, {"profile_id": "p1", "cookies_json": "[]"})
+    assert cookies["reason"] == "invalid_argument"
+    fake.routes[("PUT", "/api/profiles/p1")] = (200, {"id": "p1", "name": "新名字", "proxy": "http://u:pw@h:1"})
+    ok = await agent_tools.TOOLS["update_profile"].handler(client, {"profile_id": "p1", "name": "新名字"})
+    assert ok["ok"] and "pw" not in json.dumps(ok)
+
+
+async def test_move_profiles_reports_each_profile():
+    fake = FakeManager()
+    fake.routes[("PUT", "/api/profiles/a")] = (200, {"id": "a"})
+    result = await agent_tools.TOOLS["move_profiles"].handler(fake.client(), {"profile_ids": ["a", "missing"], "group_name": "G"})
+    assert result["ok"] is False
+    assert result["moved"] == ["a"]
+    assert result["failed"][0]["profile_id"] == "missing" and result["failed"][0]["reason"] == "not_found"
+
+
+async def test_create_proxy_never_echoes_credentials():
+    fake = FakeManager()
+    fake.routes[("POST", "/api/proxy-presets")] = (201, {"id": "px9", "name": "美国", "proxy": "socks5://user:topsecret@9.9.9.9:1080"})
+    result = await agent_tools.TOOLS["create_proxy"].handler(fake.client(), {"name": "美国", "proxy": "socks5://user:topsecret@9.9.9.9:1080"})
+    assert result["ok"] and result["proxy"]["proxy_id"] == "px9"
+    assert "topsecret" not in json.dumps(result)
+
+
+async def test_stop_all_profiles_stops_only_running():
+    fake = FakeManager()
+    fake.routes[("GET", "/api/profiles")] = (200, [{"id": "r1", "status": "running"}, {"id": "s1", "status": "stopped"}])
+    fake.routes[("POST", "/api/profiles/r1/stop")] = (200, {"ok": True})
+    result = await agent_tools.TOOLS["stop_all_profiles"].handler(fake.client(), {})
+    assert result == {"ok": True, "stopped": ["r1"], "failed": []}
+
+
+async def test_groups_and_running_and_trash_reads():
+    fake = FakeManager()
+    fake.routes[("GET", "/api/groups")] = (200, [{"id": "g1", "name": "美国账号", "color": None}])
+    fake.routes[("GET", "/api/profiles")] = (200, [{"id": "a", "group_name": "美国账号", "status": "running", "runtime_mode": "manual"}, {"id": "b", "group_name": "未分组"}])
+    fake.routes[("GET", "/api/profiles/trash")] = (200, [{"id": "t", "name": "旧", "group_name": "未分组", "deleted_at": "2026-11-01"}])
+    client = fake.client()
+    groups = await agent_tools.TOOLS["list_groups"].handler(client, {})
+    assert groups["groups"][0]["profiles"] == 1
+    running = await agent_tools.TOOLS["list_running"].handler(client, {})
+    assert running["count"] == 1
+    trash = await agent_tools.TOOLS["list_trash"].handler(client, {})
+    assert trash["profiles"][0]["id"] == "t"

@@ -1491,3 +1491,44 @@ async def test_upload_finds_hidden_file_inputs_but_clicks_need_visible_elements(
     assert not hasattr(locators[-1], "filtered")  # no visibility filter for upload
     await pages.click(ctx, "p1", "css=#f")
     assert locators[-1].filtered == {"visible": True}
+
+
+def test_management_tools_work_end_to_end(app_client):
+    """create / update / move / trash through the real Manager, under the field policy."""
+    set_mode(app_client, "full")
+
+    def call(tool: str, **arguments):
+        return app_client.post(f"/api/agent/tools/{tool}", json={"arguments": arguments}).json()
+
+    group = call("create_group", name="美国账号")
+    assert group["ok"] is True
+    proxy = call("create_proxy", name="美国1", proxy="socks5://user:hunter2@10.0.0.9:1080")
+    assert proxy["ok"] is True and "hunter2" not in str(proxy)
+
+    created = call("create_profile", name="店铺A", group_name="美国账号", proxy_id=proxy["proxy"]["proxy_id"], tags=["amazon"])
+    assert created["ok"] is True, created
+    profile_id = created["profile"]["id"]
+    assert created["profile"]["group_name"] == "美国账号" and "hunter2" not in str(created)
+
+    renamed = call("update_profile", profile_id=profile_id, name="店铺A2", timezone="America/New_York")
+    assert renamed["ok"] is True and renamed["profile"]["name"] == "店铺A2"
+
+    before = renamed["profile"]["fingerprint_seed"]
+    again = call("regenerate_fingerprint", profile_id=profile_id)
+    assert again["ok"] is True and again["profile"]["fingerprint_seed"] != before
+
+    other = call("create_group", name="备用")
+    assert other["ok"] is True
+    moved = call("move_profiles", profile_ids=[profile_id], group_name="备用")
+    assert moved["ok"] is True and moved["moved"] == [profile_id]
+    groups = {g["name"]: g["profiles"] for g in call("list_groups")["groups"]}
+    assert groups["备用"] == 1 and groups["美国账号"] == 0
+
+    # Deleting lives in the panel only; the trash is readable and restorable.
+    assert app_client.delete(f"/api/profiles/{profile_id}").status_code == 200
+    assert [p["id"] for p in call("list_trash")["profiles"]] == [profile_id]
+    restored = call("restore_profile", profile_id=profile_id)
+    assert restored["ok"] is True
+    assert call("list_trash")["count"] == 0
+    assert call("list_profiles", group_name="备用")["total"] == 1
+    assert call("list_running")["count"] == 0
