@@ -499,6 +499,27 @@ describe("saving and leaving", () => {
     await waitFor(() => expect(router.state.location.pathname).toBe("/profiles"));
   });
 
+  it("resets the profile to a fresh environment from the editor", async () => {
+    const { fetchMock, router } = await openEditor("/profiles/profile-1/edit", "macos", null, [
+      { path: "/api/mail/addresses?profile_id=profile-1", respond: [] },
+      { path: "/api/profiles/profile-1/vault", respond: { ok: true, entries: [] } },
+      {
+        method: "POST",
+        path: "/api/profiles/profile-1/reset",
+        respond: (body: unknown) => ({
+          ok: true, profile: { id: "profile-1" }, was_running: false, files_removed: 3, old_fingerprint_seed: 1,
+          new_fingerprint_seed: 77777, device_profile: "mba_13_m2_2022", bindings: (body as { bindings: string }).bindings,
+          mail_addresses: 0, vault_entries: 0,
+        }),
+      },
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: "一键重置环境" }));
+    const dialog = await screen.findByRole("dialog", { name: /重置为全新环境/ });
+    fireEvent.click(within(dialog).getByRole("button", { name: "重置环境" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => init?.method === "POST" && String(url) === "/api/profiles/profile-1/reset")).toBe(true));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/profiles"));
+  });
+
   it("says so when the profile does not exist", async () => {
     mockFetch(routes());
     renderApp("/profiles/nope/edit");

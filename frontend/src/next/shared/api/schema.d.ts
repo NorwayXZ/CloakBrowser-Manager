@@ -1481,6 +1481,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/profiles/{profile_id}/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reset Profile
+         * @description Turn a profile into a brand-new browser in place (一键重置环境).
+         *
+         *     Deletes all of its browser data (cookies, storage, history, cache,
+         *     service workers, saved logins) and rolls a new seed and device, while
+         *     name, group, notes, tags and the proxy binding stay. A running profile
+         *     is stopped the normal way first. Needs {"confirm": true}; ``bindings``
+         *     says what happens to its mail addresses and vault entries.
+         */
+        post: operations["reset_profile_api_profiles__profile_id__reset_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/profiles/{profile_id}/restore": {
         parameters: {
             query?: never;
@@ -3267,6 +3293,45 @@ export interface components {
             warmup_persona?: string | null;
             /** Warmup Targets */
             warmup_targets?: string[];
+        };
+        /** ProfileResetRequest */
+        ProfileResetRequest: {
+            /**
+             * Bindings
+             * @default unbind
+             * @enum {string}
+             */
+            bindings: "unbind" | "keep" | "delete";
+            /**
+             * Confirm
+             * @default false
+             */
+            confirm: boolean;
+        };
+        /** ProfileResetResponse */
+        ProfileResetResponse: {
+            /**
+             * Bindings
+             * @enum {string}
+             */
+            bindings: "unbind" | "keep" | "delete";
+            /** Device Profile */
+            device_profile?: string | null;
+            /** Files Removed */
+            files_removed: number;
+            /** Mail Addresses */
+            mail_addresses: number;
+            /** New Fingerprint Seed */
+            new_fingerprint_seed: number;
+            /** Ok */
+            ok: boolean;
+            /** Old Fingerprint Seed */
+            old_fingerprint_seed?: number | null;
+            profile: components["schemas"]["ProfileResponse"];
+            /** Vault Entries */
+            vault_entries: number;
+            /** Was Running */
+            was_running: boolean;
         };
         /** ProfileResponse */
         ProfileResponse: {
@@ -6661,6 +6726,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_profile_api_profiles__profile_id__reset_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProfileResetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileResetResponse"];
                 };
             };
             /** @description Validation Error */

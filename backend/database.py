@@ -961,6 +961,28 @@ def purge_profile(profile_id: str) -> bool:
         return cursor.rowcount > 0
 
 
+def release_profile_bindings(profile_id: str, action: str) -> tuple[int, int]:
+    """Mail addresses and vault entries of a profile being reset.
+
+    "unbind" keeps them but detaches them (a vault entry's profile_id cannot
+    be NULL, so it becomes ""), "delete" forgets them here, "keep" leaves them.
+    Returns (mail addresses, vault entries) that belonged to the profile.
+    """
+    with get_db() as conn:
+        mail = conn.execute("SELECT COUNT(*) FROM mail_addresses WHERE profile_id = ?", (profile_id,)).fetchone()[0]
+        vault = conn.execute("SELECT COUNT(*) FROM vault_entries WHERE profile_id = ?", (profile_id,)).fetchone()[0]
+        if action == "unbind":
+            conn.execute("UPDATE mail_addresses SET profile_id = NULL WHERE profile_id = ?", (profile_id,))
+            conn.execute(
+                "UPDATE vault_entries SET profile_id = '', updated_at = ? WHERE profile_id = ?", (_now(), profile_id)
+            )
+        elif action == "delete":
+            conn.execute("DELETE FROM mail_addresses WHERE profile_id = ?", (profile_id,))
+            conn.execute("DELETE FROM vault_entries WHERE profile_id = ?", (profile_id,))
+        conn.commit()
+    return int(mail), int(vault)
+
+
 def list_groups() -> list[dict[str, Any]]:
     with get_db() as conn:
         rows = conn.execute("SELECT * FROM profile_groups ORDER BY created_at ASC").fetchall()

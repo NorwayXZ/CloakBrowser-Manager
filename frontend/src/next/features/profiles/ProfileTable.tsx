@@ -1,4 +1,4 @@
-import { Activity, Bug, Copy, Flame, Link2, MapPin, MonitorPlay, MoreHorizontal, Pencil, Play, RefreshCw, Square, Trash2 } from "lucide-react";
+import { Activity, Bug, Copy, Eraser, Flame, Link2, MapPin, MonitorPlay, MoreHorizontal, Pencil, Play, RefreshCw, Square, Trash2 } from "lucide-react";
 import { lazy, Suspense, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { cn } from "../../shared/lib/cn";
 import { matchesCombo } from "../../shared/lib/hotkeys";
@@ -38,6 +38,7 @@ export interface RowActions {
 const INTERACTIVE = "button, a, input, textarea, select, [role=checkbox], [role=menuitem]";
 
 const FingerprintReportDialog = lazy(() => import("./FingerprintReportDialog").then((m) => ({ default: m.FingerprintReportDialog })));
+const ResetProfileDialog = lazy(() => import("./ResetProfileDialog").then((m) => ({ default: m.ResetProfileDialog })));
 
 /**
  * The environment table: each row says everything needed at a glance, and
@@ -71,6 +72,7 @@ export function ProfileTable({
   const toast = useToast();
   const [selfCheck, setSelfCheck] = useState<Profile | null>(null);
   const [rotating, setRotating] = useState<Profile | null>(null);
+  const [resetting, setResetting] = useState<Profile | null>(null);
   const bodyRef = useRef<HTMLTableSectionElement>(null);
   const allSelected = profiles.length > 0 && profiles.every((p) => selected.has(p.id));
   const someSelected = !allSelected && profiles.some((p) => selected.has(p.id));
@@ -293,6 +295,9 @@ export function ProfileTable({
                       复制
                     </MenuItem>
                     <MenuSeparator />
+                    <MenuItem icon={<Eraser className="h-4 w-4" />} onSelect={() => setResetting(profile)} disabled={isBusy} danger>
+                      一键重置环境
+                    </MenuItem>
                     <MenuItem icon={<Trash2 className="h-4 w-4" />} onSelect={() => actions.trash(profile)} danger>
                       移到回收站
                     </MenuItem>
@@ -312,6 +317,11 @@ export function ProfileTable({
     {selfCheck && (
       <Suspense fallback={null}>
         <FingerprintReportDialog profileId={selfCheck.id} profileName={selfCheck.name} onClose={() => setSelfCheck(null)} />
+      </Suspense>
+    )}
+    {resetting && (
+      <Suspense fallback={null}>
+        <ResetProfileDialog profile={resetting} onClose={() => setResetting(null)} />
       </Suspense>
     )}
     {rotating && (

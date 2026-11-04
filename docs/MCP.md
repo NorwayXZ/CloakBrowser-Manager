@@ -106,6 +106,7 @@ Codex 的配置见 [AGENT.md](AGENT.md#在-codex-里配置)（stdio 和 HTTP 两
 动作（需 `full` 或 `automation`）：`launch_profile`、`stop_profile`、`run_site_check`、`run_warmup`、`run_evolution`，以及管理类：
 - `create_profile`、`update_profile`：新建 / 修改画像，字段白名单（名称、分组、代理 `proxy_id` 或直接写 `proxy` 地址、系统、设备模板、时区、语言、账号平台、启动网址、颜色模式、标签、备注、养号人设、`cookies_json`、启动参数、拟人化等）；写错字段名会直接报错而不是被忽略。代理账密只写不读。
 - `apply_device_template`、`regenerate_fingerprint`：套设备模板、换新指纹种子（账号在用的画像别换）。
+- `reset_profile`：一键重置环境，清空 Cookie/登录态/历史等全部浏览器数据并换一套新指纹，代理和名称保留（需 `confirm=true`，见 AGENT.md「重置环境」）。
 - `create_group`、`move_profiles`：新建分组、批量移组（逐个返回结果）。
 - `create_proxy`：把代理存进代理库，账密只写不读。
 - `restore_profile`：从回收站恢复。

@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Save, Trash2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { ArrowLeft, Eraser, Save, Trash2 } from "lucide-react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useBlocker, useNavigate, useParams } from "react-router";
 import { log } from "../../shared/log/logger";
 import { cn } from "../../shared/lib/cn";
@@ -20,6 +20,8 @@ import { ProxySection } from "./sections/ProxySection";
 import { SummaryPanel } from "./SummaryPanel";
 import type { HostOS } from "./types";
 import { readDraft, useEditor } from "./useEditor";
+
+const ResetProfileDialog = lazy(() => import("../profiles/ResetProfileDialog").then((m) => ({ default: m.ResetProfileDialog })));
 
 /** /profiles/new and /profiles/:id/edit: waits for what the form needs, then mounts it. */
 export function EditorPage({ mode }: { mode: "new" | "edit" }) {
@@ -80,6 +82,7 @@ function Editor({
   const { trash } = useProfileActions();
   const editor = useEditor(profile, hostOS);
   const [saving, setSaving] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
   const [draft, setDraft] = useState(() => readDraft(profile?.id ?? null));
@@ -189,6 +192,11 @@ function Editor({
           <p className="truncate text-sm text-fg-3">{editor.form.name || "未命名"}</p>
         </div>
         {isEdit && (
+          <Button variant="danger-ghost" icon={<Eraser className="h-3.5 w-3.5" />} onClick={() => setResetting(true)}>
+            一键重置环境
+          </Button>
+        )}
+        {isEdit && (
           <Button
             variant="danger-ghost"
             icon={<Trash2 className="h-3.5 w-3.5" />}
@@ -284,6 +292,13 @@ function Editor({
           <Kbd tone="inverse">{formatShortcut("mod+s")}</Kbd>
         </Button>
       </div>
+
+      {resetting && isEdit && (
+        <Suspense fallback={null}>
+          {/* The form holds the old fingerprint: back to the list, where the row shows the new one. */}
+          <ResetProfileDialog profile={profile} onClose={() => setResetting(false)} onDone={() => leave(`/profiles?p=${encodeURIComponent(profile.id)}`)} />
+        </Suspense>
+      )}
 
       {blocker.state === "blocked" && (
         <Dialog

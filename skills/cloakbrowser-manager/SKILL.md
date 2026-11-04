@@ -47,6 +47,7 @@ From a repo checkout, `./bin/cloak call <tool> '<json>'` does the same.
 | switch the proxy or change IP | `update_profile(proxy_id)` / `rotate_proxy_ip` |
 | check a proxy works | `check_proxy_exit_ip` |
 | new fingerprint / different device | `regenerate_fingerprint` / `apply_device_template` |
+| sign-up failed, want a clean browser on the same proxy IP | `reset_profile` (wipes cookies/logins/history, new fingerprint, keeps proxy; needs `confirm=true`) |
 | open / close an environment | `launch_profile` / `open_browser` / `stop_profile` / `stop_all_profiles` |
 | what is running | `list_running` |
 | groups | `list_groups`, `create_group`, `move_profiles` |
