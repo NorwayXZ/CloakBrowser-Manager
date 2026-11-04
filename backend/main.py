@@ -59,7 +59,7 @@ from . import linkability
 from . import secrets_crypto
 from .browser_manager import BrowserLaunchError, BrowserManager, CookiePullError, _normalize_proxy, _validate_proxy
 from .cloak_runtime import get_effective_chromium_version
-from . import desktop_app, seed_device, self_update, site_checks
+from . import desktop_app, profile_reset, seed_device, self_update, site_checks
 from . import behavior_traces, llm_client, mailbox, sentence_profile, warmup, warmup_script
 from .behavior_traces import BehaviorRecorder
 from .site_check_job import SiteCheckJob, describe_environment
@@ -87,6 +87,8 @@ from .models import (
     BrowserUpdateResponse,
     BurnRequest,
     BurnResponse,
+    ProfileResetRequest,
+    ProfileResetResponse,
     CookieMergeRequest,
     CookieMergeResponse,
     CookiePullResponse,
@@ -934,6 +936,68 @@ async def burn_profile(profile_id: str, req: BurnRequest):
 
     result = await _burn_profile_now(profile)
     return BurnResponse(ok=True, profile_id=profile_id, **result)
+
+
+@app.post("/api/profiles/{profile_id}/reset", response_model=ProfileResetResponse)
+async def reset_profile(profile_id: str, req: ProfileResetRequest):
+    """Turn a profile into a brand-new browser in place (一键重置环境).
+
+    Deletes all of its browser data (cookies, storage, history, cache,
+    service workers, saved logins) and rolls a new seed and device, while
+    name, group, notes, tags and the proxy binding stay. A running profile
+    is stopped the normal way first. Needs {"confirm": true}; ``bindings``
+    says what happens to its mail addresses and vault entries.
+    """
+    if req.confirm is not True:
+        raise HTTPException(status_code=400, detail="重置会删除这个环境的全部浏览器数据，不可恢复，请带上 confirm=true 明确确认")
+    profile = db.get_profile(profile_id)
+    if not profile or profile.get("deleted_at"):
+        raise HTTPException(status_code=404, detail="Profile not found")
+    data_dir = profile_reset.owned_data_dir(profile, db.DATA_DIR / "profiles")
+    if data_dir is None:
+        raise HTTPException(status_code=409, detail="这个环境的数据目录不在 Manager 的 profiles 目录里，为安全起见没有清空")
+
+    was_running = profile_id in browser_mgr.running
+    if was_running:
+        await browser_mgr.stop(profile_id, "重置环境")
+    agent_leases.clear_profile(profile_id)
+    agent_pages.forget(profile_id)
+    try:
+        async with browser_mgr.held_stopped(profile_id):
+            browser_mgr.cookie_pulls.drop(profile_id)
+            try:
+                files_removed = await asyncio.to_thread(profile_reset.wipe_data_dir, data_dir)
+            except OSError as exc:
+                logger.error("Reset of %s could not clear %s: %s", profile_id, data_dir, exc)
+                raise HTTPException(status_code=409, detail=f"数据目录清不掉（可能有文件被占用），环境没有改动：{exc}") from exc
+            fields = profile_reset.fresh_identity(
+                profile,
+                host_os=browser_mgr.runtime.host_os,
+                native=browser_mgr._browser_engine(profile) == "system_chrome",
+            )
+            updated = db.update_profile(profile_id, **fields)
+            mail_count, vault_count = db.release_profile_bindings(profile_id, req.bindings)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail="环境正在启动，等它启动完或关掉后再重置") from exc
+    if not updated:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    logger.info(
+        "Reset profile %s: %d files removed, seed %s -> %s, device %s, bindings=%s",
+        profile_id, files_removed, profile.get("fingerprint_seed"), fields["fingerprint_seed"],
+        fields["device_profile"], req.bindings,
+    )
+    return ProfileResetResponse(
+        ok=True,
+        profile=_profile_response(updated),
+        was_running=was_running,
+        files_removed=files_removed,
+        old_fingerprint_seed=profile.get("fingerprint_seed"),
+        new_fingerprint_seed=fields["fingerprint_seed"],
+        device_profile=fields["device_profile"],
+        bindings=req.bindings,
+        mail_addresses=mail_count,
+        vault_entries=vault_count,
+    )
 
 
 @app.get("/api/device-templates", response_model=list[DeviceTemplateResponse])

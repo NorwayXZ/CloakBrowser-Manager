@@ -1482,6 +1482,61 @@ async def _regenerate_fingerprint(client: RestClient, args: dict[str, Any]) -> d
 
 
 @register(
+    "reset_profile",
+    "一键重置环境：把这个画像变成一个全新的浏览器——Cookie、登录状态、LocalStorage/IndexedDB、历史、缓存、Service Worker 全部删除（不可恢复），"
+    "并重新随机生成指纹（种子、设备、分辨率、显卡、CPU、内存、UA）；时区和语言清空，下次启动按代理出口 IP 自动匹配。"
+    "名称、分组、备注、标签、代理绑定和换 IP 链接都保留。运行中会先正常关闭。注册失败想换个干净环境、又要留着同一个代理 IP 时用它。"
+    "必须带 confirm=true。bindings 决定这个画像的邮箱地址和保险库账号：unbind（默认，保留但解绑）/ keep（仍绑在这个画像）/ delete（删除记录）。",
+    {
+        "type": "object",
+        "properties": {
+            "profile_id": {"type": "string", "description": "画像 id（先用 list_profiles 查）"},
+            "confirm": {"type": "boolean", "description": "必须为 true：浏览器数据删除后不可恢复"},
+            "bindings": {
+                "type": "string",
+                "enum": ["unbind", "keep", "delete"],
+                "description": "邮箱地址和保险库账号怎么处理，默认 unbind",
+            },
+        },
+        "required": ["profile_id", "confirm"],
+    },
+    "action",
+)
+async def _reset_profile(client: RestClient, args: dict[str, Any]) -> dict[str, Any]:
+    profile_id, err = _profile_id_arg(args)
+    if err:
+        return err
+    if args.get("confirm") is not True:
+        return {
+            "ok": False,
+            "reason": "invalid_argument",
+            "detail": "重置会删除这个画像的全部浏览器数据（Cookie、登录状态、历史），不可恢复；确认后带 confirm=true 再调。",
+        }
+    bindings = str(args.get("bindings") or "unbind")
+    if bindings not in ("unbind", "keep", "delete"):
+        return {"ok": False, "reason": "invalid_argument", "detail": "bindings 只能是 unbind / keep / delete。"}
+    status, payload = await client.post(
+        f"/api/profiles/{quote(profile_id, safe='')}/reset",
+        json_body={"confirm": True, "bindings": bindings},
+        timeout=ACTION_TIMEOUT_S,
+    )
+    if status >= 300:
+        return error_result(status, payload, tool="reset_profile")
+    return {
+        "ok": True,
+        "profile": shape_profile(payload.get("profile") or {}),
+        "was_running": payload.get("was_running"),
+        "files_removed": payload.get("files_removed"),
+        "new_fingerprint_seed": payload.get("new_fingerprint_seed"),
+        "device_profile": payload.get("device_profile"),
+        "bindings": payload.get("bindings"),
+        "mail_addresses": payload.get("mail_addresses"),
+        "vault_entries": payload.get("vault_entries"),
+        "next_step": "环境已是全新浏览器，代理没变；需要的话用 open_browser 重新打开。",
+    }
+
+
+@register(
     "create_group",
     "新建一个分组。名称已存在会回 conflict。",
     {
@@ -2337,6 +2392,7 @@ TOOL_EN: dict[str, str] = {
     "update_profile": "Change a profile's name, group, proxy, platform, device template, timezone, locale, startup URLs, color scheme or tags. Stop it first if it is running.",
     "apply_device_template": "Apply a device template (screen, GPU, CPU, memory) to a profile.",
     "regenerate_fingerprint": "Give a profile a new fingerprint seed. Do not use it on profiles whose account is already live.",
+    "reset_profile": "Turn a profile into a brand-new browser: wipe cookies, logins, storage, history and cache (not recoverable) and roll a new fingerprint, keeping name, group, notes and the proxy. Needs confirm=true.",
     "create_group": "Create a group.",
     "move_profiles": "Move up to 100 profiles into a group; per-profile results.",
     "restore_profile": "Restore a profile from the recycle bin.",
@@ -2438,6 +2494,7 @@ TRIGGERS: dict[str, str] = {
     "update_profile": "修改环境,改配置,改代理,改时区,编辑画像,update profile,edit settings,change proxy",
     "apply_device_template": "套用设备模板,换设备型号,apply template,change device",
     "regenerate_fingerprint": "换新指纹,重新生成指纹,new fingerprint,regenerate fingerprint",
+    "reset_profile": "重置环境,一键重置,换环境,清空环境,全新环境,注册失败,reset profile,fresh browser,wipe profile,new environment",
     "create_group": "新建分组,创建分组,create group,new group",
     "move_profiles": "移动分组,换组,归类,move to group,regroup",
     "restore_profile": "恢复环境,还原回收站,找回已删除,restore profile,undelete",

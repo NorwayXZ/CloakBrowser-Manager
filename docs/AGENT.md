@@ -69,7 +69,7 @@ curl -X POST http://127.0.0.1:8080/api/agent/tools/open_browser \
 | --- | --- |
 | `off` | 全部拒绝 |
 | `read-only` | 只读工具：看画像、预检、检测报告、养号/进化状态、内核信息 |
-| `full` | 再加新建/修改画像、启停、跑检测/养号/进化（`launch_profile` 只能 `manual`）、批准养号剧本和进化提案，以及邮箱工具 |
+| `full` | 再加新建/修改画像、重置环境（`reset_profile`）、启停、跑检测/养号/进化（`launch_profile` 只能 `manual`）、批准养号剧本和进化提案，以及邮箱工具 |
 | `automation`（默认） | **没有限制**：再加 `open_browser`、`get_cdp_endpoint`、页面工具（含 `browser_cookies` 读写 Cookie、`browser_evaluate` 执行 JS、`browser_get_html`）、保险库工具，以及 `delete_profile` / `purge_profile`；`launch_profile` 可用 `debug` |
 
 这是用户自己的单机工具，所以默认全开、不需要任何设置。用户想收紧时才会调低，你就会看到更少的工具。
@@ -123,6 +123,22 @@ curl -X POST http://127.0.0.1:8080/api/agent/tools/open_browser \
 - 遇到图形验证码、手机短信、人机验证：**停下来**，请用户在面板里接管处理；处理完再继续，不要尝试绕过。
 - 用户在面板「设置 → 保险库」里查看、复制或删除密码；没设管理员密码时，本机任何程序（包括有命令行权限的 AI）都能直接调用查看接口，所以让有命令行权限的 AI 工作之前请先设管理员密码。
 - 开着「拟人化」的画像里 `browser_type` 每个字符都有人类打字延迟，一个邮箱要几秒；用 `browser_batch` 合并整张表单，并预期这一步比较慢。
+
+## 重置环境：注册失败后换一个干净的浏览器
+
+注册失败、想在**同一个代理 IP** 上重新来过时，不要新建画像再绑代理，用 `reset_profile`（`full` 档起可用）：
+
+```json
+{"profile_id": "…", "confirm": true, "bindings": "unbind"}
+```
+
+- **删除（不可恢复）：** 这个画像的整个浏览器数据目录——Cookie、登录状态、LocalStorage / IndexedDB、历史、缓存、Service Worker、保存的密码，以及导入的 Cookie。效果和全新画像一样。
+- **重新生成：** 指纹种子、设备型号、分辨率、显卡、CPU 核数、内存、UA（同一系统里随机换一个设备）。时区和语言清空，下次启动按代理出口 IP 自动匹配。
+- **保留：** 名称、分组、备注、标签、启动网址、代理绑定（含中转）和它的换 IP 链接、指纹选项（噪声、存储配额等）。
+- 画像在运行时会先正常关闭（同 `stop_profile`），再重置；正在启动时回 `conflict`，等一会再试。
+- `bindings` 决定这个画像的邮箱地址和保险库账号：`unbind`（默认）保留记录但解绑，之后 `mail_get_address` 会发一个新地址，旧条目在「设置 → 保险库」里还能看到；`keep` 仍绑在这个画像；`delete` 删除这些记录（邮箱服务器上的信箱不动）。
+- 没带 `confirm=true` 会直接拒绝。只在用户要「换个干净环境」或注册明确失败时用；账号已经在用的画像不要重置。
+- 想连 IP 一起换：先 `rotate_proxy_ip`，再 `reset_profile`。
 
 ## 操作页面：内置页面工具
 

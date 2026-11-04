@@ -204,6 +204,7 @@ EXPECTED_ACTION_TOOLS = {
     "update_profile": agent_tools.UPDATE_PROFILE_ARGS,
     "apply_device_template": agent_tools.TOOLS["apply_device_template"].input_schema,
     "regenerate_fingerprint": PROFILE_ID_ARGS,
+    "reset_profile": agent_tools.TOOLS["reset_profile"].input_schema,
     "create_group": agent_tools.TOOLS["create_group"].input_schema,
     "move_profiles": agent_tools.TOOLS["move_profiles"].input_schema,
     "restore_profile": PROFILE_ID_ARGS,

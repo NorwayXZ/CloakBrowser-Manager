@@ -16,7 +16,7 @@ import threading
 import time
 import urllib.request
 from dataclasses import dataclass
-from contextlib import contextmanager, suppress
+from contextlib import asynccontextmanager, contextmanager, suppress
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -2606,6 +2606,22 @@ class BrowserManager:
         while profile_id in self._launching and time.monotonic() < deadline:
             await asyncio.sleep(0.1)
         return self.running.get(profile_id)
+
+    @asynccontextmanager
+    async def held_stopped(self, profile_id: str):
+        """Keep a stopped profile from launching while its data is rewritten.
+
+        Uses the launch reservation, so a launch meanwhile fails as "already
+        running". Raises RuntimeError when it is running or launching now.
+        """
+        async with self._lock:
+            if profile_id in self.running or profile_id in self._launching:
+                raise RuntimeError(f"Profile {profile_id} is running")
+            self._launching.add(profile_id)
+        try:
+            yield
+        finally:
+            self._launching.discard(profile_id)
 
     async def launch(
         self,

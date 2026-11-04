@@ -11,6 +11,9 @@ export type Preflight = Schemas["PreflightResponse"];
 export type PreflightIssue = Schemas["PreflightIssue"];
 export type DeviceTemplate = Schemas["DeviceTemplateResponse"];
 export type BurnResult = Schemas["BurnResponse"];
+export type ResetResult = Schemas["ProfileResetResponse"];
+/** What a reset does with the profile's mail addresses and vault entries. */
+export type ResetBindings = NonNullable<Schemas["ProfileResetRequest"]["bindings"]>;
 
 /** Who drives a running profile: an AI agent, or the person after a takeover. `agent_lease` is an untyped dict in the schema. */
 export interface AgentLease {

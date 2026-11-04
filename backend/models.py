@@ -502,6 +502,27 @@ class BurnResponse(BaseModel):
     was_running: bool
 
 
+class ProfileResetRequest(BaseModel):
+    confirm: bool = False
+    # Mail addresses and vault entries of this profile: "unbind" keeps them
+    # but detaches them from the profile (the default), "keep" leaves them
+    # bound, "delete" forgets them (the mail server's mailbox is left alone).
+    bindings: Literal["unbind", "keep", "delete"] = "unbind"
+
+
+class ProfileResetResponse(BaseModel):
+    ok: bool
+    profile: ProfileResponse
+    was_running: bool
+    files_removed: int
+    old_fingerprint_seed: int | None = None
+    new_fingerprint_seed: int
+    device_profile: str | None = None
+    bindings: Literal["unbind", "keep", "delete"]
+    mail_addresses: int
+    vault_entries: int
+
+
 class LinkabilityProfileRef(BaseModel):
     id: str
     name: str

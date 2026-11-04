@@ -128,7 +128,7 @@ export function VaultSection() {
                     <div className="truncate" title={entry.username ?? ""}>{entry.username ?? "—"}</div>
                     <div className="truncate text-xs text-fg-3" title={entry.email ?? ""}>{entry.email ?? ""}</div>
                   </TD>
-                  <TD className="truncate text-fg-2">{names.get(entry.profile_id) ?? (profiles.isPending ? "…" : "（已删除）")}</TD>
+                  <TD className="truncate text-fg-2">{entry.profile_id ? names.get(entry.profile_id) ?? (profiles.isPending ? "…" : "（已删除）") : "（已解绑）"}</TD>
                   <TD>
                     <Badge tone={STATUS[entry.status]?.tone ?? "neutral"}>{STATUS[entry.status]?.label ?? entry.status}</Badge>
                   </TD>

@@ -2,7 +2,7 @@
 
 由 `python scripts/gen_skill_reference.py` 从 Manager 的工具注册表生成；`pytest` 会检查它没有过期。
 
-共 71 个工具。每个工具的“触发词”是用户常用说法，用来对上你该选哪个工具。
+共 72 个工具。每个工具的“触发词”是用户常用说法，用来对上你该选哪个工具。
 
 ## 只读工具（21）
 
@@ -248,7 +248,7 @@ Manager 总览：应用版本、内核版本、运行中的浏览器数、画像
 
 无参数。
 
-## 动作与管理工具（22）
+## 动作与管理工具（23）
 
 需要 `full` 档（令牌范围 `control`）
 
@@ -459,6 +459,20 @@ Manager 总览：应用版本、内核版本、运行中的浏览器数、画像
 | 参数 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `profile_id` | string | 是 | 画像 id（先用 list_profiles 查） |
+
+### `reset_profile`
+
+一键重置环境：把这个画像变成一个全新的浏览器——Cookie、登录状态、LocalStorage/IndexedDB、历史、缓存、Service Worker 全部删除（不可恢复），并重新随机生成指纹（种子、设备、分辨率、显卡、CPU、内存、UA）；时区和语言清空，下次启动按代理出口 IP 自动匹配。名称、分组、备注、标签、代理绑定和换 IP 链接都保留。运行中会先正常关闭。注册失败想换个干净环境、又要留着同一个代理 IP 时用它。必须带 confirm=true。bindings 决定这个画像的邮箱地址和保险库账号：unbind（默认，保留但解绑）/ keep（仍绑在这个画像）/ delete（删除记录）。
+
+*Turn a profile into a brand-new browser: wipe cookies, logins, storage, history and cache (not recoverable) and roll a new fingerprint, keeping name, group, notes and the proxy. Needs confirm=true.*
+
+触发词：重置环境,一键重置,换环境,清空环境,全新环境,注册失败,reset profile,fresh browser,wipe profile,new environment
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `profile_id` | string | 是 | 画像 id（先用 list_profiles 查） |
+| `confirm` | boolean | 是 | 必须为 true：浏览器数据删除后不可恢复 |
+| `bindings` | unbind / keep / delete |  | 邮箱地址和保险库账号怎么处理，默认 unbind |
 
 ### `create_group`
 

@@ -521,6 +521,70 @@ describe("trash and burn", () => {
   });
 });
 
+describe("one-click reset", () => {
+  const RESET = {
+    ok: true, was_running: false, files_removed: 12, old_fingerprint_seed: 11111, new_fingerprint_seed: 54321,
+    device_profile: "mbp_14_m3_2023", bindings: "unbind", mail_addresses: 0, vault_entries: 0,
+  };
+
+  it("says what is deleted and what stays, and resets only after confirmation", async () => {
+    const { fetchMock } = await renderList([
+      { path: "/api/mail/addresses?profile_id=a", respond: [] },
+      { path: "/api/profiles/a/vault", respond: { ok: true, entries: [] } },
+      { method: "POST", path: "/api/profiles/a/reset", respond: { ...RESET, profile: AMAZON } },
+    ]);
+    openMenu(screen.getByRole("button", { name: "「Amazon Seller #1」的更多操作" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "一键重置环境" }));
+    const dialog = await screen.findByRole("dialog", { name: "把「Amazon Seller #1」重置为全新环境？" });
+    expect(dialog).toHaveTextContent("Cookie、登录状态、历史全部删除，不可恢复；代理保留。");
+    expect(dialog).toHaveTextContent("203.0.113.24");
+    await waitFor(() => expect(within(dialog).queryByText(/正在查看绑定/)).not.toBeInTheDocument());
+    expect(within(dialog).queryByRole("radiogroup")).not.toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(calls(fetchMock, "POST", /\/reset$/)).toHaveLength(0);
+
+    openMenu(screen.getByRole("button", { name: "「Amazon Seller #1」的更多操作" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "一键重置环境" }));
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "重置环境" }));
+    await waitFor(() => expect(bodyOf(calls(fetchMock, "POST", /\/a\/reset$/)[0])).toEqual({ confirm: true, bindings: "unbind" }));
+    expect(await screen.findByText("「Amazon Seller #1」已重置为全新环境")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("asks what to do with bound mail addresses and vault accounts", async () => {
+    profiles = [{ ...AMAZON, status: "running" }];
+    const { fetchMock } = await renderList([
+      { path: "/api/mail/addresses?profile_id=a", respond: [{ address: "x@mail.test" }, { address: "y@mail.test" }] },
+      { path: "/api/profiles/a/vault", respond: { ok: true, entries: [{ id: "v1" }] } },
+      { method: "POST", path: "/api/profiles/a/reset", respond: { ...RESET, bindings: "delete", profile: AMAZON } },
+    ]);
+    openMenu(screen.getByRole("button", { name: "「Amazon Seller #1」的更多操作" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "一键重置环境" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent("会先正常关闭浏览器");
+    expect(await within(dialog).findByText(/2 个邮箱地址、1 个保险库账号/)).toBeInTheDocument();
+    expect(within(dialog).getByRole("radio", { name: "保留并解绑" })).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(within(dialog).getByRole("radio", { name: "删除记录" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "重置环境" }));
+    await waitFor(() => expect(bodyOf(calls(fetchMock, "POST", /\/a\/reset$/)[0])).toEqual({ confirm: true, bindings: "delete" }));
+  });
+
+  it("keeps the dialog open and explains a refused reset", async () => {
+    await renderList([
+      { path: "/api/mail/addresses?profile_id=e", respond: [] },
+      { path: "/api/profiles/e/vault", respond: { ok: true, entries: [] } },
+      { method: "POST", path: "/api/profiles/e/reset", status: 409, respond: { detail: "环境正在启动，等它启动完或关掉后再重置" } },
+    ]);
+    openMenu(screen.getByRole("button", { name: "「Etsy UK」的更多操作" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "一键重置环境" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "重置环境" }));
+    expect(await within(dialog).findByText(/环境正在启动/)).toBeInTheDocument();
+  });
+});
+
 describe("one-click creation", () => {
   const OPTIONS = {
     countries: [

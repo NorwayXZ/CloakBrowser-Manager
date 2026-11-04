@@ -11,6 +11,8 @@ import type {
   Profile,
   ProfileCreate,
   ProfileGroup,
+  ResetBindings,
+  ResetResult,
   SentenceAssembled,
   SentenceCreated,
   SentenceDraft,
@@ -34,6 +36,17 @@ export const profilesApi = {
   remove: (id: string) => request<{ ok: boolean }>(`/api/profiles/${enc(id)}`, { method: "DELETE" }),
   restore: (id: string) => request<Profile>(`/api/profiles/${enc(id)}/restore`, { method: "POST" }),
   burn: (id: string) => request<BurnResult>(`/api/profiles/${enc(id)}/burn`, { method: "POST", body: { confirm: true } }),
+  // Stopping a running browser first can take a while.
+  reset: (id: string, bindings: ResetBindings) =>
+    request<ResetResult>(`/api/profiles/${enc(id)}/reset`, { method: "POST", body: { confirm: true, bindings }, timeoutMs: 90_000 }),
+  /** How many mail addresses and vault entries a profile has, for the reset dialog. */
+  bindings: async (id: string) => {
+    const [mail, vault] = await Promise.all([
+      request<unknown[]>(`/api/mail/addresses?profile_id=${enc(id)}`),
+      request<{ entries?: unknown[] }>(`/api/profiles/${enc(id)}/vault`),
+    ]);
+    return { mail: mail.length, vault: vault.entries?.length ?? 0 };
+  },
   preflight: (id: string, mode: LaunchMode) =>
     request<Preflight>(`/api/profiles/${enc(id)}/preflight?launch_mode=${mode}`),
   // Launching waits for the browser to come up; give it more than the default 15 s.
