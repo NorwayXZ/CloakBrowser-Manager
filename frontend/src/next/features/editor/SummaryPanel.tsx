@@ -7,11 +7,16 @@ import type { Editor } from "./useEditor";
 /** Live 概要 of what the browser will present, as in the current editor. */
 export function SummaryPanel({ editor, hostOS, hostScreen, isEdit }: { editor: Editor; hostOS: HostOS | null; hostScreen: number[] | null; isEdit: boolean }) {
   const rows = summaryRows({ form: editor.form, proxyParts: editor.proxyParts, proxyTest: editor.proxyTest, hostOS, hostScreen, isEdit });
+  const seed = editor.form.fingerprint_seed;
+  const serial = seed ? String(seed).replace(/\D/g, "").slice(0, 6).padStart(6, "0") : "";
   const cloak = normalizeFormEngine(editor.form.browser_engine) === "cloakbrowser";
   return (
-    <aside aria-label="概要" className="glass rounded-lg">
+    <aside aria-label="概要" className="glass overflow-hidden rounded-lg border-t-2 border-t-accent">
       <header className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
-        <h2 className="text-base font-semibold text-fg">概要</h2>
+        <div className="min-w-0">
+          <h2 className="text-base font-semibold text-fg">概要</h2>
+          {serial && <p className="font-mono text-xs tabular-nums text-fg-3" aria-label="环境编号">编号 {serial}</p>}
+        </div>
         {cloak ? (
           <Button size="sm" variant="ghost" className="text-accent" icon={<Shuffle className="h-3.5 w-3.5" />} onClick={editor.randomizeDevice}>
             随机设备型号

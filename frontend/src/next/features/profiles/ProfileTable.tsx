@@ -258,7 +258,7 @@ export function ProfileTable({
                       关闭
                     </Button>
                   ) : (
-                    <Button size="sm" variant="primary" icon={<Play className="h-3 w-3" />} loading={isBusy} onClick={() => actions.launch(profile, "manual")} aria-label={`打开「${profile.name}」`}>
+                    <Button size="sm" icon={<Play className="h-3 w-3" />} loading={isBusy} onClick={() => actions.launch(profile, "manual")} aria-label={`打开「${profile.name}」`}>
                       打开
                     </Button>
                   )}
