@@ -52,8 +52,8 @@
   --shadow-popover: 0 6px 20px rgb(15 23 42 / 0.14), 0 0 0 1px rgb(15 23 42 / 0.06);
   --shadow-modal: 0 16px 48px rgb(15 23 42 / 0.22), 0 0 0 1px rgb(15 23 42 / 0.06);
 
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "PingFang SC", "Hiragino Sans GB",
-    "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+  /* Songti (宋体) throughout: macOS Songti SC, Windows SimSun, Linux Noto/Source Han Serif. */
+  --font-sans: "Songti SC", "STSong", "SimSun", "NSimSun", "Noto Serif CJK SC", "Source Han Serif SC", "Songti TC", serif;
   --font-mono: "SF Mono", ui-monospace, "Cascadia Mono", "Cascadia Code", Consolas, monospace;
 
   color-scheme: light;
