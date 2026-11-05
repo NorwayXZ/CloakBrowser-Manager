@@ -45,7 +45,7 @@ export function DataPage() {
   ];
 
   return (
-    <div className="flex flex-col gap-5 pb-8 pt-2">
+    <div className="flex flex-col gap-5 pb-8 pt-5">
       <PageHeader title="数据" description="备份、恢复、导出配置，以及 7 天内删除的环境。" />
       <nav aria-label="数据分类" className="flex max-w-full gap-6 overflow-x-auto border-b border-border">
         {tabs.map((tab) => (

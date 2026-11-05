@@ -10,7 +10,7 @@ const TABS = [
 /** 资源: the pools profiles draw from — saved proxies, relay servers and mailboxes — as one row of tabs. */
 export function ResourcesLayout() {
   return (
-    <div className="flex flex-col pt-2">
+    <div className="flex flex-col pt-5">
       <nav aria-label="资源分类" className="flex max-w-full gap-6 overflow-x-auto border-b border-border">
         {TABS.map((tab) => (
           <NavLink

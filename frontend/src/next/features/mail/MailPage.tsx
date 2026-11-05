@@ -44,7 +44,7 @@ export function MailPage() {
   const configured = settings.data?.configured === true;
 
   return (
-    <div className="flex flex-col gap-6 pb-8 pt-2">
+    <div className="flex flex-col gap-6 pb-8 pt-5">
       <PageHeader
         title="邮箱"
         description={PAGE_DESCRIPTION}
