@@ -20,7 +20,7 @@ export function ChecksPage() {
   ];
 
   return (
-    <div className="flex flex-col gap-5 pb-8 pt-2">
+    <div className="flex flex-col gap-5 pb-8 pt-5">
       <PageHeader title="检测" description="用公开检测网站验收环境，在克隆上验证修复，找出会被关联到一起的环境。" />
       <nav aria-label="检测分类" className="flex max-w-full gap-6 overflow-x-auto border-b border-border">
         {tabs.map((item) => (

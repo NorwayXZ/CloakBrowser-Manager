@@ -31,7 +31,7 @@ export function SettingsPage() {
   const { section } = useParams();
   if (!section) {
     return (
-      <div className="flex min-h-full flex-col gap-6 pb-8 pt-2">
+      <div className="flex min-h-full flex-col gap-6 pb-8 pt-5">
         <PageHeader title="设置" description="检测、数据、内核、AI、保险库、自动化、账号与更新。" />
         <nav aria-label="设置分类" className="min-w-0">
           <ul className="m-0 flex list-none flex-col gap-3 p-0">
@@ -48,7 +48,7 @@ export function SettingsPage() {
   const current = SECTIONS.find((item) => item.id === section);
   if (!current) return <Navigate to="/settings" replace />;
   return (
-    <div className="flex min-h-full flex-col gap-6 pb-8 pt-2">
+    <div className="flex min-h-full flex-col gap-6 pb-8 pt-5">
       <h1 className="sr-only">设置</h1>
       <BackToSettings />
       <div className="mx-auto w-full min-w-0 max-w-form">
@@ -61,7 +61,7 @@ export function SettingsPage() {
 /** A full page (检测, 数据) opened from the settings cards, with the same way back. */
 export function SettingsSubpage({ children }: { children: ReactNode }) {
   return (
-    <div className="flex min-h-full flex-col pt-2">
+    <div className="flex min-h-full flex-col pt-5">
       <BackToSettings />
       {children}
     </div>
