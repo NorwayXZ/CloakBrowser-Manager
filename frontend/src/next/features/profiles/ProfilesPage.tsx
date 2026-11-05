@@ -127,11 +127,11 @@ export function ProfilesPage() {
   const filtered = query.trim() !== "" || group !== ALL_GROUPS;
 
   return (
-    <div className="flex h-full min-h-0 flex-col pt-2">
+    <div className="flex h-full min-h-0 flex-col pt-5">
         <div className="flex shrink-0 flex-col gap-3 pb-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
-              <h1 className="text-lg font-semibold text-fg">环境</h1>
+              <h1 className="text-xl font-semibold tracking-tight text-fg">环境</h1>
               <p className="text-sm text-fg-2">
                 {profiles.isSuccess ? `共 ${all.length} 个 · 运行中 ${runningCount}` : "正在读取…"}
               </p>

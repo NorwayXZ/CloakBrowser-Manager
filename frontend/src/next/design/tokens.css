@@ -1,6 +1,6 @@
 /*
  * Design tokens of the panel: a flat light-gray canvas, white cards with a hairline border,
- * one solid blue accent, small radii and a compact type scale.
+ * one solid teal accent, small radii and a compact type scale.
  *
  * Colors are RGB channels so Tailwind can add alpha (bg-accent/10). Light
  * values on :root, dark values under [data-theme="dark"]; ThemeProvider always
@@ -23,14 +23,14 @@
   --c-fg: 31 35 41;               /* #1C1C3A body text */
   --c-fg-2: 77 85 97;            /* #4A4A6E secondary text */
   --c-fg-3: 100 108 120;            /* #626286 captions, placeholders */
-  --c-accent: 37 99 235;          /* #4F46D6 */
-  --c-accent-hover: 29 78 216;    /* #3E36BE */
-  --c-accent-fill: 37 99 235;     /* #5B50E8 */
-  --c-accent-fill-hover: 29 78 216; /* #4A40D6 */
-  --c-accent-fill-2: 37 99 235;  /* #326EE0 */
-  --c-accent-soft: 233 241 254;   /* #EDEAFF */
+  --c-accent: 15 118 110;
+  --c-accent-hover: 17 94 89;
+  --c-accent-fill: 15 118 110;
+  --c-accent-fill-hover: 17 94 89;
+  --c-accent-fill-2: 15 118 110;
+  --c-accent-soft: 226 244 241;
   --c-on-accent: 255 255 255;
-  --c-switch-on: 37 99 235;       /* #34C759 */
+  --c-switch-on: 15 118 110;
   --c-success: 30 125 55;         /* #1E7D37 */
   --c-success-soft: 230 246 234;  /* #E6F6EA */
   --c-warning: 168 80 0;          /* #A85000 */
@@ -71,14 +71,14 @@
   --c-fg: 236 238 242;            /* #F0F0FF */
   --c-fg-2: 186 191 201;          /* #BCBCD6 */
   --c-fg-3: 154 160 172;          /* #9C9CBA */
-  --c-accent: 118 168 255;        /* #968EFF */
-  --c-accent-hover: 154 192 255;  /* #B4AEFF */
-  --c-accent-fill: 37 99 235;     /* #5B50E8 */
-  --c-accent-fill-hover: 29 78 216; /* #4E44D6 */
-  --c-accent-fill-2: 37 99 235;  /* #326EE0 */
-  --c-accent-soft: 24 38 72;      /* #28245C */
+  --c-accent: 94 202 190;
+  --c-accent-hover: 134 220 210;
+  --c-accent-fill: 15 118 110;
+  --c-accent-fill-hover: 17 94 89;
+  --c-accent-fill-2: 15 118 110;
+  --c-accent-soft: 16 46 44;
   --c-on-accent: 255 255 255;
-  --c-switch-on: 59 130 246;       /* #30D158 */
+  --c-switch-on: 45 160 148;
   --c-success: 48 209 88;         /* #30D158 */
   --c-success-soft: 16 48 28;     /* #10301C */
   --c-warning: 255 159 10;        /* #FF9F0A */
