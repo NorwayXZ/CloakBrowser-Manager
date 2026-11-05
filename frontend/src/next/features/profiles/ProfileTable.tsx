@@ -1,4 +1,4 @@
-import { Activity, Bug, Copy, Eraser, Flame, Link2, MapPin, MonitorPlay, MoreHorizontal, Pencil, Play, RefreshCw, Square, Trash2 } from "lucide-react";
+import { Activity, Bug, Copy, Eraser, Flame, Link2, MapPin, MonitorPlay, MoreHorizontal, Pencil, Pin, Play, RefreshCw, Square, Trash2 } from "lucide-react";
 import { lazy, Suspense, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { cn } from "../../shared/lib/cn";
 import { matchesCombo } from "../../shared/lib/hotkeys";
@@ -57,6 +57,8 @@ export function ProfileTable({
   onToggle,
   onToggleAll,
   actions,
+  pinned,
+  onTogglePin,
 }: {
   profiles: Profile[];
   selected: ReadonlySet<string>;
@@ -68,6 +70,8 @@ export function ProfileTable({
   onToggle: (id: string) => void;
   onToggleAll: () => void;
   actions: RowActions;
+  pinned?: ReadonlySet<string>;
+  onTogglePin?: (id: string) => void;
 }) {
   const toast = useToast();
   const [selfCheck, setSelfCheck] = useState<Profile | null>(null);
@@ -186,6 +190,7 @@ export function ProfileTable({
                   <span className="truncate font-medium" title={profile.name}>
                     {profile.name}
                   </span>
+                  {pinned?.has(profile.id) && <Pin aria-label="已置顶" className="h-3 w-3 shrink-0 text-accent" />}
                   {profile.disposable && <Badge tone="warning">一次性</Badge>}
                 </div>
                 <div className="truncate text-xs text-fg-3">
@@ -289,6 +294,11 @@ export function ProfileTable({
                     {profile.proxy?.toLowerCase().startsWith("socks5://") && (
                       <MenuItem icon={<RefreshCw className="h-4 w-4" />} onSelect={() => setRotating(profile)}>
                         一键切换 IP
+                      </MenuItem>
+                    )}
+                    {onTogglePin && (
+                      <MenuItem icon={<Pin className="h-4 w-4" />} onSelect={() => onTogglePin(profile.id)}>
+                        {pinned?.has(profile.id) ? "取消置顶" : "置顶"}
                       </MenuItem>
                     )}
                     <MenuItem icon={<Copy className="h-4 w-4" />} onSelect={() => actions.duplicate(profile)}>

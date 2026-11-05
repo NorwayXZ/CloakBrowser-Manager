@@ -10,14 +10,14 @@ export function Table({
   label,
   className,
   minWidth,
-  flat,
+  flat = true,
 }: {
   children: ReactNode;
   label: string;
   className?: string;
   /** Below this width the table scrolls sideways inside its frame instead of squeezing columns. */
   minWidth?: number;
-  /** One framed table with ruled rows, for long dense lists, instead of a card per row. */
+  /** One framed table with ruled rows (the default); false gives a card per row. */
   flat?: boolean;
 }) {
   return (
@@ -50,7 +50,7 @@ export function TR({ className, selected, children, ...rest }: HTMLAttributes<HT
   return (
     <tr
       data-selected={selected || undefined}
-      className={cn("group", className)}
+      className={cn("group animate-[cbm-fade-in_180ms_ease-out]", className)}
       {...rest}
     >
       {children}

@@ -74,7 +74,14 @@ export function FormField({
         </p>
       )}
       {description && (
-        <p id={descId} className="text-xs text-fg-3">
+        <p
+          id={descId}
+          className={cn(
+            "text-xs text-fg-3",
+            // Editor rows: the hint floats under the field while it is hovered or focused, so rows stay one line tall.
+            inline && "pointer-events-none invisible absolute left-0 top-full z-10 mt-1 max-w-full rounded-md border border-border bg-surface px-2.5 py-1.5 shadow-popover group-hover/field:visible group-focus-within/field:visible",
+          )}
+        >
           {description}
         </p>
       )}
@@ -83,9 +90,9 @@ export function FormField({
   return (
     <FieldCtx.Provider value={{ id, describedBy, invalid: Boolean(error) }}>
       {inline ? (
-        <div className={cn("grid min-w-0 grid-cols-1 gap-x-4 gap-y-1.5 md:grid-cols-[128px_minmax(0,1fr)]", className)}>
+        <div className={cn("group/field grid min-w-0 grid-cols-1 gap-x-4 gap-y-1.5 md:grid-cols-[128px_minmax(0,1fr)]", className)}>
           {labelNode}
-          <div className="flex min-w-0 flex-col gap-1.5">
+          <div className="relative flex min-w-0 flex-col gap-1.5">
             {children}
             {extras}
           </div>

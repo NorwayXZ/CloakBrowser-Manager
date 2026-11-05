@@ -1,3 +1,4 @@
+import { pinnedFirst, usePinnedProfiles } from "./pins";
 import { ChevronDown, Copy, Inbox, Pencil, Play, RefreshCw, Search, SearchX, Sparkles, Square, Trash2, UserRoundPlus, X } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
@@ -50,7 +51,8 @@ export function ProfilesPage() {
   const [tableRef, tableWidth] = useWidth<HTMLDivElement>();
 
   const all = useMemo(() => profiles.data ?? [], [profiles.data]);
-  const visible = useMemo(() => filterProfiles(all, query, group), [all, query, group]);
+  const { pinned, toggle: togglePin } = usePinnedProfiles();
+  const visible = useMemo(() => pinnedFirst(filterProfiles(all, query, group), pinned), [all, query, group, pinned]);
   const counts = useMemo(() => countByGroup(all), [all]);
   const chosen = useMemo(() => all.filter((p) => selected.has(p.id)), [all, selected]);
   const runningCount = all.filter(isRunning).length;
@@ -282,6 +284,8 @@ export function ProfilesPage() {
               onToggle={toggle}
               onToggleAll={toggleAll}
               actions={actions}
+              pinned={pinned}
+              onTogglePin={togglePin}
             />
           )}
         </div>
