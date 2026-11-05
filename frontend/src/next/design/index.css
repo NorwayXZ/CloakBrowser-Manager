@@ -98,6 +98,12 @@
     opacity: 0;
   }
 }
+@keyframes cbm-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
 @keyframes cbm-pop-in {
   from {
     opacity: 0;

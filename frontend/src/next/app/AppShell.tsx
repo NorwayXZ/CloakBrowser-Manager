@@ -34,9 +34,11 @@ export function AppShell() {
       <DowngradeBanner />
       <main id="main" tabIndex={-1} className="min-h-0 flex-1 overflow-auto focus:outline-none">
         <div className="mx-auto h-full w-full max-w-[1320px] px-6 lg:px-10">
-          <RouteErrorBoundary key={location.pathname}>
-            <Outlet />
-          </RouteErrorBoundary>
+          <div key={location.pathname} className="h-full animate-[cbm-rise_220ms_cubic-bezier(0.22,1,0.36,1)]">
+            <RouteErrorBoundary>
+              <Outlet />
+            </RouteErrorBoundary>
+          </div>
         </div>
       </main>
       <VersionFooter />

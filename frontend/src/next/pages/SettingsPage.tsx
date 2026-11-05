@@ -34,7 +34,7 @@ export function SettingsPage() {
       <div className="flex min-h-full flex-col gap-6 pb-8 pt-5">
         <PageHeader title="设置" description="检测、数据、内核、AI、保险库、自动化、账号与更新。" />
         <nav aria-label="设置分类" className="min-w-0">
-          <ul className="m-0 flex list-none flex-col gap-3 p-0">
+          <ul className="glass m-0 flex list-none flex-col divide-y divide-border overflow-hidden rounded-lg p-0">
             {[...PAGES, ...SECTIONS].map((item) => (
               <li key={item.id}>
                 <SettingsCard item={item} />
@@ -86,7 +86,7 @@ function SettingsCard({ item }: { item: SectionCard }) {
   return (
     <Link
       to={`/settings/${item.id}`}
-      className="glass group flex min-h-[64px] items-center gap-4 rounded-lg px-5 py-3 transition-colors duration-fast hover:bg-surface-2"
+      className="group flex min-h-[64px] items-center gap-4 px-5 py-3 transition-colors duration-fast hover:bg-surface-2"
     >
       <span aria-hidden className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-accent-soft text-accent">
         <item.icon className="h-[18px] w-[18px]" />
