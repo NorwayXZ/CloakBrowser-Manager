@@ -1209,6 +1209,10 @@ async def _connect_over_cdp_when_ready(
     last_error: Exception | None = None
     while time.monotonic() < deadline:
         if process.poll() is not None:
+            # The kernel's license exits (76 = seat taken, …) are final: say so in
+            # the user's words instead of a bare code that the caller would retry.
+            if process.returncode in LICENSE_EXIT_REASONS:
+                raise BrowserLaunchError(LICENSE_EXIT_REASONS[process.returncode])
             raise RuntimeError(
                 f"System Chrome exited before CDP became ready (code {process.returncode})"
             )
@@ -2996,7 +3000,9 @@ class BrowserManager:
                         context = await launcher(**launch_options)
                         await self._wait_for_cdp(cdp_port)
                         break
-                    except asyncio.CancelledError:
+                    except (asyncio.CancelledError, BrowserLaunchError):
+                        # Cancelled, or refused for a reason another attempt cannot
+                        # fix (license seat, bad license): stop here, keep the reason.
                         if context is not None:
                             await self._close_context(context, profile_id)
                         self._release_cdp_port(cdp_port)

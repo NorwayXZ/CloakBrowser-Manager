@@ -1781,6 +1781,42 @@ async def _debug_launch_options(monkeypatch, tmp_path: Path, runtime: RuntimeCon
 
 
 @pytest.mark.asyncio
+async def test_debug_launch_stops_at_a_license_refusal_and_keeps_its_reason(monkeypatch, tmp_path: Path):
+    # Exit 76 (license seat taken) used to be retried three times and end as
+    # "Unable to start verified CDP", which hid the reason from people and agents.
+    from backend import browser_manager as module
+
+    calls = 0
+
+    async def seat_taken(**_kwargs):
+        nonlocal calls
+        calls += 1
+        raise module.BrowserLaunchError(module.LICENSE_EXIT_REASONS[76])
+
+    monkeypatch.setattr(module, "_launch_cloakbrowser_persistent_context_async", seat_taken)
+    manager = BrowserManager(RuntimeConfig("macos", "native", "native-window", tmp_path))
+    with pytest.raises(module.BrowserLaunchError, match="授权并发已满"):
+        await manager.launch(_launch_profile(tmp_path), launch_mode="debug")
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_cdp_wait_turns_a_license_exit_into_its_reason():
+    from backend import browser_manager as module
+
+    process = MagicMock()
+    process.poll.return_value = 76
+    process.returncode = 76
+    with pytest.raises(module.BrowserLaunchError, match="授权并发已满"):
+        await module._connect_over_cdp_when_ready(MagicMock(), 9222, process, timeout=1)
+
+    process.poll.return_value = 1
+    process.returncode = 1
+    with pytest.raises(RuntimeError, match="code 1"):
+        await module._connect_over_cdp_when_ready(MagicMock(), 9222, process, timeout=1)
+
+
+@pytest.mark.asyncio
 async def test_macos_debug_launch_sets_window_size(monkeypatch, tmp_path: Path):
     # Without it the window opened maximized: a 2560px content area inside a
     # spoofed 1920px screen, which the fingerprint self-check flagged.
