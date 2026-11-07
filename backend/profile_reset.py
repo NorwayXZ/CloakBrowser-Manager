@@ -42,7 +42,7 @@ def _apple(device_id: str, chip: str, width: int, height: int, cores: int) -> di
     }
 
 
-def _windows(device_id: str, width: int, height: int, cores: int, vendor: str, model: str) -> dict[str, Any]:
+def _windows(device_id: str, width: int, height: int, cores: int, vendor: str, model: str, pci_id: str) -> dict[str, Any]:
     return {
         "id": device_id,
         "platform": "windows",
@@ -51,21 +51,22 @@ def _windows(device_id: str, width: int, height: int, cores: int, vendor: str, m
         "hardware_concurrency": cores,
         "device_memory": 8,
         "gpu_vendor": f"Google Inc. ({vendor})",
-        "gpu_renderer": f"ANGLE ({vendor}, {model} Direct3D11 vs_5_0 ps_5_0, D3D11)",
+        # Chrome on Windows includes the PCI device id; a renderer without it matches no real machine.
+        "gpu_renderer": f"ANGLE ({vendor}, {model} (0x{int(pci_id, 16):08X}) Direct3D11 vs_5_0 ps_5_0, D3D11)",
     }
 
 
 # The editor's presets minus the two "原生" ones (a reset picks a device, the
 # way the editor's 随机设备型号 does).
 DEVICE_PRESETS: tuple[dict[str, Any], ...] = (
-    _windows("win_laptop_iris_xe_2256", 2256, 1504, 8, "Intel", "Intel(R) Iris(R) Xe Graphics"),
-    _windows("win_laptop_iris_xe_1920", 1920, 1200, 12, "Intel", "Intel(R) Iris(R) Xe Graphics"),
-    _windows("win_laptop_arc_2880", 2880, 1800, 16, "Intel", "Intel(R) Arc(TM) Graphics"),
-    _windows("win_laptop_rtx_4060_2560", 2560, 1600, 16, "NVIDIA", "NVIDIA GeForce RTX 4060 Laptop GPU"),
-    _windows("win_desktop_uhd_770_1080", 1920, 1080, 16, "Intel", "Intel(R) UHD Graphics 770"),
-    _windows("win_desktop_rtx_3060_1440", 2560, 1440, 12, "NVIDIA", "NVIDIA GeForce RTX 3060"),
-    _windows("win_desktop_rtx_4060_1440", 2560, 1440, 16, "NVIDIA", "NVIDIA GeForce RTX 4060"),
-    _windows("win_desktop_rx_6600_1440", 2560, 1440, 16, "AMD", "AMD Radeon RX 6600"),
+    _windows("win_laptop_iris_xe_2256", 2256, 1504, 8, "Intel", "Intel(R) Iris(R) Xe Graphics", "9A49"),
+    _windows("win_laptop_iris_xe_1920", 1920, 1200, 12, "Intel", "Intel(R) Iris(R) Xe Graphics", "46A6"),
+    _windows("win_laptop_arc_2880", 2880, 1800, 16, "Intel", "Intel(R) Arc(TM) Graphics", "7D55"),
+    _windows("win_laptop_rtx_4060_2560", 2560, 1600, 16, "NVIDIA", "NVIDIA GeForce RTX 4060 Laptop GPU", "28A0"),
+    _windows("win_desktop_uhd_770_1080", 1920, 1080, 16, "Intel", "Intel(R) UHD Graphics 770", "4680"),
+    _windows("win_desktop_rtx_3060_1440", 2560, 1440, 12, "NVIDIA", "NVIDIA GeForce RTX 3060", "2503"),
+    _windows("win_desktop_rtx_4060_1440", 2560, 1440, 16, "NVIDIA", "NVIDIA GeForce RTX 4060", "2882"),
+    _windows("win_desktop_rx_6600_1440", 2560, 1440, 16, "AMD", "AMD Radeon RX 6600", "73FF"),
     _apple("mba_13_m1_2020", "M1", 1440, 900, 8),
     _apple("mba_13_m2_2022", "M2", 1470, 956, 8),
     _apple("mba_15_m2_2023", "M2", 1710, 1107, 8),
