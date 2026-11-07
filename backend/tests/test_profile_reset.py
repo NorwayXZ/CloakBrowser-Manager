@@ -277,6 +277,24 @@ def test_device_presets_match_the_editor_list():
     assert {d["id"] for d in profile_reset.DEVICE_PRESETS} == editor_ids
 
 
+def test_windows_presets_report_a_real_chrome_renderer_with_the_pci_device_id():
+    # Real Chrome on Windows says "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 (0x00002503) Direct3D11 ...)";
+    # a renderer without the device id matches no real machine.
+    from backend.device_templates import _RENDERER_RE
+
+    windows = [d for d in profile_reset.DEVICE_PRESETS if d["platform"] == "windows"]
+    assert windows
+    for device in windows:
+        assert _RENDERER_RE.match(device["gpu_renderer"]), device["gpu_renderer"]
+
+    text = EDITOR_PRESETS.read_text(encoding="utf-8")
+    editor = re.findall(r'windowsRenderer\("(\w+)", "([^"]+)", "([0-9A-F]+)"\)', text)
+    assert len(editor) == len(windows)
+    assert sorted(f"ANGLE ({v}, {m} (0x{int(i, 16):08X}) Direct3D11 vs_5_0 ps_5_0, D3D11)" for v, m, i in editor) == sorted(
+        d["gpu_renderer"] for d in windows
+    )
+
+
 # ── agent tool ───────────────────────────────────────────────────────────────
 
 

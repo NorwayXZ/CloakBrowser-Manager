@@ -39,8 +39,9 @@ function appleRenderer(chip: string): string {
   return `ANGLE (Apple, ANGLE Metal Renderer: Apple ${chip}, Unspecified Version)`;
 }
 
-function windowsRenderer(vendor: "Intel" | "NVIDIA" | "AMD", renderer: string): string {
-  return `ANGLE (${vendor}, ${renderer} Direct3D11 vs_5_0 ps_5_0, D3D11)`;
+// Chrome on Windows puts the GPU's PCI device id in the renderer string; one without it matches no real machine.
+function windowsRenderer(vendor: "Intel" | "NVIDIA" | "AMD", renderer: string, deviceId: string): string {
+  return `ANGLE (${vendor}, ${renderer} (0x${deviceId.padStart(8, "0")}) Direct3D11 vs_5_0 ps_5_0, D3D11)`;
 }
 
 function appleProfile(
@@ -138,7 +139,7 @@ export const DEVICE_PROFILES: DeviceProfilePreset[] = [
     1504,
     8,
     WINDOWS_INTEL_GPU_VENDOR,
-    windowsRenderer("Intel", "Intel(R) Iris(R) Xe Graphics"),
+    windowsRenderer("Intel", "Intel(R) Iris(R) Xe Graphics", "9A49"),
   ),
   windowsProfile(
     "win_laptop_iris_xe_1920",
@@ -149,7 +150,7 @@ export const DEVICE_PROFILES: DeviceProfilePreset[] = [
     1200,
     12,
     WINDOWS_INTEL_GPU_VENDOR,
-    windowsRenderer("Intel", "Intel(R) Iris(R) Xe Graphics"),
+    windowsRenderer("Intel", "Intel(R) Iris(R) Xe Graphics", "46A6"),
   ),
   windowsProfile(
     "win_laptop_arc_2880",
@@ -160,7 +161,7 @@ export const DEVICE_PROFILES: DeviceProfilePreset[] = [
     1800,
     16,
     WINDOWS_INTEL_GPU_VENDOR,
-    windowsRenderer("Intel", "Intel(R) Arc(TM) Graphics"),
+    windowsRenderer("Intel", "Intel(R) Arc(TM) Graphics", "7D55"),
   ),
   windowsProfile(
     "win_laptop_rtx_4060_2560",
@@ -171,7 +172,7 @@ export const DEVICE_PROFILES: DeviceProfilePreset[] = [
     1600,
     16,
     WINDOWS_NVIDIA_GPU_VENDOR,
-    windowsRenderer("NVIDIA", "NVIDIA GeForce RTX 4060 Laptop GPU"),
+    windowsRenderer("NVIDIA", "NVIDIA GeForce RTX 4060 Laptop GPU", "28A0"),
   ),
   windowsProfile(
     "win_desktop_uhd_770_1080",
@@ -182,7 +183,7 @@ export const DEVICE_PROFILES: DeviceProfilePreset[] = [
     1080,
     16,
     WINDOWS_INTEL_GPU_VENDOR,
-    windowsRenderer("Intel", "Intel(R) UHD Graphics 770"),
+    windowsRenderer("Intel", "Intel(R) UHD Graphics 770", "4680"),
   ),
   windowsProfile(
     "win_desktop_rtx_3060_1440",
@@ -193,7 +194,7 @@ export const DEVICE_PROFILES: DeviceProfilePreset[] = [
     1440,
     12,
     WINDOWS_NVIDIA_GPU_VENDOR,
-    windowsRenderer("NVIDIA", "NVIDIA GeForce RTX 3060"),
+    windowsRenderer("NVIDIA", "NVIDIA GeForce RTX 3060", "2503"),
   ),
   windowsProfile(
     "win_desktop_rtx_4060_1440",
@@ -204,7 +205,7 @@ export const DEVICE_PROFILES: DeviceProfilePreset[] = [
     1440,
     16,
     WINDOWS_NVIDIA_GPU_VENDOR,
-    windowsRenderer("NVIDIA", "NVIDIA GeForce RTX 4060"),
+    windowsRenderer("NVIDIA", "NVIDIA GeForce RTX 4060", "2882"),
   ),
   windowsProfile(
     "win_desktop_rx_6600_1440",
@@ -215,7 +216,7 @@ export const DEVICE_PROFILES: DeviceProfilePreset[] = [
     1440,
     16,
     WINDOWS_AMD_GPU_VENDOR,
-    windowsRenderer("AMD", "AMD Radeon RX 6600"),
+    windowsRenderer("AMD", "AMD Radeon RX 6600", "73FF"),
   ),
 
   appleProfile("mba_13_m1_2020", "MacBook Air", "MacBook Air 13 M1 (2020)", "M1", 1440, 900, 8),
