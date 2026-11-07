@@ -39,7 +39,12 @@ function currentRoute(): string | undefined {
 
 function stringify(value: unknown): string | undefined {
   if (value === undefined || value === null) return undefined;
-  if (value instanceof Error) return value.stack || `${value.name}: ${value.message}`;
+  if (value instanceof Error) {
+    const head = `${value.name}: ${value.message}`;
+    // WebKit (the macOS app window) leaves the message out of `stack`: keep it, or the log only has frames.
+    if (!value.stack) return head;
+    return value.stack.includes(value.message) ? value.stack : `${head}\n${value.stack}`;
+  }
   if (typeof value === "string") return value;
   try {
     return JSON.stringify(value);

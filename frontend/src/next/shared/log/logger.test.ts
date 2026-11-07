@@ -24,6 +24,18 @@ describe("redact", () => {
 });
 
 describe("log", () => {
+  it("keeps an error's message when the stack leaves it out (WebKit)", async () => {
+    const fetchMock = vi.fn(async () => new Response("{}"));
+    vi.stubGlobal("fetch", fetchMock);
+    const error = new Error("启动失败：授权并发已满");
+    error.stack = "U@http://127.0.0.1:8080/assets/main.js:14:71392";
+    log.warn("启动失败：X", { action: "profile.launch", detail: error });
+    await vi.advanceTimersByTimeAsync(3000);
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const { entries } = JSON.parse(String(init.body));
+    expect(entries[0].detail).toBe("Error: 启动失败：授权并发已满\nU@http://127.0.0.1:8080/assets/main.js:14:71392");
+  });
+
   it("uploads warnings and errors in one batch after a short delay, info stays local", async () => {
     const fetchMock = vi.fn(async () => new Response("{}"));
     vi.stubGlobal("fetch", fetchMock);
