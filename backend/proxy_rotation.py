@@ -26,7 +26,9 @@ class RotationError(ValueError):
     """A controlled message that is safe to return without supplier credentials."""
 
 
-LOCAL_HINT = "切换链接指向本机（127.0.0.1 / localhost）。如果这是本机运行的换 IP 服务，请打开「允许本机链接」后再保存"
+LOCAL_HINT = "切换链接指向本机或内网（如 127.0.0.1、192.168.x.x）。如果换 IP 服务就在这台电脑或你的局域网里，请打开「允许本机和内网链接」后再保存"
+# Where a rotation box on the owner's own network lives: RFC 1918, CGNAT (Tailscale and similar) and IPv6 ULA.
+LAN_NETWORKS = tuple(ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "fc00::/7"))
 
 
 def _address(value: str):
@@ -40,17 +42,18 @@ def public_address(value: str) -> bool:
     return _address(value).is_global
 
 
-def loopback_address(value: str) -> bool:
-    return _address(value).is_loopback
+def local_address(value: str) -> bool:
+    address = _address(value)
+    return address.is_loopback or any(address.version == n.version and address in n for n in LAN_NETWORKS)
 
 
 def check_address(value: str, allow_local: bool) -> None:
-    """Loopback is opt-in per proxy; private, link-local and metadata addresses stay blocked."""
+    """Loopback and LAN are opt-in per proxy; link-local and metadata addresses stay blocked."""
     if public_address(value): return
-    if loopback_address(value):
+    if local_address(value):
         if allow_local: return
         raise RotationError(LOCAL_HINT)
-    raise RotationError("切换链接不能指向内网、链路本地或云元数据地址")
+    raise RotationError("切换链接不能指向链路本地或云元数据地址")
 
 
 def validate_settings(config: dict) -> None:
@@ -92,7 +95,7 @@ def rotation_key(config: dict) -> str:
 
 
 def send_refresh(config: dict) -> None:
-    """Resolve and pin a public (or opted-in loopback) address. Never follow a redirect or expose response text."""
+    """Resolve and pin a public (or opted-in loopback/LAN) address. Never follow a redirect or expose response text."""
     validate_settings(config)
     started = time.monotonic()
     u = urlsplit(config["url"])
