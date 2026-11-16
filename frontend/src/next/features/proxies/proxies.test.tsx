@@ -80,7 +80,7 @@ it("saves the refresh link without executing it and rotates through the Manager 
 });
 
 it("explains the local-link option and saves it once switched on", async () => {
-  const HINT="切换链接指向本机（127.0.0.1 / localhost）。如果这是本机运行的换 IP 服务，请打开「允许本机链接」后再保存";
+  const HINT="切换链接指向本机或内网（如 127.0.0.1、192.168.x.x）。如果换 IP 服务就在这台电脑或你的局域网里，请打开「允许本机和内网链接」后再保存";
   // The backend refuses a local link until the option is on; status is read after respond runs.
   const save:MockRoute={method:"PUT",path:"/api/proxy-presets/p1/rotation-settings",respond:(b)=>{
     const on=(b as {allow_local:boolean}).allow_local;
@@ -94,11 +94,11 @@ it("explains the local-link option and saves it once switched on", async () => {
   fireEvent.click(await screen.findByRole("button",{name:"切换链接"}));
   const dialog=await screen.findByRole("dialog",{name:"配置一键换 IP"});
   await waitFor(()=>expect(within(dialog).getByRole("button",{name:"保存切换设置"})).not.toBeDisabled());
-  const toggle=within(dialog).getByRole("switch",{name:"允许本机链接"});
+  const toggle=within(dialog).getByRole("switch",{name:"允许本机和内网链接"});
   expect(toggle).not.toBeChecked();
   fireEvent.change(within(dialog).getByLabelText("换 IP 链接"),{target:{value:"http://127.0.0.1:9000/rotate"}});
   fireEvent.click(within(dialog).getByRole("button",{name:"保存切换设置"}));
-  expect(await within(dialog).findByText(/允许本机链接」后再保存/)).toBeInTheDocument();
+  expect(await within(dialog).findByText(/允许本机和内网链接」后再保存/)).toBeInTheDocument();
   fireEvent.click(toggle);
   fireEvent.click(within(dialog).getByRole("button",{name:"保存切换设置"}));
   await waitFor(()=>expect(screen.queryByRole("dialog",{name:"配置一键换 IP"})).not.toBeInTheDocument());

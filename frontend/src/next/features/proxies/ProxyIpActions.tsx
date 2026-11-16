@@ -121,7 +121,7 @@ function RotationSettings({proxyId,onClose,onSaved}:{proxyId:string;onClose:()=>
   return <Dialog open onOpenChange={v=>{if(!v)onClose();}} title="配置一键换 IP" description="粘贴供应商提供的刷新链接。保存不会调用链接；清空链接保存可关闭此能力。" dismissible={!saving} footer={<><Button variant="ghost" disabled={saving} onClick={onClose}>取消</Button><Button disabled={loading} loading={saving} onClick={()=>void save()}>保存切换设置</Button></>}>
     <div className="flex flex-col gap-4">
       <FormField label="换 IP 链接"><Textarea value={form.url} autoComplete="off" spellCheck={false} rows={3} placeholder="粘贴供应商的 http(s):// 刷新链接" onChange={e=>setForm({...form,url:e.target.value})} /></FormField>
-      <Switch checked={form.allow_local} onCheckedChange={v=>setForm({...form,allow_local:v})} label="允许本机链接" description="仅当换 IP 服务就运行在这台电脑上（127.0.0.1 / localhost）时打开；内网和云元数据地址始终拒绝。" />
+      <Switch checked={form.allow_local} onCheckedChange={v=>setForm({...form,allow_local:v})} label="允许本机和内网链接" description="换 IP 服务在这台电脑（127.0.0.1 / localhost）或你的局域网（如 192.168.x.x）里时打开；链路本地和云元数据地址始终拒绝。" />
       <p className="text-xs text-fg-2">链接与认证信息加密保存。Agent 工具仅返回能力和操作结果，不返回原始链接。链接由 Manager 的管理网络发起，不通过正在切换的 SOCKS5。</p>
       <FormField label="冷却时间（秒）"><Input type="number" min={5} max={3600} value={form.cooldown_seconds} onChange={e=>setForm({...form,cooldown_seconds:Number(e.target.value)})} /></FormField>
       <FormField label="共享切换组（可选）" description="不同链接会切换同一批出口时，填写相同组名。相同链接自动共用锁和冷却时间。"><Input value={form.shared_group} maxLength={64} onChange={e=>setForm({...form,shared_group:e.target.value})} /></FormField>
