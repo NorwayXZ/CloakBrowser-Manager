@@ -162,7 +162,7 @@ def test_self_check_flags_a_desktop_platform_and_chrome_only_apis():
 
 
 def test_frontend_presets_match_the_backend_table():
-    text = EDITOR_PRESETS.read_text()
+    text = EDITOR_PRESETS.read_text(encoding="utf-8")
     for device_id, (_, width, height, _ratio) in ios_persona.IPHONES.items():
         match = re.search(rf'iphoneProfile\(\s*"{device_id}",\s*"[^"]*",\s*(\d+),\s*(\d+)', text)
         assert match, f"{device_id} is missing from the editor presets"
