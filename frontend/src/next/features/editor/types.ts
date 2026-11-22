@@ -6,7 +6,7 @@
  */
 
 export type HostOS = "windows" | "macos" | "linux";
-export type BrowserEngine = "auto" | "system_chrome" | "cloakbrowser";
+export type BrowserEngine = "auto" | "system_chrome" | "cloakbrowser" | "webkit";
 
 export interface FingerprintOptions {
   brand?: "Chrome" | "Edge" | "Opera" | "Vivaldi" | null;

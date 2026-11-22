@@ -64,7 +64,7 @@ export function PreflightDialog({ entries, onCancel, onConfirm }: PreflightDialo
                 <div className="min-w-0">
                   <div className="truncate text-sm font-semibold text-slate-900">{name}</div>
                   <div className="mt-1 text-xs text-slate-500">
-                    {result.browser_engine === "cloakbrowser" ? "CloakBrowser 画像" : "系统 Chrome 原生"} · {result.launch_mode === "manual" ? "日常无外部 CDP" : "调试模式"}
+                    {result.browser_engine === "webkit" ? "苹果原生 WebKit（Safari 内核）" : result.browser_engine === "cloakbrowser" ? "CloakBrowser 画像" : "系统 Chrome 原生"} · {result.launch_mode === "manual" ? "日常无外部 CDP" : "受控模式"}
                   </div>
                 </div>
                 <span className={`ml-3 inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${result.status === "pass" ? "bg-emerald-50 text-emerald-700" : result.status === "warning" ? "bg-amber-50 text-amber-700" : "bg-red-50 text-red-700"}`}>

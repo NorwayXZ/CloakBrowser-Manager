@@ -544,6 +544,6 @@ describe("saving and leaving", () => {
 
     setName("My iPhone");
     const body = await create(fetchMock);
-    expect(body).toMatchObject({ platform: "ios", device_profile: "iphone_15", browser_engine: "cloakbrowser", screen_width: 393, screen_height: 852 });
+    expect(body).toMatchObject({ platform: "ios", device_profile: "iphone_15", browser_engine: "webkit", screen_width: 393, screen_height: 852 });
   });
 });

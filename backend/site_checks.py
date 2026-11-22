@@ -28,11 +28,26 @@ REPORT_FILE = "report.json"
 POLL_SECONDS = 2.0
 
 TEXT_JS = "document.body ? document.body.innerText.slice(0, 40000) : ''"
+BROWSERSCAN_JS = """({
+  text: document.body ? document.body.innerText.slice(0, 40000) : '',
+  hiddenAuth: (() => {
+    const el = [...document.querySelectorAll('span')].find(
+      e => /authenticity:|真实度[：:]/i.test(e.textContent || '')
+    );
+    return el && el.parentElement ? el.parentElement.textContent.trim().slice(0, 160) : '';
+  })(),
+})"""
 SANNYSOFT_JS = """({
   text: document.body ? document.body.innerText.slice(0, 40000) : '',
+  ua: typeof navigator !== 'undefined' ? navigator.userAgent : '',
   passed: document.querySelectorAll('td.passed').length,
   failed: document.querySelectorAll('td.failed').length,
   warn: document.querySelectorAll('td.warn').length,
+  failedNames: [...document.querySelectorAll('td.failed')].map(td => {
+    const row = td.parentElement;
+    const cell = row && row.cells && row.cells[0] ? row.cells[0] : null;
+    return (cell ? cell.innerText : '').trim().replace(/\\s+/g, ' ');
+  }),
 })"""
 IPHEY_JS = """({
   text: document.body ? document.body.innerText.slice(0, 40000) : '',
@@ -71,7 +86,7 @@ SITES: tuple[SiteCheck, ...] = (
     SiteCheck("pixelscan", "Pixelscan", "https://pixelscan.net/fingerprint-check",
               "指纹一致、未检测到伪装、未检测到自动化"),
     SiteCheck("browserscan", "BrowserScan", "https://www.browserscan.net/",
-              "真实度 100%（90–99% 记为警告），未检测到机器人"),
+              "真实度 100%（90–99% 记为警告），未检测到机器人", BROWSERSCAN_JS),
     SiteCheck("sannysoft", "Sannysoft", "https://bot.sannysoft.com/",
               "没有任何失败项", SANNYSOFT_JS, 45.0),
     SiteCheck("iphey", "IPHey", "https://iphey.com/",
@@ -203,15 +218,27 @@ def judge_pixelscan(raw: Any) -> Verdict | None:
     return "pass", "指纹一致，未检测到伪装和自动化", details
 
 
+_SAFARI_CHROME_ONLY_ROWS = (
+    "chrome",
+    "permissions",
+    "plugins length",
+    "plugins is of type pluginarray",
+)
+
+
 def judge_browserscan(raw: Any) -> Verdict | None:
     text = _text(raw)
-    score = _percent(r"authenticity:\s*(\d+)%", text)
+    hidden = str(raw.get("hiddenAuth", "") if isinstance(raw, dict) else "")
+    combined = f"{text}\n{hidden}" if hidden else text
+    score = _percent(r"(?:authenticity:|真实度[：:])\s*(\d+)%", combined)
     if score is None:
         return None
-    bot = re.search(r"Bot Detection:\s*(Yes|No)", text, re.I)
+    bot_en = re.search(r"Bot Detection:\s*(Yes|No)", text, re.I)
+    bot_zh = re.search(r"机器人检测[：:]\s*(是|否)", text)
+    bot_label = bot_en.group(1) if bot_en else ("Yes" if (bot_zh and bot_zh.group(1) == "是") else ("No" if bot_zh else None))
     deductions = [f"{m.group(1).strip()} {m.group(2)}" for m in re.finditer(r"\n([^\n%]{3,60})\n\s*(-\d+%)", text)]
-    details = [f"真实度：{score}%", f"机器人检测：{bot.group(1) if bot else '未显示'}", *[f"扣分：{d}" for d in deductions]]
-    if bot and bot.group(1).lower() == "yes":
+    details = [f"真实度：{score}%", f"机器人检测：{bot_label or '未显示'}", *[f"扣分：{d}" for d in deductions]]
+    if bot_label and bot_label.lower() == "yes":
         return "fail", f"检测到机器人，真实度 {score}%", details
     if score >= 100:
         return "pass", "真实度 100%", details
@@ -226,7 +253,22 @@ def judge_sannysoft(raw: Any) -> Verdict | None:
     passed, failed, warn = int(raw.get("passed", 0)), int(raw.get("failed", 0)), int(raw.get("warn", 0))
     if passed + failed + warn < 10:
         return None
+    ua = str(raw.get("ua") or "")
+    failed_names = [str(name).strip() for name in (raw.get("failedNames") or []) if str(name).strip()]
+    is_safari = "Safari/" in ua and "Chrome/" not in ua and "Chromium/" not in ua
+    safari_ignored: list[str] = []
+    if is_safari and failed_names and len(failed_names) == failed:
+        real_failed_names: list[str] = []
+        for name in failed_names:
+            low = name.lower()
+            if any(low.startswith(prefix) for prefix in _SAFARI_CHROME_ONLY_ROWS):
+                safari_ignored.append(name)
+            else:
+                real_failed_names.append(name)
+        failed = len(real_failed_names)
     details = [f"通过 {passed} 项", f"失败 {failed} 项", f"警告 {warn} 项"]
+    if safari_ignored:
+        details.append(f"已排除 Chrome 专属项（真机 Safari 同样无此项）：{len(safari_ignored)} 项")
     if failed:
         return "fail", f"{failed} 项失败", details
     if warn:

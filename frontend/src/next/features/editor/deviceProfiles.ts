@@ -373,16 +373,14 @@ export function randomFingerprintSeed() {
   return Math.floor(Math.random() * 90000) + 10000;
 }
 
-function normalizeEngine(value?: BrowserEngine | string | null): BrowserEngine {
-  return value === "cloakbrowser" ? "cloakbrowser" : "system_chrome";
-}
-
 export function applyDeviceProfile(
   current: ProfileCreateData,
   preset: DeviceProfilePreset,
 ): ProfileCreateData {
-  // Only the kernel takes the iPhone persona's switches.
-  const browserEngine = preset.platform === "ios" ? "cloakbrowser" : normalizeEngine(current.browser_engine);
+  // iOS defaults to real Apple WebKit (Safari engine), while allowing explicit cloakbrowser fallback.
+  const browserEngine: BrowserEngine = preset.platform === "ios"
+    ? (current.browser_engine === "cloakbrowser" ? "cloakbrowser" : "webkit")
+    : (current.browser_engine === "cloakbrowser" ? "cloakbrowser" : "system_chrome");
   const isNative = browserEngine === "system_chrome";
 
   return {

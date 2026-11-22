@@ -3176,7 +3176,7 @@ export interface components {
              * @default auto
              * @enum {string}
              */
-            browser_engine: "auto" | "system_chrome" | "cloakbrowser";
+            browser_engine: "auto" | "system_chrome" | "cloakbrowser" | "webkit";
             /**
              * Clipboard Sync
              * @default true
@@ -3566,7 +3566,7 @@ export interface components {
             /** Auto Launch */
             auto_launch?: boolean | null;
             /** Browser Engine */
-            browser_engine?: ("auto" | "system_chrome" | "cloakbrowser") | null;
+            browser_engine?: ("auto" | "system_chrome" | "cloakbrowser" | "webkit") | null;
             /** Clipboard Sync */
             clipboard_sync?: boolean | null;
             /** Color Scheme */

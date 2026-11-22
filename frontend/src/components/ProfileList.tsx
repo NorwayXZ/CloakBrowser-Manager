@@ -78,7 +78,7 @@ export function ProfileList({ profiles, selectedId, onSelect, onNew }: ProfileLi
               <span className="text-xs text-gray-500">{platformLabel(profile.platform)}</span>
               <span className="text-xs text-gray-600">·</span>
               <span className="text-xs text-gray-500">
-                {profile.browser_engine === "cloakbrowser" ? "伪装" : "原生"}
+                {profile.browser_engine === "webkit" ? "WebKit" : profile.browser_engine === "cloakbrowser" ? "伪装" : "原生"}
               </span>
               {profile.proxy && (
                 <>

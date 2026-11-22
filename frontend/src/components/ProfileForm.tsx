@@ -207,7 +207,7 @@ const GPU_PRESETS: Record<string, { vendor: string; renderer: string }> = {
 
 type ProxyKind = "none" | "custom" | "xray";
 type ProxyScheme = "http" | "https" | "socks5";
-type EditableBrowserEngine = "system_chrome" | "cloakbrowser";
+type EditableBrowserEngine = "system_chrome" | "cloakbrowser" | "webkit";
 
 interface ProxyParts {
   kind: ProxyKind;
@@ -478,6 +478,7 @@ function proxyFromParts(parts: ProxyParts): string | null {
 }
 
 function normalizeFormEngine(value?: string | null): EditableBrowserEngine {
+  if (value === "webkit") return "webkit";
   return value === "cloakbrowser" ? "cloakbrowser" : "system_chrome";
 }
 
@@ -542,8 +543,9 @@ export function ProfileForm({
 
   useEffect(() => {
     if (profile) {
-      // An iPhone always runs on the kernel, whatever an API-created profile stored.
-      const browserEngine = profile.platform === "ios" ? "cloakbrowser" : normalizeFormEngine(profile.browser_engine);
+      const browserEngine: EditableBrowserEngine = profile.platform === "ios"
+        ? (profile.browser_engine === "cloakbrowser" ? "cloakbrowser" : "webkit")
+        : normalizeFormEngine(profile.browser_engine);
       const deviceProfile = getDeviceProfile(profile.device_profile);
       const baseForm: ProfileCreateData = {
         name: profile.name,
@@ -877,15 +879,21 @@ export function ProfileForm({
     const target: DevicePlatform = platformFitsHost(nextPlatform, allowedPlatform) ? nextPlatform : allowedPlatform;
     if (form.platform === target) return;
     const preset = getDeviceProfile(getDefaultDeviceProfileId(target));
-    setForm((prev) => applyDeviceProfile({ ...prev, fingerprint_options: adaptLegacyOptions(prev, target) }, preset));
+    const nextEngine: EditableBrowserEngine = target === "ios"
+      ? "webkit"
+      : (form.browser_engine === "system_chrome" ? "system_chrome" : "cloakbrowser");
+    setForm((prev) => applyDeviceProfile({ ...prev, browser_engine: nextEngine, fingerprint_options: adaptLegacyOptions(prev, target) }, preset));
   };
 
   const handleDeviceProfileChange = (id: string) => {
     const nextProfile = platformProfiles.find((preset) => preset.id === id) ?? getDeviceProfile(getDefaultDeviceProfileId(allowedPlatform));
-    setForm((prev) => applyDeviceProfile({ ...prev, fingerprint_options: adaptLegacyOptions(prev, nextProfile.platform) }, nextProfile));
+    const nextEngine: EditableBrowserEngine = nextProfile.platform === "ios"
+      ? (form.platform === "ios" && form.browser_engine === "cloakbrowser" ? "cloakbrowser" : "webkit")
+      : (form.browser_engine === "system_chrome" ? "system_chrome" : "cloakbrowser");
+    setForm((prev) => applyDeviceProfile({ ...prev, browser_engine: nextEngine, fingerprint_options: adaptLegacyOptions(prev, nextProfile.platform) }, nextProfile));
   };
 
-  const handleEngineChange = (engine: "system_chrome" | "cloakbrowser") => {
+  const handleEngineChange = (engine: EditableBrowserEngine) => {
     setForm((prev) => applyDeviceProfile(
       { ...prev, browser_engine: engine },
       platformFitsHost(selectedDeviceProfile.platform, allowedPlatform)
@@ -1093,24 +1101,6 @@ export function ProfileForm({
                       <FieldNote>用于列表页展示这个浏览器对应哪个平台账号；可以从建议里选，也可以自己输入。</FieldNote>
                     </div>
 
-                    <label className="pt-2 text-right text-sm font-medium text-slate-600">浏览器</label>
-                    <div>
-                      <select
-                        className="input max-w-xs"
-                        value={currentEngine}
-                        disabled={form.platform === "ios"}
-                        onChange={(e) => handleEngineChange(e.target.value as "system_chrome" | "cloakbrowser")}
-                      >
-                        <option value="system_chrome">稳定原生（系统 Chrome）</option>
-                        <option value="cloakbrowser">伪装画像（CloakBrowser）</option>
-                      </select>
-                      <div className="mt-1 text-xs text-accent">
-                        {currentEngine === "system_chrome"
-                          ? "日常启动始终不打开外部 CDP。系统 Chrome 会使用语言参数和进程时区，但能否完整生效由本机 Chrome 决定，启动自检会如实报告。"
-                          : "日常启动直接运行 CloakBrowser 二进制，不打开外部 CDP；语言和时区由底层参数统一应用到主页面、iframe 与 Worker。"}
-                      </div>
-                    </div>
-
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">操作系统</label>
                     <div>
                       {allowedPlatform === "macos" ? (
@@ -1129,10 +1119,38 @@ export function ProfileForm({
                         </div>
                       )}
                       <FieldNote>{form.platform === "ios"
-                        ? "已切换到 iPhone 手机浏览器环境（竖屏尺寸、多点触控、iOS Safari 标识与 Apple GPU）；外观层完整伪装为 iPhone，底层运行在防检测内核上。"
+                        ? "已切换到 iPhone 手机浏览器环境：默认采用真正的苹果 WebKit（Safari 同源内核），下方均为手机专属配置。"
                         : allowedPlatform === "macos"
                           ? "当前为 Mac 桌面浏览器环境；需要手机环境时直接切到「iOS（iPhone 手机）」，下方会自动切换为全套手机配置。"
                           : "已按当前电脑隔离：Windows 只显示 Windows 画像，避免跨系统画像互相打架。"}</FieldNote>
+                    </div>
+
+                    <label className="pt-2 text-right text-sm font-medium text-slate-600">浏览器</label>
+                    <div>
+                      <select
+                        className="input max-w-md"
+                        value={currentEngine}
+                        onChange={(e) => handleEngineChange(e.target.value as EditableBrowserEngine)}
+                      >
+                        {form.platform === "ios" ? (
+                          <>
+                            <option value="webkit">苹果原生 WebKit（真 Safari 内核 · 过严风控推荐）</option>
+                            <option value="cloakbrowser">防检测浏览器（Chromium 内核 · 仅外观）</option>
+                          </>
+                        ) : (
+                          <>
+                            <option value="system_chrome">稳定原生（系统 Chrome）</option>
+                            <option value="cloakbrowser">伪装画像（CloakBrowser）</option>
+                          </>
+                        )}
+                      </select>
+                      <div className="mt-1 text-xs text-accent">
+                        {currentEngine === "webkit"
+                          ? "使用真正的苹果 WebKit（JavaScriptCore + Safari 渲染与网络栈），底层引擎、媒体查询、触摸和 Apple GPU 均与真 iPhone Safari 同源。"
+                          : currentEngine === "system_chrome"
+                            ? "日常启动始终不打开外部 CDP。系统 Chrome 会使用语言参数和进程时区，但能否完整生效由本机 Chrome 决定，启动自检会如实报告。"
+                            : "日常启动直接运行 CloakBrowser 二进制，不打开外部 CDP；语言和时区由底层参数统一应用到主页面、iframe 与 Worker。"}
+                      </div>
                     </div>
 
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">设备画像</label>

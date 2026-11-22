@@ -121,7 +121,7 @@ export const SECTIONS = [
 ] as const;
 
 export function platformLabel(platform: DevicePlatform): string {
-  if (platform === "ios") return "iPhone（iOS 外观）";
+  if (platform === "ios") return "iPhone（iOS）";
   return platform === "windows" ? "Windows" : "macOS";
 }
 
@@ -129,7 +129,7 @@ export function platformLabel(platform: DevicePlatform): string {
 
 export type ProxyKind = "none" | "custom" | "xray";
 export type ProxyScheme = "http" | "https" | "socks5";
-export type EditableEngine = "system_chrome" | "cloakbrowser";
+export type EditableEngine = "system_chrome" | "cloakbrowser" | "webkit";
 
 export interface ProxyParts {
   kind: ProxyKind;
@@ -223,6 +223,7 @@ export function proxyLabel(parts: ProxyParts): string {
 // ── Form state ──────────────────────────────────────────────────────────────
 
 export function normalizeFormEngine(value?: string | null): EditableEngine {
+  if (value === "webkit") return "webkit";
   return value === "cloakbrowser" ? "cloakbrowser" : "system_chrome";
 }
 
@@ -272,8 +273,10 @@ export function initialState(profile: Profile | null, hostOS?: HostOS | null): E
   const deviceProfile = getDeviceProfile(profile.device_profile);
   const baseForm: EditorForm = {
     name: profile.name,
-    // An iPhone always runs on the kernel, whatever an API-created profile stored.
-    browser_engine: profile.platform === "ios" ? "cloakbrowser" : normalizeFormEngine(profile.browser_engine),
+    // An iPhone defaults to real Apple WebKit, while preserving explicit cloakbrowser fallback.
+    browser_engine: profile.platform === "ios"
+      ? (profile.browser_engine === "cloakbrowser" ? "cloakbrowser" : "webkit")
+      : normalizeFormEngine(profile.browser_engine),
     device_profile: deviceProfile.id,
     fingerprint_seed: profile.fingerprint_seed,
     proxy: profile.proxy,
@@ -363,13 +366,19 @@ export function changePlatform(form: EditorForm, platform: DevicePlatform, hostO
   const target: DevicePlatform = platformFitsHost(platform, allowed) ? platform : allowed;
   if (form.platform === target) return form;
   const preset = getDeviceProfile(getDefaultDeviceProfileId(target));
-  return applyDeviceProfile({ ...form, fingerprint_options: adaptOptionsForPlatform(form, target) }, preset);
+  const nextEngine: EditableEngine = target === "ios"
+    ? "webkit"
+    : (form.browser_engine === "system_chrome" ? "system_chrome" : "cloakbrowser");
+  return applyDeviceProfile({ ...form, browser_engine: nextEngine, fingerprint_options: adaptOptionsForPlatform(form, target) }, preset);
 }
 
 export function changeDevice(form: EditorForm, id: string, hostOS?: HostOS | null): EditorForm {
   const allowed = getDevicePlatformForHost(hostOS);
   const next = getDeviceProfilesForPlatform(allowed).find((preset) => preset.id === id) ?? getDeviceProfile(getDefaultDeviceProfileId(allowed));
-  return applyDeviceProfile({ ...form, fingerprint_options: adaptOptionsForPlatform(form, next.platform) }, next);
+  const nextEngine: EditableEngine = next.platform === "ios"
+    ? (form.platform === "ios" && form.browser_engine === "cloakbrowser" ? "cloakbrowser" : "webkit")
+    : (form.browser_engine === "system_chrome" ? "system_chrome" : "cloakbrowser");
+  return applyDeviceProfile({ ...form, browser_engine: nextEngine, fingerprint_options: adaptOptionsForPlatform(form, next.platform) }, next);
 }
 
 /** A different device of this host's platform, with a new seed ("随机设备型号"). */
@@ -493,17 +502,24 @@ export function summaryRows(ctx: SummaryContext): [string, string][] {
   const webrtc = options.webrtc ?? "proxy";
   const ios = form.platform === "ios";
   const cloakOnly: [string, string][] =
-    engine === "cloakbrowser"
+    engine === "webkit"
       ? [
-          ["浏览器品牌", ios ? "Mobile Safari（iOS）" : options.brand ? `${options.brand}${options.brand_version ? ` ${options.brand_version}` : ""}` : "Chrome（跟随内核）"],
-          ["WebRTC", webrtc === "custom" ? `指定 ${options.webrtc_ip || "（未填）"}` : form.proxy ? `出口 IP${proxyTest?.ip ? ` ${proxyTest.ip}` : ""}` : "真实（直连）"],
+          ["浏览器品牌", "Mobile Safari（苹果原生 WebKit）"],
+          ["WebRTC", form.proxy ? "禁止本地 UDP 泄漏（仅走代理）" : "真实（直连）"],
           ["地理位置", geolocation === "block" ? "禁止" : geolocation === "real" ? "真实" : `基于 IP${exitPlace ? `（${exitPlace}）` : ""}`],
-          ["指纹噪声", options.noise == null ? (ios ? "开启（按种子独立）" : "自动") : options.noise ? "开启" : "关闭"],
-          ["跨电脑 Cookie", options.portable_cookies ? "开启" : "关闭"],
+          ["指纹噪声", options.noise === false ? "关闭" : "开启（按种子独立）"],
         ]
-      : [];
+      : engine === "cloakbrowser"
+        ? [
+            ["浏览器品牌", ios ? "Mobile Safari（iOS）" : options.brand ? `${options.brand}${options.brand_version ? ` ${options.brand_version}` : ""}` : "Chrome（跟随内核）"],
+            ["WebRTC", webrtc === "custom" ? `指定 ${options.webrtc_ip || "（未填）"}` : form.proxy ? `出口 IP${proxyTest?.ip ? ` ${proxyTest.ip}` : ""}` : "真实（直连）"],
+            ["地理位置", geolocation === "block" ? "禁止" : geolocation === "real" ? "真实" : `基于 IP${exitPlace ? `（${exitPlace}）` : ""}`],
+            ["指纹噪声", options.noise == null ? (ios ? "开启（按种子独立）" : "自动") : options.noise ? "开启" : "关闭"],
+            ["跨电脑 Cookie", options.portable_cookies ? "开启" : "关闭"],
+          ]
+        : [];
   return [
-    ["浏览器", engine === "system_chrome" ? "Google Chrome 原生" : ios ? "CloakBrowser（iPhone 手机模式）" : "CloakBrowser / Chromium"],
+    ["浏览器", engine === "webkit" ? "Apple WebKit（Safari 同源内核）" : engine === "system_chrome" ? "Google Chrome 原生" : ios ? "CloakBrowser（仅 iPhone 外观）" : "CloakBrowser / Chromium"],
     ["系统", platformLabel(form.platform === "ios" ? "ios" : getDevicePlatformForHost(hostOS))],
     ["设备型号", device.name],
     ["账号平台", form.account_platform || "未设置"],
@@ -531,7 +547,7 @@ export function fingerprintPreviewRows(ctx: SummaryContext): [string, string][] 
   const { cpu, gpu } = cpuGpu(ctx);
   const { timezone, locale } = timezoneLocale(ctx);
   return [
-    ["运行模式", engine === "system_chrome" ? "系统 Chrome 原生" : "防检测浏览器"],
+    ["运行模式", engine === "webkit" ? "苹果原生 WebKit（Safari 内核）" : engine === "system_chrome" ? "系统 Chrome 原生" : "防检测浏览器"],
     ["操作系统", platformLabel(form.platform === "ios" ? "ios" : getDevicePlatformForHost(hostOS))],
     ["设备型号", device.name],
     ["CPU / 芯片", device.chip],

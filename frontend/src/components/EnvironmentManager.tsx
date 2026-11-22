@@ -150,6 +150,7 @@ function locationText(profile: Profile) {
 }
 
 function engineLabel(profile: Profile) {
+  if (profile.browser_engine === "webkit") return "苹果 WebKit";
   return profile.browser_engine === "cloakbrowser" ? "伪装画像" : "稳定原生";
 }
 

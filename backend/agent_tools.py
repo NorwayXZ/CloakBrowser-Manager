@@ -959,6 +959,12 @@ async def _cdp_endpoint_info(client: RestClient, profile_id: str, *, tool: str) 
             "detail": "这个画像没在运行。用 open_browser 启动它。",
         }
     if not payload.get("cdp_url"):
+        if payload.get("browser_engine") == "webkit":
+            return {
+                "ok": False,
+                "reason": "cdp_unavailable",
+                "detail": "苹果原生 WebKit 内核不使用 Chrome CDP 端口；请直接用 open_browser 及 browser_navigate、browser_snapshot、browser_click 等页面工具操作该环境。",
+            }
         return {
             "ok": False,
             "reason": "cdp_unavailable",
@@ -1297,7 +1303,7 @@ async def _mail_list_messages(client: RestClient, args: dict[str, Any]) -> dict[
 # Writes go through a field whitelist so a typo fails loudly instead of being ignored.
 
 _WRITABLE_PROFILE_FIELDS = (
-    "name", "platform", "group_name", "proxy_id", "device_profile", "timezone",
+    "name", "platform", "browser_engine", "group_name", "proxy_id", "device_profile", "timezone",
     "locale", "account_platform", "startup_urls", "color_scheme", "tags",
     "notes", "warmup_persona", "cookies_json", "proxy", "launch_args", "headless",
     "humanize", "human_preset", "geoip", "auto_launch",
@@ -1305,7 +1311,8 @@ _WRITABLE_PROFILE_FIELDS = (
 
 _PROFILE_WRITE_PROPS: dict[str, Any] = {
     "name": {"type": "string", "description": "画像名称（只用来自己识别）"},
-    "platform": {"type": "string", "enum": ["windows", "macos", "linux", "ios"], "description": "设备系统；新建时不填就用本机系统（本地版只能启动和本机同系统的画像）。ios = iPhone 外观版，只能在 Mac 上用，device_profile 填 iphone_15、iphone_16_pro 等；它只改外观，底层仍是 Chrome"},
+    "platform": {"type": "string", "enum": ["windows", "macos", "linux", "ios"], "description": "设备系统；新建时不填就用本机系统（本地版只能启动和本机同系统的画像）。ios = iPhone 手机环境（仅限 Mac），默认使用苹果原生 WebKit（Safari 同源内核），device_profile 填 iphone_15、iphone_16_pro 等"},
+    "browser_engine": {"type": "string", "enum": ["auto", "system_chrome", "cloakbrowser", "webkit"], "description": "浏览器内核；iOS 默认 webkit（苹果原生 WebKit / Safari 内核），桌面常用 cloakbrowser 或 system_chrome"},
     "group_name": {"type": "string", "description": "分组名称（先用 list_groups 查；没有就先 create_group）"},
     "proxy_id": {"type": "string", "description": "list_proxies 里的 proxy_id；不填表示不改/直连"},
     "device_profile": {"type": "string", "description": "设备模板 id（list_device_templates 查）"},

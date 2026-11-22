@@ -5,7 +5,7 @@
 export type HostOS = "windows" | "macos" | "linux";
 export type RuntimeMode = "native" | "docker";
 export type ViewerMode = "native-window" | "vnc";
-export type BrowserEngine = "auto" | "system_chrome" | "cloakbrowser";
+export type BrowserEngine = "auto" | "system_chrome" | "cloakbrowser" | "webkit";
 export type LaunchMode = "manual" | "debug";
 export type BrowserBrand = "Chrome" | "Edge" | "Opera" | "Vivaldi";
 export type WebRTCMode = "proxy" | "custom";

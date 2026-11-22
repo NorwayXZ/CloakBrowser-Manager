@@ -69,27 +69,12 @@ export const BasicSection = forwardRef<HTMLInputElement, {
           ))}
         </datalist>
         <FormField
-          label="浏览器"
-          description={
-            <Hint>
-              {engine === "system_chrome"
-                ? "日常启动始终不打开外部 CDP。系统 Chrome 会使用语言参数和进程时区，但能否完整生效由本机 Chrome 决定，启动自检会如实报告。"
-                : "日常启动直接运行 CloakBrowser 二进制，不打开外部 CDP；语言和时区由底层参数统一应用到主页面、iframe 与 Worker。"}
-            </Hint>
-          }
-        >
-          <Select value={engine} disabled={ios} onChange={(event) => editor.changeEngine(event.target.value as "system_chrome" | "cloakbrowser")}>
-            <option value="system_chrome">稳定原生（系统 Chrome）</option>
-            <option value="cloakbrowser">防检测浏览器（CloakBrowser）</option>
-          </Select>
-        </FormField>
-        <FormField
           label="操作系统"
           description={
             platform === "macos"
               ? ios
-                ? "已切换到 iPhone 手机浏览器环境（竖屏尺寸、多点触控、iOS Safari 标识与 Apple GPU）；外观层完整伪装为 iPhone，底层运行在防检测内核上。"
-                : "当前为 Mac 桌面浏览器环境；需要手机环境时直接切到「iOS（iPhone）」，下方会自动切换为全套手机配置。"
+                ? "已切换到 iPhone 手机浏览器环境：默认采用真正的苹果 WebKit（Safari 同源 JavaScriptCore 内核），下方均为手机专属配置。"
+                : "当前为 Mac 桌面浏览器环境；需要手机环境时直接切到「iOS（iPhone 手机）」，下方会自动切换为全套手机配置。"
               : "按当前电脑锁定：只提供同系统的设备型号，避免跨系统设备型号互相矛盾。"
           }
         >
@@ -106,6 +91,34 @@ export const BasicSection = forwardRef<HTMLInputElement, {
           ) : (
             <span className="inline-flex h-8 w-fit items-center rounded border border-border bg-surface-2 px-2.5 text-sm text-fg">{platformLabel(platform)}</span>
           )}
+        </FormField>
+        <FormField
+          label="浏览器"
+          description={
+            <Hint>
+              {engine === "webkit"
+                ? "使用真正的苹果 WebKit（JavaScriptCore + Safari 渲染与网络栈），底层引擎、屏幕媒体查询、触摸和 Apple GPU 均与真 iPhone Safari 同源；首次启动若本机未缓存会自动下载。"
+                : engine === "system_chrome"
+                  ? "日常启动始终不打开外部 CDP。系统 Chrome 会使用语言参数和进程时区，但能否完整生效由本机 Chrome 决定，启动自检会如实报告。"
+                  : ios
+                    ? "仅在 Chromium 内核上模拟 iPhone 外观，深度检测能识别出 Chrome 引擎；严风控平台建议选「苹果原生 WebKit」。"
+                    : "日常启动直接运行 CloakBrowser 二进制，不打开外部 CDP；语言和时区由底层参数统一应用到主页面、iframe 与 Worker。"}
+            </Hint>
+          }
+        >
+          <Select value={engine} onChange={(event) => editor.changeEngine(event.target.value as "system_chrome" | "cloakbrowser" | "webkit")}>
+            {ios ? (
+              <>
+                <option value="webkit">苹果原生 WebKit（真 Safari 内核 · 过严风控推荐）</option>
+                <option value="cloakbrowser">防检测浏览器（Chromium 内核 · 仅外观）</option>
+              </>
+            ) : (
+              <>
+                <option value="system_chrome">稳定原生（系统 Chrome）</option>
+                <option value="cloakbrowser">防检测浏览器（CloakBrowser）</option>
+              </>
+            )}
+          </Select>
         </FormField>
         <FormField
           label="设备型号"

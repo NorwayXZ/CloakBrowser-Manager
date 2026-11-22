@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .runtime import HostOS, RuntimeMode, ViewerMode
 
-BrowserEngine = Literal["auto", "system_chrome", "cloakbrowser"]
+BrowserEngine = Literal["auto", "system_chrome", "cloakbrowser", "webkit"]
 LaunchMode = Literal["manual", "debug"]
 BrowserBrand = Literal["Chrome", "Edge", "Opera", "Vivaldi"]
 GeolocationMode = Literal["ip", "block", "real"]

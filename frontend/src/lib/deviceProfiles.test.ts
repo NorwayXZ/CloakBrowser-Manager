@@ -52,11 +52,11 @@ describe("deviceProfiles", () => {
 });
 
 describe("iPhone presets in the previous panel", () => {
-  it("are offered on a Mac only, and force the CloakBrowser engine", () => {
+  it("are offered on a Mac only, and default to the real Apple WebKit engine", () => {
     expect(getDeviceProfilesForPlatform("macos").some((preset) => preset.platform === "ios")).toBe(true);
     expect(getDeviceProfilesForPlatform("windows").some((preset) => preset.platform === "ios")).toBe(false);
     const next = applyDeviceProfile({ name: "t", browser_engine: "system_chrome" }, getDeviceProfile("iphone_15"));
-    expect(next).toMatchObject({ platform: "ios", browser_engine: "cloakbrowser", device_memory: null, gpu_renderer: "Apple GPU" });
+    expect(next).toMatchObject({ platform: "ios", browser_engine: "webkit", device_memory: null, gpu_renderer: "Apple GPU" });
     expect(next.user_agent).toContain("iPhone");
   });
 });
