@@ -39,7 +39,7 @@ from .fingerprint_options import (
     unsupported_option_labels,
     webrtc_ip_arg,
 )
-from . import chrome_versions, ios_persona, seed_device
+from . import chrome_versions, ios_persona, seed_device, webkit_ios
 from .host_display import primary_screen_size, primary_visible_frame
 from .fingerprint_report import DEFAULT_NETWORK_PROBE_URL, analyze_fingerprint, run_fingerprint_probe
 from .cloak_runtime import get_effective_chromium_version
@@ -2356,9 +2356,15 @@ class BrowserManager:
         self._auto_launch_task: asyncio.Task | None = None
 
     def _browser_engine(self, profile: dict[str, Any] | None = None) -> str:
-        if profile and ios_persona.is_ios(profile):
-            return "cloakbrowser"  # only the kernel takes the persona's switches
         profile_engine = str((profile or {}).get("browser_engine") or "auto").strip().lower()
+        if profile and ios_persona.is_ios(profile):
+            if profile_engine in {"cloak", "cloakbrowser", "cloak-browser"}:
+                return "cloakbrowser"
+            if profile_engine in {"webkit", "safari", "auto", ""}:
+                return "webkit"
+            return "cloakbrowser"
+        if profile_engine in {"webkit", "safari"}:
+            return "webkit"
         if profile_engine in {"chrome", "system-chrome", "system_chrome"}:
             if self.runtime.runtime_mode == "docker":
                 logger.info(
@@ -2430,18 +2436,25 @@ class BrowserManager:
         host = self.runtime.host_os
         platform = str(profile.get("platform") or "").lower()
 
+        if engine == "webkit" and platform != ios_persona.PLATFORM:
+            issues.append({
+                "severity": "error",
+                "code": "webkit_ios_only",
+                "message": "苹果原生 WebKit 内核专用于 iOS（iPhone 手机）环境；桌面环境请选择系统 Chrome 或防检测浏览器。",
+            })
         if platform == ios_persona.PLATFORM:
             if host != "macos":
                 issues.append({
                     "severity": "error",
                     "code": "ios_needs_macos_host",
-                    "message": "iPhone 外观版目前只支持 macOS 电脑（需要苹果的字体和显卡环境）。",
+                    "message": "iPhone 环境目前只支持 macOS 电脑（需要苹果原生的 WebKit 内核、字体和显卡环境）。",
                 })
-            issues.append({
-                "severity": "warning",
-                "code": "ios_look_only",
-                "message": "iPhone 外观版只改外观（UA、屏幕、触摸、像素密度、苹果显卡名）；底层引擎仍是 Chrome，深度检测能看出来。",
-            })
+            elif engine != "webkit":
+                issues.append({
+                    "severity": "warning",
+                    "code": "ios_look_only",
+                    "message": "当前选的是 Chromium 外观版：只改外观，底层引擎仍是 Chrome；过严风控建议把浏览器切换为「苹果原生 WebKit」。",
+                })
         elif host in {"macos", "windows"} and platform and platform != host:
             issues.append({
                 "severity": "error",
@@ -2616,15 +2629,16 @@ class BrowserManager:
             "can_launch": error_count == 0,
             "issues": issues,
             "capabilities": {
-                "external_cdp": mode == "debug",
+                "external_cdp": mode == "debug" and engine != "webkit",
                 "fingerprint_args": engine == "cloakbrowser",
                 "native_system_chrome": engine == "system_chrome",
+                "native_webkit": engine == "webkit",
                 "proxy_dns_policy": "proxy_host_resolver" if profile.get("proxy") else "direct",
                 "webrtc_policy": "disable_non_proxied_udp",
                 "tls_transport": "browser_native",
                 "tls_externally_verified": False,
                 "storage_persistence": True,
-                "cookie_import": "profile_extension" if profile.get("cookies_json") and mode == "manual" else "browser_storage",
+                "cookie_import": "profile_extension" if profile.get("cookies_json") and mode == "manual" and engine != "webkit" else "browser_storage",
             },
         }
 
@@ -2703,16 +2717,21 @@ class BrowserManager:
 
             user_data_dir = Path(profile["user_data_dir"])
 
+            browser_engine = self._browser_engine(profile)
+            user_data_dir.mkdir(parents=True, exist_ok=True)
+
             # Docker can leave stale locks after an unclean container exit. Native
             # mode must let Chromium arbitrate profile ownership itself.
-            if self.runtime.runtime_mode == "docker":
+            if self.runtime.runtime_mode == "docker" and browser_engine != "webkit":
                 for lock_file in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
                     (user_data_dir / lock_file).unlink(missing_ok=True)
 
-            _init_profile_defaults(user_data_dir)
-            _sync_session_restore(user_data_dir)
+            if browser_engine != "webkit":
+                _init_profile_defaults(user_data_dir)
+                _sync_session_restore(user_data_dir)
             if (
-                requested_launch_mode == "manual"
+                browser_engine != "webkit"
+                and requested_launch_mode == "manual"
                 and self.runtime.runtime_mode == "native"
                 and not effective_headless
             ):
@@ -2739,7 +2758,7 @@ class BrowserManager:
                 )
 
             user_launch_args = list(profile.get("launch_args") or [])
-            if requested_launch_mode == "manual":
+            if requested_launch_mode == "manual" and browser_engine != "webkit":
                 # Every manual launch carries the cookie extension: it imports
                 # the saved cookies and, with this per-launch token, can answer
                 # pull-back requests for browsers the Manager cannot drive.
@@ -2777,13 +2796,12 @@ class BrowserManager:
                     raise ValueError("中转模式不能用高级启动参数覆盖代理连接")
                 user_launch_args.append("--disable-quic")
 
-            browser_engine = self._browser_engine(profile)
             if self.runtime.host_os == "macos" and browser_engine == "cloakbrowser":
                 _quarantine_macos_cloak_sync_data(
                     user_data_dir,
                     profile.get("last_exit_reason"),
                 )
-            if self.runtime.host_os == "macos" and self.runtime.runtime_mode == "native":
+            if browser_engine != "webkit" and self.runtime.host_os == "macos" and self.runtime.runtime_mode == "native":
                 name_arg = window_name_arg(profile.get("name"))
                 if name_arg and not any(arg.startswith("--window-name") for arg in user_launch_args):
                     user_launch_args.append(name_arg)
@@ -2816,7 +2834,7 @@ class BrowserManager:
                 needs_auth_bridge = bool(parsed_proxy.username or parsed_proxy.password)
                 if needs_auth_bridge and (
                     parsed_proxy.scheme == "socks5"
-                    or browser_engine == "system_chrome"
+                    or browser_engine in {"system_chrome", "webkit"}
                 ):
                     proxy_bridge = HttpProxyBridge(proxy)
                     browser_proxy = await proxy_bridge.start()
@@ -2877,8 +2895,9 @@ class BrowserManager:
             fixed_language = parse_fingerprint_options(profile).language
             if fixed_language:
                 resolved_locale = fixed_language
-                _sync_profile_locale(user_data_dir, resolved_locale)
-            else:
+                if browser_engine != "webkit":
+                    _sync_profile_locale(user_data_dir, resolved_locale)
+            elif browser_engine != "webkit":
                 # A language put first in the browser's settings page becomes
                 # the whole browser's language, interface included.
                 preferred_language = settings_preferred_language(user_data_dir)
@@ -2888,13 +2907,20 @@ class BrowserManager:
             if browser_engine == "system_chrome" and proxy:
                 _sync_webrtc_policy(user_data_dir)
             geo_mode, geo_coords = (
-                geolocation_plan(profile, proxy_geo, can_override=requested_launch_mode == "debug")
-                if browser_engine == "cloakbrowser"
+                geolocation_plan(
+                    profile,
+                    proxy_geo,
+                    can_override=(requested_launch_mode == "debug" or browser_engine == "webkit"),
+                )
+                if browser_engine in {"cloakbrowser", "webkit"}
                 else ("real", None)
             )
-            _sync_geolocation_permission(user_data_dir, block=geo_mode == "block")
+            if browser_engine != "webkit":
+                _sync_geolocation_permission(user_data_dir, block=geo_mode == "block")
 
-            if browser_engine == "system_chrome":
+            if browser_engine == "webkit":
+                extra_args = []
+            elif browser_engine == "system_chrome":
                 extra_args = list(SYSTEM_CHROME_BASE_ARGS)
             else:
                 extra_args = self._build_fingerprint_args(profile)
@@ -2988,7 +3014,24 @@ class BrowserManager:
             )
             startup_urls = _startup_urls_for_profile(profile, profile_id)
 
-            if use_manual_system_chrome or use_manual_cloakbrowser:
+            if browser_engine == "webkit":
+                profile_cookies = _parse_profile_cookies(profile.get("cookies_json"))
+                context = await webkit_ios.launch_webkit_ios_context(
+                    profile=profile,
+                    user_data_dir=user_data_dir,
+                    headless=effective_headless,
+                    browser_proxy=browser_proxy,
+                    locale=resolved_locale,
+                    timezone=resolved_timezone,
+                    geo_coords=geo_coords,
+                    geo_mode=geo_mode,
+                    profile_cookies=profile_cookies,
+                    startup_urls=[],
+                    humanize=bool(profile.get("humanize", False)),
+                    human_preset=str(profile.get("human_preset") or "default"),
+                    on_all_windows_closed=lambda: self.stop(profile_id, reason="关闭了浏览器窗口"),
+                )
+            elif use_manual_system_chrome or use_manual_cloakbrowser:
                 if _has_restorable_chrome_session(user_data_dir):
                     # Keep restored tabs and add one local report tab so manual,
                     # no-CDP launches are still checked on every startup.
@@ -3177,7 +3220,7 @@ class BrowserManager:
 
             if (
                 self.runtime.runtime_mode == "native"
-                and browser_engine == "system_chrome"
+                and browser_engine in {"system_chrome", "webkit"}
                 and not effective_headless
                 and context is not None
             ):

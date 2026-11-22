@@ -27,12 +27,14 @@ describe("iPhone presets", () => {
     expect([phone.gpu_vendor, phone.gpu_renderer]).toEqual(["Apple Inc.", "Apple GPU"]);
   });
 
-  it("force the CloakBrowser engine, because only the kernel takes the persona's switches", () => {
+  it("default to the real Apple WebKit engine while preserving explicit cloakbrowser fallback", () => {
     const next = applyDeviceProfile({ name: "t", browser_engine: "system_chrome" }, getDeviceProfile("iphone_15"));
-    expect(next.browser_engine).toBe("cloakbrowser");
+    expect(next.browser_engine).toBe("webkit");
     expect(next.platform).toBe("ios");
     expect(next.user_agent).toContain("iPhone");
     expect(next.gpu_renderer).toBe("Apple GPU");
+    const fallback = applyDeviceProfile({ name: "t", browser_engine: "cloakbrowser" }, getDeviceProfile("iphone_15"));
+    expect(fallback.browser_engine).toBe("cloakbrowser");
   });
 });
 
@@ -78,12 +80,12 @@ describe("an iPhone profile in the editor", () => {
     expect(platformLabel("ios")).toContain("iPhone");
   });
 
-  it("keeps the kernel engine and its own screen when an API-created profile is opened", () => {
+  it("defaults API-created auto iPhone profiles to Apple WebKit and keeps its own screen", () => {
     const stored = { ...createDefaultForm("macos"), id: "p1", name: "iPhone", platform: "ios", device_profile: "iphone_15", browser_engine: "auto" } as unknown as Profile;
     const { form } = initialState(stored, "macos");
-    expect(form.browser_engine).toBe("cloakbrowser");
+    expect(form.browser_engine).toBe("webkit");
     expect(screenFollowsDisplay(form, [2560, 1440])).toBe(false);
-    expect(screenFollowsDisplay({ ...form, platform: "macos" }, [2560, 1440])).toBe(true);
+    expect(screenFollowsDisplay({ ...form, platform: "macos", browser_engine: "cloakbrowser" }, [2560, 1440])).toBe(true);
   });
 
   it("can re-roll to any iPhone but the current one, including the default model", () => {
@@ -107,13 +109,13 @@ describe("an iPhone profile in the editor", () => {
 
     const start = createDefaultForm("macos");
     const iosForm = changePlatform({ ...start, fingerprint_options: { ...start.fingerprint_options, brand: "Edge", platform_version: "15.6.0" } }, "ios", "macos");
-    expect(iosForm).toMatchObject({ platform: "ios", device_profile: "iphone_15", browser_engine: "cloakbrowser", screen_width: 393, screen_height: 852 });
+    expect(iosForm).toMatchObject({ platform: "ios", device_profile: "iphone_15", browser_engine: "webkit", screen_width: 393, screen_height: 852 });
     expect(iosForm.fingerprint_options?.brand).toBeNull();
     expect(iosForm.fingerprint_options?.platform_version).toBeNull();
     expect(iosForm.fingerprint_options?.noise).toBeNull();
 
     const backToMac = changePlatform(iosForm, "macos", "macos");
-    expect(backToMac).toMatchObject({ platform: "macos", device_profile: "native_macos", user_agent: null });
+    expect(backToMac).toMatchObject({ platform: "macos", device_profile: "native_macos", browser_engine: "cloakbrowser", user_agent: null });
     expect(backToMac.fingerprint_options?.noise).toBe(false);
   });
 });

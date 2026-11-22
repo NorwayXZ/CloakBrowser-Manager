@@ -347,6 +347,7 @@ def init_db():
                SET device_memory = 8
                WHERE device_memory IS NULL
                  AND browser_engine = 'cloakbrowser'
+                 AND platform != 'ios'
                  AND device_profile IS NOT NULL
                  AND device_profile != 'native_macos'
                  AND device_profile != 'native_windows'"""

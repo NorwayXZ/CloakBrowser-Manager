@@ -88,6 +88,7 @@ export function locationTitle(profile: Pick<Profile, "proxy" | "proxy_geo">): st
 }
 
 export function engineLabel(profile: Pick<Profile, "browser_engine">): string {
+  if (profile.browser_engine === "webkit") return "苹果 WebKit";
   return profile.browser_engine === "cloakbrowser" ? "防检测浏览器" : "稳定原生";
 }
 
@@ -165,7 +166,7 @@ export function duplicatePayload(profile: Profile): ProfileCreate {
   const engine = profile.browser_engine;
   return {
     name: `${profile.name} 副本`,
-    browser_engine: engine === "cloakbrowser" || engine === "system_chrome" || engine === "auto" ? engine : "auto",
+    browser_engine: engine === "cloakbrowser" || engine === "system_chrome" || engine === "webkit" || engine === "auto" ? engine : "auto",
     device_profile: profile.device_profile,
     fingerprint_seed: null,
     proxy: profile.proxy,

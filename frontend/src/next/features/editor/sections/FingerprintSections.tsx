@@ -141,12 +141,13 @@ export function FingerprintSection({ editor, hostOS, hostScreen, isEdit }: { edi
 export function MoreFingerprintSection({ editor, hostOS }: { editor: Editor; hostOS: HostOS | null }) {
   const { form, setOption } = editor;
   const engine = normalizeFormEngine(form.browser_engine);
+  const isWebkit = engine === "webkit";
   const options: FingerprintOptions = form.fingerprint_options ?? {};
   const mac = form.platform === "macos";
   // An iPhone has no Client Hints and no taskbar: those two fields mean nothing there.
   const ios = form.platform === "ios";
 
-  if (engine !== "cloakbrowser") {
+  if (engine === "system_chrome") {
     return (
       <Section id="form-more-fingerprint" title="更多指纹">
         <p className="text-sm text-fg-2">“稳定原生”使用电脑上的 Google Chrome 和真实硬件，不支持浏览器品牌、WebRTC IP 等额外伪装项；需要时把浏览器切换为“防检测浏览器”。</p>
@@ -156,7 +157,15 @@ export function MoreFingerprintSection({ editor, hostOS }: { editor: Editor; hos
 
   const geolocation = options.geolocation ?? "ip";
   return (
-    <Section id="form-more-fingerprint" title="更多指纹" description="CloakBrowser 内核自带的额外伪装项。全部留默认时由内核按稳定种子生成，已经是一套一致的指纹；只在明确需要时才改。">
+    <Section
+      id="form-more-fingerprint"
+      title="更多指纹"
+      description={
+        isWebkit
+          ? "苹果原生 WebKit（iOS Safari）手机环境的定位、WebRTC 防泄漏与按种子独立的画布/音频微调。"
+          : "CloakBrowser 内核自带的额外伪装项。全部留默认时由内核按稳定种子生成，已经是一套一致的指纹；只在明确需要时才改。"
+      }
+    >
       <div className="grid max-w-form grid-cols-1 gap-5 md:grid-cols-1">
         {!ios && (
           <FormField label="浏览器品牌" description="改 User-Agent 和 Client Hints 里的浏览器名称，内核本身不变。">
@@ -190,7 +199,9 @@ export function MoreFingerprintSection({ editor, hostOS }: { editor: Editor; hos
           label="地理位置"
           description={
             geolocation === "ip"
-              ? "调试启动：网页请求定位时返回出口 IP 所在城市的坐标。日常启动改不了坐标，和普通 Chrome 一样先询问：请点「禁止」，点允许会给出这台电脑的真实位置。"
+              ? isWebkit
+                ? "网页请求定位时自动返回出口 IP 所在城市的真实坐标。"
+                : "调试启动：网页请求定位时返回出口 IP 所在城市的坐标。日常启动改不了坐标，和普通 Chrome 一样先询问：请点「禁止」，点允许会给出这台电脑的真实位置。"
               : geolocation === "block"
                 ? "所有网站请求定位都直接拒绝。"
                 : "和普通 Chrome 一样，由你决定是否给网站真实位置。用代理时不建议。"
@@ -198,29 +209,39 @@ export function MoreFingerprintSection({ editor, hostOS }: { editor: Editor; hos
         >
           <Segmented label="地理位置" value={geolocation} onChange={(value) => setOption("geolocation", value)} options={[["ip", "基于 IP"], ["block", "禁止"], ["real", "真实"]]} />
         </FormField>
+        {!isWebkit && (
+          <FormField
+            label="WebRTC"
+            description={options.webrtc === "custom" ? "网页通过 WebRTC 看到的公网 IP 固定为这里填的地址。" : "用代理时网页通过 WebRTC 看到的是代理出口 IP，防止泄露真实 IP；直连时保持真实。"}
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <Segmented
+                label="WebRTC"
+                value={options.webrtc ?? "proxy"}
+                options={[["proxy", "跟随出口 IP"], ["custom", "指定 IP"]]}
+                onChange={(value) =>
+                  editor.setForm((f) => ({
+                    ...f,
+                    fingerprint_options: { ...(f.fingerprint_options ?? {}), webrtc: value, webrtc_ip: value === "custom" ? f.fingerprint_options?.webrtc_ip ?? "" : null },
+                  }))
+                }
+              />
+              {options.webrtc === "custom" && (
+                <Input mono className="w-48" aria-label="WebRTC 公网 IP" value={options.webrtc_ip ?? ""} placeholder="例如 203.0.113.9" onChange={(event) => setOption("webrtc_ip", event.target.value)} />
+              )}
+            </div>
+          </FormField>
+        )}
         <FormField
-          label="WebRTC"
-          
-          description={options.webrtc === "custom" ? "网页通过 WebRTC 看到的公网 IP 固定为这里填的地址。" : "用代理时网页通过 WebRTC 看到的是代理出口 IP，防止泄露真实 IP；直连时保持真实。"}
+          label="指纹噪声"
+          description={
+            <Hint>
+              {isWebkit
+                ? "在真苹果 WebKit 上按稳定种子对边缘像素与音频做极轻微固定偏移，让同一台 Mac 上的多个 iPhone 账号互不串号；单账号只需一台真机指纹时也可以关闭。"
+                : "噪声让每个环境的 Canvas、WebGL、音频输出各不相同。实测多数现代检测器对噪声净扣分，新建环境默认关闭；想回到内核默认可以切回“自动”；macOS 设备型号默认关闭。"}
+            </Hint>
+          }
         >
-          <div className="flex flex-wrap items-center gap-2">
-            <Segmented
-              label="WebRTC"
-              value={options.webrtc ?? "proxy"}
-              options={[["proxy", "跟随出口 IP"], ["custom", "指定 IP"]]}
-              onChange={(value) =>
-                editor.setForm((f) => ({
-                  ...f,
-                  fingerprint_options: { ...(f.fingerprint_options ?? {}), webrtc: value, webrtc_ip: value === "custom" ? f.fingerprint_options?.webrtc_ip ?? "" : null },
-                }))
-              }
-            />
-            {options.webrtc === "custom" && (
-              <Input mono className="w-48" aria-label="WebRTC 公网 IP" value={options.webrtc_ip ?? ""} placeholder="例如 203.0.113.9" onChange={(event) => setOption("webrtc_ip", event.target.value)} />
-            )}
-          </div>
-        </FormField>
-        <FormField label="指纹噪声"  description={<Hint>噪声让每个环境的 Canvas、WebGL、音频输出各不相同。实测多数现代检测器对噪声净扣分，新建环境默认关闭；想回到内核默认可以切回“自动”；macOS 设备型号默认关闭。</Hint>}>
           <Segmented
             label="指纹噪声"
             value={options.noise == null ? "auto" : options.noise ? "on" : "off"}
@@ -228,19 +249,21 @@ export function MoreFingerprintSection({ editor, hostOS }: { editor: Editor; hos
             onChange={(value) => setOption("noise", value === "auto" ? null : value === "on")}
           />
         </FormField>
-        <FormField label="存储配额" description={<Hint>navigator.storage.estimate() 报告的磁盘配额（MB）。真实电脑通常几十 GB 以上；新建环境默认 50000（约 50 GB），实测可以消除 BrowserScan 的无痕模式扣分。</Hint>}>
-          <div className="flex flex-wrap items-center gap-2">
-            <Segmented
-              label="存储配额"
-              value={options.storage_quota_mb == null ? "auto" : "custom"}
-              options={[["auto", "按种子自动"], ["custom", "自定义"]]}
-              onChange={(value) => setOption("storage_quota_mb", value === "auto" ? null : 50000)}
-            />
-            {options.storage_quota_mb != null && (
-              <Input type="number" min={100} aria-label="存储配额（MB）" className="w-32" value={options.storage_quota_mb} placeholder="单位 MB" onChange={(event) => setOption("storage_quota_mb", numberOrNull(event.target.value))} />
-            )}
-          </div>
-        </FormField>
+        {!isWebkit && (
+          <FormField label="存储配额" description={<Hint>navigator.storage.estimate() 报告的磁盘配额（MB）。真实电脑通常几十 GB 以上；新建环境默认 50000（约 50 GB），实测可以消除 BrowserScan 的无痕模式扣分。</Hint>}>
+            <div className="flex flex-wrap items-center gap-2">
+              <Segmented
+                label="存储配额"
+                value={options.storage_quota_mb == null ? "auto" : "custom"}
+                options={[["auto", "按种子自动"], ["custom", "自定义"]]}
+                onChange={(value) => setOption("storage_quota_mb", value === "auto" ? null : 50000)}
+              />
+              {options.storage_quota_mb != null && (
+                <Input type="number" min={100} aria-label="存储配额（MB）" className="w-32" value={options.storage_quota_mb} placeholder="单位 MB" onChange={(event) => setOption("storage_quota_mb", numberOrNull(event.target.value))} />
+              )}
+            </div>
+          </FormField>
+        )}
         {!ios && <FormField label="任务栏高度" description="决定 screen.availHeight 比屏幕高度少多少像素，一般不用改。">
           <div className="flex flex-wrap items-center gap-2">
             <Segmented
@@ -254,34 +277,36 @@ export function MoreFingerprintSection({ editor, hostOS }: { editor: Editor; hos
             )}
           </div>
         </FormField>}
-        <fieldset className="flex flex-col gap-3">
-          <legend className="mb-2 text-sm font-medium text-fg">兼容选项</legend>
-          {form.platform === "windows" && (
+        {!isWebkit && (
+          <fieldset className="flex flex-col gap-3">
+            <legend className="mb-2 text-sm font-medium text-fg">兼容选项</legend>
+            {form.platform === "windows" && (
+              <Checkbox
+                checked={options.speech_voices ?? true}
+                onCheckedChange={(value) => setOption("speech_voices", value)}
+                label="Windows 语音列表"
+                description="让 speechSynthesis 报告和真实 Windows Chrome 一样的语音。某个网站因此异常时再关闭。"
+              />
+            )}
+            <Checkbox checked={options.allow_3p_cookies ?? false} onCheckedChange={(value) => setOption("allow_3p_cookies", value)} label="允许第三方 Cookie" description="只在 reCAPTCHA、单点登录或支付验证一直转圈完成不了时打开。" />
             <Checkbox
-              checked={options.speech_voices ?? true}
-              onCheckedChange={(value) => setOption("speech_voices", value)}
-              label="Windows 语音列表"
-              description="让 speechSynthesis 报告和真实 Windows Chrome 一样的语音。某个网站因此异常时再关闭。"
+              checked={(options.transparent_proxy ?? false) && Boolean(form.proxy)}
+              disabled={!form.proxy}
+              onCheckedChange={(value) => setOption("transparent_proxy", value)}
+              label="透明代理"
+              description={form.proxy ? "更隐蔽的代理连接方式，用于换了好几个代理都被网站识别的情况。" : "需要先设置代理。"}
             />
-          )}
-          <Checkbox checked={options.allow_3p_cookies ?? false} onCheckedChange={(value) => setOption("allow_3p_cookies", value)} label="允许第三方 Cookie" description="只在 reCAPTCHA、单点登录或支付验证一直转圈完成不了时打开。" />
-          <Checkbox
-            checked={(options.transparent_proxy ?? false) && Boolean(form.proxy)}
-            disabled={!form.proxy}
-            onCheckedChange={(value) => setOption("transparent_proxy", value)}
-            label="透明代理"
-            description={form.proxy ? "更隐蔽的代理连接方式，用于换了好几个代理都被网站识别的情况。" : "需要先设置代理。"}
-          />
-          <Checkbox
-            checked={options.portable_cookies ?? false}
-            onCheckedChange={(value) => setOption("portable_cookies", value)}
-            label="跨电脑 Cookie"
-            description="用和电脑无关的密钥加密 Cookie，把环境搬到另一台电脑后登录还在。只对开启之后保存的 Cookie 有效，新环境建议一开始就打开。"
-          />
-          {form.platform === "windows" && hostOS === "linux" && (
-            <Checkbox checked={options.windows_font_metrics ?? false} onCheckedChange={(value) => setOption("windows_font_metrics", value)} label="Windows 字体度量" description="Linux 上伪装 Windows 时对齐字体尺寸，需要先装好 Windows 字体。" />
-          )}
-        </fieldset>
+            <Checkbox
+              checked={options.portable_cookies ?? false}
+              onCheckedChange={(value) => setOption("portable_cookies", value)}
+              label="跨电脑 Cookie"
+              description="用和电脑无关的密钥加密 Cookie，把环境搬到另一台电脑后登录还在。只对开启之后保存的 Cookie 有效，新环境建议一开始就打开。"
+            />
+            {form.platform === "windows" && hostOS === "linux" && (
+              <Checkbox checked={options.windows_font_metrics ?? false} onCheckedChange={(value) => setOption("windows_font_metrics", value)} label="Windows 字体度量" description="Linux 上伪装 Windows 时对齐字体尺寸，需要先装好 Windows 字体。" />
+            )}
+          </fieldset>
+        )}
       </div>
     </Section>
   );
