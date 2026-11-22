@@ -32,6 +32,7 @@ import sys
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 from . import ios_persona
 from .fingerprint_options import parse_fingerprint_options
@@ -40,7 +41,106 @@ logger = logging.getLogger("cloakbrowser.manager.webkit_ios")
 
 ENGINE = "webkit"
 WEBKIT_DATA_SUBDIR = "webkit-data"
+SESSION_TABS_FILENAME = "session_tabs.json"
+START_PAGE_TOKEN = "__CLOAK_START_PAGE__"
 _INSTALL_LOCK = asyncio.Lock()
+
+
+def _is_manager_start_url(url: str, start_page_url: str | None = None) -> bool:
+    if not url:
+        return False
+    if start_page_url and url == start_page_url:
+        return True
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False
+    host = (parsed.hostname or "").lower()
+    path = parsed.path or ""
+    return host in {"127.0.0.1", "localhost"} and path.startswith("/profile/") and path.endswith("/start")
+
+
+def load_saved_session_tabs(webkit_dir: Path, start_page_url: str | None = None) -> tuple[list[str], int]:
+    """Load open tabs saved from the previous headed session, if any external web tab existed."""
+    tabs_file = webkit_dir / SESSION_TABS_FILENAME
+    if not tabs_file.is_file():
+        return [], 0
+    try:
+        raw = json.loads(tabs_file.read_text(encoding="utf-8"))
+    except Exception:
+        return [], 0
+    if not isinstance(raw, dict):
+        return [], 0
+    raw_urls = raw.get("urls")
+    if not isinstance(raw_urls, list) or not raw_urls:
+        return [], 0
+    raw_active = raw.get("active_index", 0)
+    active_idx = int(raw_active) if isinstance(raw_active, int) else 0
+
+    resolved: list[str] = []
+    mapped_active = 0
+    has_external = False
+    for idx, entry in enumerate(raw_urls):
+        u = str(entry or "").strip()
+        if not u:
+            continue
+        if u == START_PAGE_TOKEN or _is_manager_start_url(u, start_page_url):
+            if not start_page_url:
+                continue
+            if idx == active_idx:
+                mapped_active = len(resolved)
+            resolved.append(start_page_url)
+            continue
+        if u.startswith(("http://", "https://")):
+            if idx == active_idx:
+                mapped_active = len(resolved)
+            resolved.append(u)
+            has_external = True
+
+    if not has_external:
+        return [], 0
+    if mapped_active >= len(resolved):
+        mapped_active = 0
+    return resolved, mapped_active
+
+
+def save_session_tabs_from_context(context: Any, webkit_dir: Path, start_page_url: str | None = None) -> None:
+    """Persist open context.pages before programmatic shutdown when external web tabs are open."""
+    pages = list(getattr(context, "pages", []) or [])
+    if not pages:
+        return
+    tokens: list[str] = []
+    has_external = False
+    for pg in pages:
+        u = str(getattr(pg, "url", "") or "").strip()
+        if not u or not u.startswith(("http://", "https://")):
+            u = str(getattr(pg, "_cloak_target_url", "") or "").strip()
+        if not u or not u.startswith(("http://", "https://")):
+            continue
+        if _is_manager_start_url(u, start_page_url):
+            tokens.append(START_PAGE_TOKEN)
+        else:
+            tokens.append(u)
+            has_external = True
+
+    if not has_external:
+        return
+
+    tabs_file = webkit_dir / SESSION_TABS_FILENAME
+    active_idx = 0
+    if tabs_file.is_file():
+        with suppress(Exception):
+            existing = json.loads(tabs_file.read_text(encoding="utf-8"))
+            if isinstance(existing, dict) and existing.get("urls") == tokens:
+                prev_idx = existing.get("active_index", 0)
+                if isinstance(prev_idx, int) and 0 <= prev_idx < len(tokens):
+                    active_idx = prev_idx
+                    return  # Native AppKit already persisted exact active_index for these tabs.
+
+    payload = {"urls": tokens, "active_index": active_idx}
+    tmp_file = webkit_dir / f"{SESSION_TABS_FILENAME}.tmp"
+    tmp_file.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    tmp_file.replace(tabs_file)
 
 
 def playwright_browsers_cache_dir() -> Path:
@@ -218,11 +318,13 @@ def _write_macos_headed_launcher(
         return None
     launcher = webkit_dir / "launch_webkit_ui.sh"
     origin_file = webkit_dir / "window_origin.txt"
+    tabs_file = webkit_dir / SESSION_TABS_FILENAME
     script = (
         "#!/bin/bash\n"
         f"export CLOAK_PROFILE_NAME={shlex.quote(profile_name or 'iPhone')}\n"
         f"export CLOAK_START_URL={shlex.quote(start_url or 'about:blank')}\n"
         f"export CLOAK_ORIGIN_FILE={shlex.quote(str(origin_file))}\n"
+        f"export CLOAK_TABS_FILE={shlex.quote(str(tabs_file))}\n"
         f"export CLOAK_BASE_WIDTH={int(base_width)}\n"
         f"export CLOAK_BASE_HEIGHT={int(base_height)}\n"
         f"export DYLD_FRAMEWORK_PATH={shlex.quote(str(webkit_bin_dir))}\n"
@@ -850,16 +952,33 @@ async def launch_webkit_ios_context(
             except Exception as exc:
                 logger.debug("Humanize patch skipped for WebKit: %s", exc)
 
-        # Open startup URLs on headed launches (headless automation opens its own pages).
-        if not headless and startup_urls:
-            pages = list(context.pages)
-            first_page = pages[0] if pages else await context.new_page()
-            for idx, url in enumerate(startup_urls):
-                target_page = first_page if idx == 0 else await context.new_page()
-                try:
-                    await target_page.goto(url, wait_until="domcontentloaded", timeout=15_000)
-                except Exception as exc:
-                    logger.debug("WebKit startup URL %s load warning: %s", url, exc)
+        # Restore open tabs from the previous headed session (or open initial startup URLs).
+        if not headless:
+            restored_urls, restored_active_idx = load_saved_session_tabs(webkit_dir, start_page_url)
+            initial_urls = restored_urls if restored_urls else list(startup_urls or [])
+            focus_idx = restored_active_idx if restored_urls else 0
+            if initial_urls:
+                pages = list(context.pages)
+                tab_pages: list[Any] = []
+                for idx, url in enumerate(initial_urls):
+                    pg = pages[0] if (idx == 0 and pages) else await context.new_page()
+                    pg._cloak_target_url = url
+                    tab_pages.append(pg)
+                focus_idx = max(0, min(len(tab_pages) - 1, focus_idx))
+                with suppress(Exception):
+                    await tab_pages[focus_idx].bring_to_front()
+
+                async def _nav_tab(target_page: Any, target_url: str) -> None:
+                    try:
+                        await target_page.goto(target_url, wait_until="domcontentloaded", timeout=15_000)
+                    except Exception as exc:
+                        logger.debug("WebKit tab URL %s load warning: %s", target_url, exc)
+
+                nav_tasks = [asyncio.create_task(_nav_tab(pg, url)) for pg, url in zip(tab_pages, initial_urls)]
+                context._cloak_restore_tasks = nav_tasks
+                await asyncio.wait(nav_tasks, timeout=3.0)
+                with suppress(Exception):
+                    await tab_pages[focus_idx].bring_to_front()
 
         # macOS keeps Playwright.app running with 0 windows after the user closes the
         # last tab; detect empty context.pages and trigger clean profile shutdown.
@@ -867,7 +986,7 @@ async def launch_webkit_ios_context(
             watch_tasks: set[asyncio.Task[Any]] = set()
 
             async def _check_last_window_closed() -> None:
-                await asyncio.sleep(0.8)
+                await asyncio.sleep(0.25)
                 if closing or context is None:
                     return
                 if len(context.pages) == 0:
@@ -902,6 +1021,9 @@ async def launch_webkit_ios_context(
         nonlocal closing
         if closing:
             return
+        if not headless and context is not None:
+            with suppress(Exception):
+                save_session_tabs_from_context(context, webkit_dir, start_page_url)
         closing = True
         try:
             if reason is None:

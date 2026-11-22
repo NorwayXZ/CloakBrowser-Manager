@@ -107,8 +107,46 @@ def test_macos_tabs_dylib_and_headed_launcher(tmp_path: Path):
     assert "DYLD_INSERT_LIBRARIES=" in body
     assert "CLOAK_PROFILE_NAME=" in body
     assert "CLOAK_START_URL=" in body
+    assert "CLOAK_TABS_FILE=" in body
     assert "CLOAK_BASE_WIDTH=393" in body
     assert "CLOAK_BASE_HEIGHT=852" in body
+
+
+def test_session_tabs_persistence_and_start_page_port_remap(tmp_path: Path):
+    class FakePage:
+        def __init__(self, url: str):
+            self.url = url
+
+    class FakeContext:
+        def __init__(self, pages: list[FakePage]):
+            self.pages = pages
+
+    start_8080 = "http://127.0.0.1:8080/profile/p1/start"
+    start_9090 = "http://127.0.0.1:9090/profile/p1/start"
+
+    # Only start page open -> does not create external session restore payload.
+    webkit_ios.save_session_tabs_from_context(FakeContext([FakePage(start_8080)]), tmp_path, start_8080)
+    assert webkit_ios.load_saved_session_tabs(tmp_path, start_8080) == ([], 0)
+
+    # Start page + 2 external tabs -> persists all 3 and remaps start page to new port on next launch.
+    ctx = FakeContext([
+        FakePage(start_8080),
+        FakePage("https://example.com/a"),
+        FakePage("https://example.org/b"),
+    ])
+    webkit_ios.save_session_tabs_from_context(ctx, tmp_path, start_8080)
+    # Simulate native AppKit having marked index 2 as active.
+    saved = (tmp_path / webkit_ios.SESSION_TABS_FILENAME).read_text(encoding="utf-8")
+    (tmp_path / webkit_ios.SESSION_TABS_FILENAME).write_text(
+        saved.replace('"active_index": 0', '"active_index": 2'),
+        encoding="utf-8",
+    )
+    # Empty context during teardown must NOT wipe previously saved tabs!
+    webkit_ios.save_session_tabs_from_context(FakeContext([]), tmp_path, start_8080)
+
+    urls, active_idx = webkit_ios.load_saved_session_tabs(tmp_path, start_9090)
+    assert urls == [start_9090, "https://example.com/a", "https://example.org/b"]
+    assert active_idx == 2
 
 
 @pytest.mark.asyncio

@@ -3027,7 +3027,7 @@ class BrowserManager:
                         geo_coords=geo_coords,
                         geo_mode=geo_mode,
                         profile_cookies=profile_cookies,
-                        startup_urls=[],
+                        startup_urls=startup_urls,
                         start_page_url=native_start_page_url(profile_id),
                         humanize=bool(profile.get("humanize", False)),
                         human_preset=str(profile.get("human_preset") or "default"),

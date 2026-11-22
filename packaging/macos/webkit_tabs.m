@@ -30,10 +30,24 @@
 static NSString *gProfileName = @"iPhone";
 static NSString *gStartURL = @"about:blank";
 static NSString *gOriginFilePath = nil;
+static NSString *gTabsFilePath = nil;
 static CGFloat gBaseWidth = 393.0;
 static CGFloat gBaseHeight = 852.0;
 static CGFloat gInitialScaleEnv = 1.0;
 static NSMutableDictionary<NSString *, NSImage *> *gHostFavicons = nil;
+
+static BOOL CloakIsManagerStartPageURL(NSString *urlStr) {
+    if (!urlStr || urlStr.length == 0) return NO;
+    if (gStartURL.length > 0 && [urlStr isEqualToString:gStartURL]) return YES;
+    NSURL *u = [NSURL URLWithString:urlStr];
+    NSString *host = [[u host] lowercaseString] ?: @"";
+    NSString *path = [u path] ?: @"";
+    if (([host isEqualToString:@"127.0.0.1"] || [host isEqualToString:@"localhost"]) &&
+        [path hasPrefix:@"/profile/"] && [path hasSuffix:@"/start"]) {
+        return YES;
+    }
+    return NO;
+}
 
 static IMP gOrigMakeKeyAndOrderFront = NULL;
 static IMP gOrigOrderWindow = NULL;
@@ -143,6 +157,7 @@ static NSColor *CloakBrandColorForURL(NSURL *url) {
 @property (nonatomic, weak) WKWebView *webView;
 @property (nonatomic, strong) NSImage *favicon;
 @property (nonatomic, copy) NSString *lastFaviconHost;
+@property (nonatomic, copy) NSString *knownURL;
 @property (nonatomic, assign) BOOL observing;
 @property (nonatomic, assign) BOOL closingSingle;
 - (NSString *)displayTitle;
@@ -171,6 +186,8 @@ static NSColor *CloakBrandColorForURL(NSURL *url) {
 - (void)closeTabAtIndex:(NSUInteger)idx;
 - (void)closeOtherTabsExceptIndex:(NSUInteger)idx;
 - (void)closeAllTabs;
+- (void)handleRedCloseButton:(id)sender;
+- (void)persistSessionTabsAllowEmpty:(BOOL)allowEmpty;
 - (void)openNewTab;
 - (void)refreshAllBars;
 - (void)scheduleFaviconFetchForItem:(CloakTabItem *)item;
@@ -213,6 +230,10 @@ static NSColor *CloakBrandColorForURL(NSURL *url) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if ([keyPath isEqualToString:@"URL"] || [keyPath isEqualToString:@"loading"]) {
             NSURL *u = self.webView.URL;
+            NSString *abs = u.absoluteString ?: @"";
+            if ([abs hasPrefix:@"http://"] || [abs hasPrefix:@"https://"]) {
+                self.knownURL = abs;
+            }
             NSString *host = [u.host lowercaseString];
             if (host.length > 0 && gHostFavicons[host]) {
                 self.favicon = gHostFavicons[host];
@@ -224,6 +245,7 @@ static NSColor *CloakBrandColorForURL(NSURL *url) {
             if (!self.webView.isLoading && host.length > 0 && !gHostFavicons[host]) {
                 [[CloakTabDeck shared] scheduleFaviconFetchForItem:self];
             }
+            [[CloakTabDeck shared] persistSessionTabsAllowEmpty:NO];
         }
         // Keep native window title text hidden whenever MiniBrowser updates window.title.
         if (self.window) {
@@ -929,8 +951,72 @@ static const void *kTabBarAssocKey = &kTabBarAssocKey;
             _sharedFrame = NSMakeRect(savedPt.x, savedPt.y, round(gBaseWidth * savedScale), round(gBaseHeight * savedScale) + 69.0);
             _hasSharedFrame = YES;
         }
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(onAppWillTerminate:)
+                                                     name:NSApplicationWillTerminateNotification
+                                                   object:nil];
     }
     return self;
+}
+
+- (void)onAppWillTerminate:(__unused NSNotification *)note {
+    [self persistSessionTabsAllowEmpty:NO];
+    self.closingAll = YES;
+}
+
+- (void)persistSessionTabsAllowEmpty:(BOOL)allowEmpty {
+    if (!gTabsFilePath || self.closingAll) return;
+
+    // While initial restored tabs are still starting up with blank URLs, do not overwrite session_tabs.json.
+    if (!allowEmpty) {
+        for (CloakTabItem *it in self.items) {
+            if (it.knownURL.length == 0 && it.webView.isLoading) {
+                return;
+            }
+        }
+    }
+
+    NSMutableArray<NSString *> *urls = [NSMutableArray array];
+    NSUInteger activeIdx = 0;
+    BOOL hasExternalWebTab = NO;
+
+    for (CloakTabItem *it in self.items) {
+        NSString *u = it.webView.URL.absoluteString ?: @"";
+        if (!([u hasPrefix:@"http://"] || [u hasPrefix:@"https://"])) {
+            u = it.knownURL ?: @"";
+        }
+        if (!([u hasPrefix:@"http://"] || [u hasPrefix:@"https://"])) {
+            continue;
+        }
+        if (it == self.activeItem) {
+            activeIdx = urls.count;
+        }
+        if (CloakIsManagerStartPageURL(u)) {
+            [urls addObject:@"__CLOAK_START_PAGE__"];
+        } else {
+            [urls addObject:u];
+            hasExternalWebTab = YES;
+        }
+    }
+
+    if (!hasExternalWebTab) {
+        if (allowEmpty) {
+            NSDictionary *emptyPayload = @{ @"urls": @[], @"active_index": @0 };
+            NSData *data = [NSJSONSerialization dataWithJSONObject:emptyPayload options:0 error:nil];
+            [data writeToFile:gTabsFilePath atomically:YES];
+        }
+        return;
+    }
+
+    if (activeIdx >= urls.count) activeIdx = 0;
+    NSDictionary *payload = @{
+        @"urls": urls,
+        @"active_index": @(activeIdx),
+    };
+    NSData *data = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
+    if (data) {
+        [data writeToFile:gTabsFilePath atomically:YES];
+    }
 }
 
 - (BOOL)isManagedBrowserWindow:(NSWindow *)win {
@@ -1099,6 +1185,14 @@ static const void *kTabBarAssocKey = &kTabBarAssocKey;
         win.tabbingMode = NSWindowTabbingModeDisallowed;
     }
 
+    // Wire the red traffic-light close button so clicking 🔴 closes the entire phone browser
+    // in ONE click (while keeping all open tabs saved for the next launch!).
+    NSButton *redCloseBtn = [win standardWindowButton:NSWindowCloseButton];
+    if (redCloseBtn) {
+        redCloseBtn.target = self;
+        redCloseBtn.action = @selector(handleRedCloseButton:);
+    }
+
     NSButton *zoomBtn = [win standardWindowButton:NSWindowZoomButton];
     NSView *tbView = zoomBtn.superview;
     if (!tbView) return;
@@ -1239,6 +1333,7 @@ static const void *kTabBarAssocKey = &kTabBarAssocKey;
     bar.needsDisplay = YES;
     [NSAnimationContext endGrouping];
     self.switching = NO;
+    [self persistSessionTabsAllowEmpty:NO];
 }
 
 - (void)selectTabAtIndex:(NSUInteger)idx {
@@ -1261,6 +1356,7 @@ static const void *kTabBarAssocKey = &kTabBarAssocKey;
     }
     [item stopObserving];
     [self.items removeObjectIdenticalTo:item];
+    [self persistSessionTabsAllowEmpty:YES];
     [self refreshAllBars];
     if (win) {
         [win close];
@@ -1281,16 +1377,25 @@ static const void *kTabBarAssocKey = &kTabBarAssocKey;
         [self.items removeObjectIdenticalTo:item];
         [item.window close];
     }
+    [self persistSessionTabsAllowEmpty:YES];
     [self refreshAllBars];
+}
+
+- (void)handleRedCloseButton:(__unused id)sender {
+    [self closeAllTabs];
 }
 
 - (void)closeAllTabs {
     if (self.closingAll) return;
+    [self persistSessionTabsAllowEmpty:NO];
     self.closingAll = YES;
     NSArray<CloakTabItem *> *snapshot = [self.items copy];
     [self.items removeAllObjects];
     for (CloakTabItem *item in snapshot) {
         [item stopObserving];
+        if (item.window && gOrigOrderOut) {
+            ((void (*)(id, SEL, id))gOrigOrderOut)(item.window, @selector(orderOut:), nil);
+        }
         [item.window close];
     }
 }
@@ -1459,16 +1564,14 @@ static void Swizzled_performClose(NSWindow *self, SEL _cmd, id sender) {
     CloakTabDeck *deck = [CloakTabDeck shared];
     if ([deck isManagedBrowserWindow:self]) {
         NSButton *redCloseBtn = [self standardWindowButton:NSWindowCloseButton];
-        if (sender == redCloseBtn) {
+        if (sender == redCloseBtn || deck.items.count <= 1) {
             [deck closeAllTabs];
             return;
         }
-        if (deck.items.count > 1) {
-            NSUInteger idx = [deck.items indexOfObjectIdenticalTo:[deck itemForWindow:self]];
-            if (idx != NSNotFound) {
-                [deck closeTabAtIndex:idx];
-                return;
-            }
+        NSUInteger idx = [deck.items indexOfObjectIdenticalTo:[deck itemForWindow:self]];
+        if (idx != NSNotFound) {
+            [deck closeTabAtIndex:idx];
+            return;
         }
     }
     ((void (*)(id, SEL, id))gOrigPerformClose)(self, _cmd, sender);
@@ -1761,6 +1864,10 @@ static void CloakWebKitTabsEntry(void) {
         const char *envOriginFile = getenv("CLOAK_ORIGIN_FILE");
         if (envOriginFile && envOriginFile[0]) {
             gOriginFilePath = [NSString stringWithUTF8String:envOriginFile];
+        }
+        const char *envTabsFile = getenv("CLOAK_TABS_FILE");
+        if (envTabsFile && envTabsFile[0]) {
+            gTabsFilePath = [NSString stringWithUTF8String:envTabsFile];
         }
         const char *envBaseW = getenv("CLOAK_BASE_WIDTH");
         if (envBaseW && envBaseW[0]) {
