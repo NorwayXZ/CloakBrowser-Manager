@@ -45,13 +45,31 @@ _INSTALL_LOCK = asyncio.Lock()
 def playwright_browsers_cache_dir() -> Path:
     custom = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "").strip()
     if custom and custom != "0":
-        return Path(custom).expanduser()
+        candidate = Path(custom).expanduser()
+        if ".app/Contents/" not in str(candidate) or candidate.is_dir():
+            return candidate
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Caches" / "ms-playwright"
     if sys.platform == "win32":
         local = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
         return Path(local) / "ms-playwright"
     return Path.home() / ".cache" / "ms-playwright"
+
+
+def activate_playwright_browsers_path() -> Path:
+    """Point ``PLAYWRIGHT_BROWSERS_PATH`` at the writable user cache directory.
+
+    PyInstaller's ``pyi_rth_playwright`` runtime hook sets ``PLAYWRIGHT_BROWSERS_PATH=0``
+    at startup, which makes Playwright's Node driver look inside the read-only ``.app``
+    bundle (``Contents/Resources/playwright/driver/package/.local-browsers``) instead of
+    ``~/Library/Caches/ms-playwright``. Overriding ``"0"`` ensures both automatic WebKit
+    downloads and ``pw.webkit.launch_persistent_context`` use the user cache directory.
+    """
+    cache = playwright_browsers_cache_dir()
+    current = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "").strip()
+    if not current or current == "0" or (".app/Contents/" in current and not Path(current).is_dir()):
+        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(cache)
+    return cache
 
 
 def webkit_bundle_meta() -> dict[str, str]:
@@ -103,6 +121,7 @@ def ensure_webkit_installed_sync() -> Path:
     ``sys.executable -m playwright``, so this works identically inside a frozen
     PyInstaller ``.app`` bundle and in a source checkout.
     """
+    cache = activate_playwright_browsers_path()
     existing = installed_webkit_dir()
     if existing is not None:
         return existing
@@ -110,10 +129,11 @@ def ensure_webkit_installed_sync() -> Path:
     from playwright._impl._driver import compute_driver_executable, get_driver_env
 
     driver_node, driver_cli = compute_driver_executable()
-    logger.info("Apple WebKit runtime not yet cached; installing via bundled Playwright driver...")
+    driver_env = {**get_driver_env(), "PLAYWRIGHT_BROWSERS_PATH": str(cache)}
+    logger.info("Apple WebKit runtime not yet cached; installing via bundled Playwright driver into %s...", cache)
     completed = subprocess.run(
         [str(driver_node), str(driver_cli), "install", "webkit"],
-        env=get_driver_env(),
+        env=driver_env,
         capture_output=True,
         text=True,
         timeout=600,
@@ -128,10 +148,12 @@ def ensure_webkit_installed_sync() -> Path:
 
 
 async def ensure_webkit_installed() -> Path:
+    activate_playwright_browsers_path()
     existing = installed_webkit_dir()
     if existing is not None:
         return existing
     async with _INSTALL_LOCK:
+        activate_playwright_browsers_path()
         existing = installed_webkit_dir()
         if existing is not None:
             return existing
@@ -608,7 +630,8 @@ async def launch_webkit_ios_context(
     """Launch a persistent Apple WebKit iPhone context and configure its tabs."""
     from playwright.async_api import async_playwright
 
-    await ensure_webkit_installed()
+    webkit_bin_dir = await ensure_webkit_installed()
+    activate_playwright_browsers_path()
     filled = ios_persona.with_defaults(profile)
     width = int(filled["screen_width"])
     height = int(filled["screen_height"])
@@ -626,6 +649,8 @@ async def launch_webkit_ios_context(
         "has_touch": True,
         "user_agent": ua,
     }
+    if sys.platform != "win32" and (webkit_bin_dir / "pw_run.sh").is_file():
+        kwargs["executable_path"] = str(webkit_bin_dir / "pw_run.sh")
     if locale:
         kwargs["locale"] = locale
     if timezone:

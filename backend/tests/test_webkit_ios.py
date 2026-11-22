@@ -74,6 +74,17 @@ def test_jsc_worker_patch_preserves_strict_mode_and_four_space_native_code():
     assert b"\\x20\\x20\\x20\\x20[native code]" in patched
 
 
+def test_activate_playwright_browsers_path_overrides_pyinstaller_zero_hook(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", "0")
+    cache = webkit_ios.activate_playwright_browsers_path()
+    assert cache.name == "ms-playwright"
+    assert webkit_ios.os.environ["PLAYWRIGHT_BROWSERS_PATH"] == str(cache)
+
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", "/Applications/CloakBrowser Manager.app/Contents/Resources/.local-browsers")
+    cache2 = webkit_ios.activate_playwright_browsers_path()
+    assert webkit_ios.os.environ["PLAYWRIGHT_BROWSERS_PATH"] == str(cache2)
+
+
 @pytest.mark.asyncio
 @pytest.mark.skipif(sys.platform != "darwin" or not webkit_ios.is_webkit_installed(), reason="requires installed macOS WebKit")
 async def test_live_webkit_ios_passes_full_self_check_and_jsc_stealth(tmp_path: Path):

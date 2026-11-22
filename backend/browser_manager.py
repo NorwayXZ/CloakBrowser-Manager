@@ -3016,21 +3016,27 @@ class BrowserManager:
 
             if browser_engine == "webkit":
                 profile_cookies = _parse_profile_cookies(profile.get("cookies_json"))
-                context = await webkit_ios.launch_webkit_ios_context(
-                    profile=profile,
-                    user_data_dir=user_data_dir,
-                    headless=effective_headless,
-                    browser_proxy=browser_proxy,
-                    locale=resolved_locale,
-                    timezone=resolved_timezone,
-                    geo_coords=geo_coords,
-                    geo_mode=geo_mode,
-                    profile_cookies=profile_cookies,
-                    startup_urls=[],
-                    humanize=bool(profile.get("humanize", False)),
-                    human_preset=str(profile.get("human_preset") or "default"),
-                    on_all_windows_closed=lambda: self.stop(profile_id, reason="关闭了浏览器窗口"),
-                )
+                try:
+                    context = await webkit_ios.launch_webkit_ios_context(
+                        profile=profile,
+                        user_data_dir=user_data_dir,
+                        headless=effective_headless,
+                        browser_proxy=browser_proxy,
+                        locale=resolved_locale,
+                        timezone=resolved_timezone,
+                        geo_coords=geo_coords,
+                        geo_mode=geo_mode,
+                        profile_cookies=profile_cookies,
+                        startup_urls=[],
+                        humanize=bool(profile.get("humanize", False)),
+                        human_preset=str(profile.get("human_preset") or "default"),
+                        on_all_windows_closed=lambda: self.stop(profile_id, reason="关闭了浏览器窗口"),
+                    )
+                except BrowserLaunchError:
+                    raise
+                except Exception as exc:
+                    detail = str(exc).strip().splitlines()[0] if str(exc).strip() else type(exc).__name__
+                    raise BrowserLaunchError(f"启动苹果 WebKit 浏览器失败：{detail}") from exc
             elif use_manual_system_chrome or use_manual_cloakbrowser:
                 if _has_restorable_chrome_session(user_data_dir):
                     # Keep restored tabs and add one local report tab so manual,
