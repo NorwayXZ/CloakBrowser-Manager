@@ -354,6 +354,51 @@ _PAGE_TEMPLATE = r"""
     }
   }
 
+  // Playwright attaches WebKit's InspectorConsoleAgent, which eagerly evaluates getters on
+  // objects passed to console.debug/log/dir/table (triggering FingerprintJS developer_tools: true).
+  // Sanitize non-primitive arguments before forwarding to WebKit's native console methods.
+  if (typeof console === 'object' && console !== null) {
+    for (const name of ['debug', 'log', 'info', 'dir', 'dirxml', 'table', 'trace', 'group', 'groupCollapsed']) {
+      try {
+        const owner = Object.getOwnPropertyDescriptor(console, name) ? console : Object.getPrototypeOf(console);
+        if (!owner) continue;
+        const desc = Object.getOwnPropertyDescriptor(owner, name);
+        if (!desc || typeof desc.value !== 'function') continue;
+        const origFn = desc.value;
+        const wrapped = mark({
+          [name]() {
+            const safe = [];
+            for (let i = 0; i < arguments.length; i++) {
+              const a = arguments[i];
+              safe.push((a !== null && (typeof a === 'object' || typeof a === 'function')) ? '' : a);
+            }
+            return origFn.apply(this, safe);
+          }
+        }[name], name, name);
+        Object.defineProperty(owner, name, {
+          value: wrapped, writable: desc.writable, enumerable: desc.enumerable, configurable: desc.configurable,
+        });
+      } catch (_) {}
+    }
+  }
+
+  // Playwright's macOS WebKit MiniBrowser has no multi-tab bar, so <a target="_blank"> spawns
+  // extra floating windows. Keep normal unmodified taps inside the single phone window.
+  if (cfg.sameWindowLinks && typeof document === 'object' && document !== null) {
+    try {
+      document.addEventListener('click', (e) => {
+        try {
+          if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+          const el = e.target && typeof e.target.closest === 'function' ? e.target.closest('a[target]') : null;
+          if (!el) return;
+          if (String(el.getAttribute('target') || '').toLowerCase() === '_blank' && el.href && !/^javascript:/i.test(el.href)) {
+            el.removeAttribute('target');
+          }
+        } catch (_) {}
+      }, true);
+    } catch (_) {}
+  }
+
   // Prevent unproxied UDP STUN leaks when the profile routes through a proxy.
   if (cfg.hasProxy && typeof RTCPeerConnection === 'function') {
     const OrigRTC = RTCPeerConnection;
@@ -556,7 +601,7 @@ def patch_webkit_worker_source(source: bytes, profile: dict[str, Any]) -> bytes:
     return source[:end] + separator + patch + source[end:]
 
 
-def init_script(profile: dict[str, Any], *, has_proxy: bool = False) -> str:
+def init_script(profile: dict[str, Any], *, has_proxy: bool = False, same_window_links: bool = False) -> str:
     filled = ios_persona.with_defaults(profile)
     options = parse_fingerprint_options(filled)
     seed = filled.get("fingerprint_seed")
@@ -566,6 +611,7 @@ def init_script(profile: dict[str, Any], *, has_proxy: bool = False) -> str:
         "hc": int(filled.get("hardware_concurrency") or ios_persona.HARDWARE_CONCURRENCY),
         "maxTouchPoints": ios_persona.MAX_TOUCH_POINTS,
         "hasProxy": bool(has_proxy),
+        "sameWindowLinks": bool(same_window_links),
         "noise": options.noise is not False and isinstance(seed, int),
         "seed": int(seed) if isinstance(seed, int) else None,
     }
@@ -671,12 +717,31 @@ async def launch_webkit_ios_context(
     closing = False
     try:
         context = await pw.webkit.launch_persistent_context(str(webkit_dir), **kwargs)
-        script = init_script(filled, has_proxy=bool(browser_proxy))
+        script = init_script(filled, has_proxy=bool(browser_proxy), same_window_links=not headless)
         await context.add_init_script(script)
         await install_worker_route(context, filled)
+        effective_webkit_locale: str | None = None
         for existing_page in list(context.pages):
             with suppress(Exception):
                 await existing_page.evaluate(script)
+                if not effective_webkit_locale:
+                    lang = await existing_page.evaluate("navigator.language")
+                    if isinstance(lang, str) and lang.strip():
+                        effective_webkit_locale = lang.strip()
+        if not effective_webkit_locale and locale:
+            temp_page = None
+            try:
+                temp_page = await context.new_page()
+                lang = await temp_page.evaluate("navigator.language")
+                if isinstance(lang, str) and lang.strip():
+                    effective_webkit_locale = lang.strip()
+            except Exception:
+                pass
+            finally:
+                if temp_page is not None and headless:
+                    with suppress(Exception):
+                        await temp_page.close()
+        context._cloak_effective_locale = effective_webkit_locale or locale
 
         if profile_cookies:
             try:

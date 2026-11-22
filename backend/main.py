@@ -2826,11 +2826,12 @@ START_PAGE_LINK_GROUPS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
 )
 
 
-def _start_page_links_html() -> str:
+def _start_page_links_html(*, same_window: bool = False) -> str:
     sections = []
+    target_attr = "" if same_window else ' target="_blank" rel="noreferrer"'
     for title, links in START_PAGE_LINK_GROUPS:
         anchors = "\n".join(
-            f'        <a href="{html.escape(url)}" target="_blank" rel="noreferrer">{html.escape(name)}</a>'
+            f'        <a href="{html.escape(url)}"{target_attr}>{html.escape(name)}</a>'
             for name, url in links
         )
         sections.append(
@@ -2870,9 +2871,8 @@ async def profile_start_page(profile_id: str, request: Request):
     ip_timezone = html.escape(str(geo.get("timezone") or "未获取"))
     browser_timezone = html.escape(str(effective_timezone))
     browser_locale = html.escape(str(effective_locale))
-    browser_engine = html.escape(
-        str(running.browser_engine if running else profile.get("browser_engine") or "auto")
-    )
+    raw_engine = str(running.browser_engine if running else profile.get("browser_engine") or "auto")
+    browser_engine = html.escape(raw_engine)
     proxy_state = "已配置" if profile.get("proxy") else "直连（本地网络）"
     status = "运行中" if running else "未启动"
     source = html.escape(str(geo.get("source") or "Manager"))
@@ -2882,7 +2882,7 @@ async def profile_start_page(profile_id: str, request: Request):
         os.environ.get("CLOAKBROWSER_NETWORK_PROBE_URL")
         or DEFAULT_NETWORK_PROBE_URL
     )
-    links_html = _start_page_links_html()
+    links_html = _start_page_links_html(same_window=(raw_engine == "webkit"))
 
     return HTMLResponse(
         f"""<!doctype html>

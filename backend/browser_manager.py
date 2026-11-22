@@ -3037,6 +3037,8 @@ class BrowserManager:
                 except Exception as exc:
                     detail = str(exc).strip().splitlines()[0] if str(exc).strip() else type(exc).__name__
                     raise BrowserLaunchError(f"启动苹果 WebKit 浏览器失败：{detail}") from exc
+                if not profile.get("locale"):
+                    resolved_locale = getattr(context, "_cloak_effective_locale", None) or resolved_locale
             elif use_manual_system_chrome or use_manual_cloakbrowser:
                 if _has_restorable_chrome_session(user_data_dir):
                     # Keep restored tabs and add one local report tab so manual,

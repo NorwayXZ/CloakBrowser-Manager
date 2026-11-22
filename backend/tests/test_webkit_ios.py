@@ -168,6 +168,12 @@ async def test_live_webkit_ios_passes_full_self_check_and_jsc_stealth(tmp_path: 
                     w.onmessage = e => { w.terminate(); resolve(e.data); };
                     w.onerror = e => reject(e.message);
                   });
+                  let devtoolsGetterFired = false;
+                  const trap = {};
+                  Object.defineProperty(trap, 'id', { get() { devtoolsGetterFired = true; return 'x'; } });
+                  console.debug(trap);
+                  console.log(trap);
+                  console.dir(trap);
                   return {
                     evalLen: eval.toString().length,
                     hasChrome: 'chrome' in window,
@@ -177,6 +183,8 @@ async def test_live_webkit_ios_passes_full_self_check_and_jsc_stealth(tmp_path: 
                     wdStr: String(wdGet),
                     wdHasProto: Object.prototype.hasOwnProperty.call(wdGet, 'prototype'),
                     receiverErr,
+                    devtoolsGetterFired,
+                    consoleDebugStr: String(console.debug),
                     pf: navigator.platform,
                     mtp: navigator.maxTouchPoints,
                     hc: navigator.hardwareConcurrency,
@@ -198,6 +206,8 @@ async def test_live_webkit_ios_passes_full_self_check_and_jsc_stealth(tmp_path: 
             assert probe["wdStr"] == "function webdriver() {\n    [native code]\n}"
             assert probe["wdHasProto"] is False
             assert probe["receiverErr"] == "The Navigator.webdriver getter can only be used on instances of Navigator"
+            assert probe["devtoolsGetterFired"] is False
+            assert probe["consoleDebugStr"] == "function debug() {\n    [native code]\n}"
             assert probe["pf"] == "iPhone"
             assert probe["mtp"] == 5
             assert probe["hc"] == 6
