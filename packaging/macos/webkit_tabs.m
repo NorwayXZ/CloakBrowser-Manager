@@ -24,6 +24,7 @@
 
 static NSString *gProfileName = @"iPhone";
 static NSString *gStartURL = @"about:blank";
+static NSString *gOriginFilePath = nil;
 static NSMutableDictionary<NSString *, NSImage *> *gHostFavicons = nil;
 
 static IMP gOrigMakeKeyAndOrderFront = NULL;
@@ -32,6 +33,31 @@ static IMP gOrigOrderOut = NULL;
 static IMP gOrigPerformClose = NULL;
 static IMP gOrigSendEvent = NULL;
 static IMP gOrigSetTitle = NULL;
+static IMP gOrigSetFrameDisplay = NULL;
+static IMP gOrigSetFrameDisplayAnimate = NULL;
+static IMP gOrigSetFrameOrigin = NULL;
+static IMP gOrigSetFrameTopLeft = NULL;
+static IMP gOrigCascadeTopLeft = NULL;
+static BOOL gInProgrammaticFrameCall = NO;
+
+static void CloakPersistOrigin(NSPoint pt) {
+    if (!gOriginFilePath) return;
+    NSString *s = [NSString stringWithFormat:@"%.1f,%.1f\n", pt.x, pt.y];
+    [s writeToFile:gOriginFilePath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+}
+
+static BOOL CloakLoadSavedOrigin(NSPoint *outPt) {
+    if (!gOriginFilePath) return NO;
+    NSString *s = [NSString stringWithContentsOfFile:gOriginFilePath encoding:NSUTF8StringEncoding error:nil];
+    if (!s || s.length == 0) return NO;
+    NSArray<NSString *> *parts = [[s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] componentsSeparatedByString:@","];
+    if (parts.count != 2) return NO;
+    CGFloat x = [parts[0] doubleValue];
+    CGFloat y = [parts[1] doubleValue];
+    if (!isfinite(x) || !isfinite(y)) return NO;
+    if (outPt) *outPt = NSMakePoint(x, y);
+    return YES;
+}
 
 // Extract a meaningful brand initial from a URL host (e.g. demo.fingerprint.com -> "F").
 static NSString *CloakBrandInitialForURL(NSURL *url) {
@@ -91,6 +117,8 @@ static NSColor *CloakBrandColorForURL(NSURL *url) {
 @property (nonatomic, weak) CloakTabItem *activeItem;
 @property (nonatomic, assign) NSRect sharedFrame;
 @property (nonatomic, assign) BOOL hasSharedFrame;
+@property (nonatomic, assign) BOOL hasSettledSize;
+@property (nonatomic, assign) BOOL userDragging;
 @property (nonatomic, assign) BOOL switching;
 @property (nonatomic, assign) BOOL closingAll;
 
@@ -558,7 +586,16 @@ static NSColor *CloakBrandColorForURL(NSURL *url) {
     }
 
     // Clicking empty space or the profile badge drags the window naturally.
+    CloakTabDeck *deck = [CloakTabDeck shared];
+    deck.userDragging = YES;
     [self.window performWindowDragWithEvent:event];
+    if (self.window) {
+        deck.sharedFrame = self.window.frame;
+        deck.hasSharedFrame = YES;
+        deck.hasSettledSize = YES;
+        CloakPersistOrigin(deck.sharedFrame.origin);
+    }
+    deck.userDragging = NO;
 }
 
 - (void)otherMouseDown:(NSEvent *)event {
@@ -683,6 +720,11 @@ static const void *kTabBarAssocKey = &kTabBarAssocKey;
     self = [super init];
     if (self) {
         _items = [NSMutableArray array];
+        NSPoint savedPt;
+        if (CloakLoadSavedOrigin(&savedPt)) {
+            _sharedFrame = NSMakeRect(savedPt.x, savedPt.y, 393.0, 921.0);
+            _hasSharedFrame = YES;
+        }
     }
     return self;
 }
@@ -704,6 +746,7 @@ static const void *kTabBarAssocKey = &kTabBarAssocKey;
 
 - (void)installTabBarOnWindow:(NSWindow *)win {
     win.animationBehavior = NSWindowAnimationBehaviorNone;
+    [win setFrameAutosaveName:@""];
     win.titleVisibility = NSWindowTitleHidden;
     win.representedURL = nil;
     if (@available(macOS 10.12, *)) {
@@ -749,6 +792,9 @@ static const void *kTabBarAssocKey = &kTabBarAssocKey;
     CloakTabItem *item = [[CloakTabItem alloc] init];
     item.window = win;
     id wc = win.windowController;
+    if ([wc isKindOfClass:[NSWindowController class]]) {
+        [(NSWindowController *)wc setShouldCascadeWindows:NO];
+    }
     if ([wc respondsToSelector:@selector(webView)]) {
         WKWebView *wv = [wc webView];
         item.webView = wv;
@@ -763,11 +809,40 @@ static const void *kTabBarAssocKey = &kTabBarAssocKey;
     [self.items addObject:item];
     [self installTabBarOnWindow:win];
 
-    if (!self.hasSharedFrame) {
-        self.sharedFrame = win.frame;
-        self.hasSharedFrame = YES;
+    if (self.items.count == 1) {
+        if (!self.hasSharedFrame) {
+            self.sharedFrame = win.frame;
+            self.hasSharedFrame = YES;
+        } else {
+            NSRect cur = win.frame;
+            cur.origin = self.sharedFrame.origin;
+            self.sharedFrame = cur;
+            self.switching = YES;
+            if (gOrigSetFrameDisplay) {
+                ((void (*)(id, SEL, NSRect, BOOL))gOrigSetFrameDisplay)(win, @selector(setFrame:display:), cur, NO);
+            } else {
+                [win setFrame:cur display:NO];
+            }
+            self.switching = NO;
+        }
+        __weak CloakTabDeck *weakSelf = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            CloakTabDeck *strongSelf = weakSelf;
+            if (!strongSelf) return;
+            if (strongSelf.activeItem.window) {
+                strongSelf.sharedFrame = strongSelf.activeItem.window.frame;
+            }
+            strongSelf.hasSettledSize = YES;
+        });
     } else {
-        [win setFrame:self.sharedFrame display:NO];
+        self.hasSettledSize = YES;
+        self.switching = YES;
+        if (gOrigSetFrameDisplay) {
+            ((void (*)(id, SEL, NSRect, BOOL))gOrigSetFrameDisplay)(win, @selector(setFrame:display:), self.sharedFrame, NO);
+        } else {
+            [win setFrame:self.sharedFrame display:NO];
+        }
+        self.switching = NO;
     }
 
     NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
@@ -787,16 +862,16 @@ static const void *kTabBarAssocKey = &kTabBarAssocKey;
     if (!item) return;
 
     NSWindow *prevWin = self.activeItem.window;
-    if (prevWin && prevWin != win) {
-        self.sharedFrame = prevWin.frame;
-        self.hasSharedFrame = YES;
-    }
 
     self.switching = YES;
     [NSAnimationContext beginGrouping];
     [NSAnimationContext currentContext].duration = 0.0;
     if (self.hasSharedFrame) {
-        [win setFrame:self.sharedFrame display:YES];
+        if (gOrigSetFrameDisplay) {
+            ((void (*)(id, SEL, NSRect, BOOL))gOrigSetFrameDisplay)(win, @selector(setFrame:display:), self.sharedFrame, YES);
+        } else {
+            [win setFrame:self.sharedFrame display:YES];
+        }
     }
     self.activeItem = item;
     [self installTabBarOnWindow:win];
@@ -885,13 +960,20 @@ static const void *kTabBarAssocKey = &kTabBarAssocKey;
 }
 
 - (void)onWindowMovedOrResized:(NSNotification *)note {
-    if (self.switching) return;
+    if (self.switching || gInProgrammaticFrameCall) return;
     NSWindow *win = note.object;
-    if (win == self.activeItem.window && win.isVisible) {
-        self.sharedFrame = win.frame;
-        self.hasSharedFrame = YES;
-        [self installTabBarOnWindow:win];
+    if (win != self.activeItem.window || !win.isVisible) return;
+    // WindowServer user drags bypass -[NSWindow setFrame:*] and post NSWindowDidMoveNotification directly.
+    // Preserve our settled phone size while recording the user's new screen origin.
+    NSRect cur = win.frame;
+    if (self.hasSettledSize) {
+        self.sharedFrame = NSMakeRect(cur.origin.x, cur.origin.y, self.sharedFrame.size.width, self.sharedFrame.size.height);
+    } else {
+        self.sharedFrame = cur;
     }
+    self.hasSharedFrame = YES;
+    CloakPersistOrigin(self.sharedFrame.origin);
+    [self installTabBarOnWindow:win];
 }
 
 - (void)onWindowWillClose:(NSNotification *)note {
@@ -1071,6 +1153,89 @@ static void Swizzled_sendEvent(NSWindow *self, SEL _cmd, NSEvent *event) {
     ((void (*)(id, SEL, NSEvent *))gOrigSendEvent)(self, _cmd, event);
 }
 
+static NSRect CloakCoerceWindowFrame(NSWindow *win, NSRect proposed) {
+    CloakTabDeck *deck = [CloakTabDeck shared];
+    if (deck.switching || ![deck isManagedBrowserWindow:win]) {
+        return proposed;
+    }
+    BOOL leftMouseDown = ([NSEvent pressedMouseButtons] & 1) != 0;
+    if ((deck.userDragging || leftMouseDown) && win == deck.activeItem.window && win.isVisible) {
+        deck.sharedFrame = proposed;
+        deck.hasSharedFrame = YES;
+        deck.hasSettledSize = YES;
+        return proposed;
+    }
+    if (!deck.hasSharedFrame) {
+        deck.sharedFrame = proposed;
+        deck.hasSharedFrame = YES;
+        return proposed;
+    }
+    if (!deck.hasSettledSize) {
+        // Tab 1 initial viewport sizing: keep top-left corner fixed while height settles to phone screen.
+        CGFloat topY = NSMaxY(deck.sharedFrame);
+        NSRect locked = NSMakeRect(
+            deck.sharedFrame.origin.x,
+            topY - proposed.size.height,
+            proposed.size.width,
+            proposed.size.height
+        );
+        deck.sharedFrame = locked;
+        return locked;
+    }
+    return deck.sharedFrame;
+}
+
+static void Swizzled_setFrameDisplay(NSWindow *self, SEL _cmd, NSRect frameRect, BOOL flag) {
+    NSRect locked = CloakCoerceWindowFrame(self, frameRect);
+    BOOL prev = gInProgrammaticFrameCall;
+    gInProgrammaticFrameCall = YES;
+    ((void (*)(id, SEL, NSRect, BOOL))gOrigSetFrameDisplay)(self, _cmd, locked, flag);
+    gInProgrammaticFrameCall = prev;
+}
+
+static void Swizzled_setFrameDisplayAnimate(NSWindow *self, SEL _cmd, NSRect frameRect, BOOL displayFlag, BOOL animateFlag) {
+    NSRect locked = CloakCoerceWindowFrame(self, frameRect);
+    BOOL prev = gInProgrammaticFrameCall;
+    gInProgrammaticFrameCall = YES;
+    ((void (*)(id, SEL, NSRect, BOOL, BOOL))gOrigSetFrameDisplayAnimate)(self, _cmd, locked, displayFlag, NO);
+    gInProgrammaticFrameCall = prev;
+}
+
+static void Swizzled_setFrameOrigin(NSWindow *self, SEL _cmd, NSPoint point) {
+    CloakTabDeck *deck = [CloakTabDeck shared];
+    BOOL leftMouseDown = ([NSEvent pressedMouseButtons] & 1) != 0;
+    if (!deck.switching && !(deck.userDragging || leftMouseDown) && deck.hasSharedFrame && [deck isManagedBrowserWindow:self]) {
+        point = deck.sharedFrame.origin;
+    }
+    BOOL prev = gInProgrammaticFrameCall;
+    gInProgrammaticFrameCall = YES;
+    ((void (*)(id, SEL, NSPoint))gOrigSetFrameOrigin)(self, _cmd, point);
+    gInProgrammaticFrameCall = prev;
+}
+
+static void Swizzled_setFrameTopLeftPoint(NSWindow *self, SEL _cmd, NSPoint point) {
+    CloakTabDeck *deck = [CloakTabDeck shared];
+    BOOL leftMouseDown = ([NSEvent pressedMouseButtons] & 1) != 0;
+    if (!deck.switching && !(deck.userDragging || leftMouseDown) && deck.hasSharedFrame && [deck isManagedBrowserWindow:self]) {
+        point = NSMakePoint(deck.sharedFrame.origin.x, NSMaxY(deck.sharedFrame));
+    }
+    BOOL prev = gInProgrammaticFrameCall;
+    gInProgrammaticFrameCall = YES;
+    ((void (*)(id, SEL, NSPoint))gOrigSetFrameTopLeft)(self, _cmd, point);
+    gInProgrammaticFrameCall = prev;
+}
+
+static NSPoint Swizzled_cascadeTopLeftFromPoint(NSWindow *self, SEL _cmd, NSPoint topLeftPoint) {
+    CloakTabDeck *deck = [CloakTabDeck shared];
+    if ([deck isManagedBrowserWindow:self]) {
+        if (deck.hasSharedFrame) {
+            return NSMakePoint(deck.sharedFrame.origin.x, NSMaxY(deck.sharedFrame));
+        }
+        return topLeftPoint;
+    }
+    return ((NSPoint (*)(id, SEL, NSPoint))gOrigCascadeTopLeft)(self, _cmd, topLeftPoint);
+}
+
 static void Swizzled_setTitle(NSWindow *self, SEL _cmd, NSString *title) {
     CloakTabDeck *deck = [CloakTabDeck shared];
     if ([deck isManagedBrowserWindow:self]) {
@@ -1104,6 +1269,21 @@ static void InstallCloakWebKitTabs(void) {
 
     Method mTitle = class_getInstanceMethod(winCls, @selector(setTitle:));
     if (mTitle) gOrigSetTitle = method_setImplementation(mTitle, (IMP)Swizzled_setTitle);
+
+    Method mFrameDisp = class_getInstanceMethod(winCls, @selector(setFrame:display:));
+    if (mFrameDisp) gOrigSetFrameDisplay = method_setImplementation(mFrameDisp, (IMP)Swizzled_setFrameDisplay);
+
+    Method mFrameAnim = class_getInstanceMethod(winCls, @selector(setFrame:display:animate:));
+    if (mFrameAnim) gOrigSetFrameDisplayAnimate = method_setImplementation(mFrameAnim, (IMP)Swizzled_setFrameDisplayAnimate);
+
+    Method mOrigin = class_getInstanceMethod(winCls, @selector(setFrameOrigin:));
+    if (mOrigin) gOrigSetFrameOrigin = method_setImplementation(mOrigin, (IMP)Swizzled_setFrameOrigin);
+
+    Method mTopLeft = class_getInstanceMethod(winCls, @selector(setFrameTopLeftPoint:));
+    if (mTopLeft) gOrigSetFrameTopLeft = method_setImplementation(mTopLeft, (IMP)Swizzled_setFrameTopLeftPoint);
+
+    Method mCascade = class_getInstanceMethod(winCls, @selector(cascadeTopLeftFromPoint:));
+    if (mCascade) gOrigCascadeTopLeft = method_setImplementation(mCascade, (IMP)Swizzled_cascadeTopLeftFromPoint);
 }
 
 __attribute__((constructor))
@@ -1122,6 +1302,16 @@ static void CloakWebKitTabsEntry(void) {
         const char *envStart = getenv("CLOAK_START_URL");
         if (envStart && envStart[0]) {
             gStartURL = [NSString stringWithUTF8String:envStart] ?: @"about:blank";
+        }
+        const char *envOriginFile = getenv("CLOAK_ORIGIN_FILE");
+        if (envOriginFile && envOriginFile[0]) {
+            gOriginFilePath = [NSString stringWithUTF8String:envOriginFile];
+        }
+        NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
+        for (NSString *key in [[ud dictionaryRepresentation] allKeys]) {
+            if ([key hasPrefix:@"NSWindow Frame "]) {
+                [ud removeObjectForKey:key];
+            }
         }
         gHostFavicons = [NSMutableDictionary dictionary];
         InstallCloakWebKitTabs();

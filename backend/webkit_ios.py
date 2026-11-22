@@ -215,10 +215,12 @@ def _write_macos_headed_launcher(
     if not pw_bin.is_file():
         return None
     launcher = webkit_dir / "launch_webkit_ui.sh"
+    origin_file = webkit_dir / "window_origin.txt"
     script = (
         "#!/bin/bash\n"
         f"export CLOAK_PROFILE_NAME={shlex.quote(profile_name or 'iPhone')}\n"
         f"export CLOAK_START_URL={shlex.quote(start_url or 'about:blank')}\n"
+        f"export CLOAK_ORIGIN_FILE={shlex.quote(str(origin_file))}\n"
         f"export DYLD_FRAMEWORK_PATH={shlex.quote(str(webkit_bin_dir))}\n"
         f"export DYLD_LIBRARY_PATH={shlex.quote(str(webkit_bin_dir))}\n"
         f"export DYLD_INSERT_LIBRARIES={shlex.quote(str(dylib_path))}\n"
