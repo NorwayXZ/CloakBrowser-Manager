@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   applyDeviceProfile,
   getDeviceProfile,
+  getDeviceProfileFamiliesForExactPlatform,
   getDeviceProfileFamiliesForPlatform,
+  getDeviceProfilesForExactPlatform,
   getDeviceProfilesForPlatform,
 } from "./deviceProfiles";
-import { buildPayload, changeDevice, createDefaultForm, initialState, platformLabel, randomizeDevice, screenFollowsDisplay, selectedDevice } from "./model";
+import { buildPayload, changeDevice, changePlatform, createDefaultForm, initialState, platformLabel, randomizeDevice, screenFollowsDisplay, selectedDevice } from "./model";
 import { deviceText } from "../profiles/format";
 import type { Profile } from "../profiles/types";
 
@@ -95,5 +97,23 @@ describe("an iPhone profile in the editor", () => {
   it("is listed by its model name", () => {
     const stored = { id: "p1", name: "x", platform: "ios", device_profile: "iphone_16_pro" } as unknown as Profile;
     expect(deviceText(stored)).toBe("iPhone 16 Pro");
+  });
+
+  it("separates macOS desktop presets from iOS phone presets when OS is switched", () => {
+    expect(getDeviceProfileFamiliesForExactPlatform("macos")).not.toContain("iPhone");
+    expect(getDeviceProfilesForExactPlatform("macos").every((p) => p.platform === "macos")).toBe(true);
+    expect(getDeviceProfileFamiliesForExactPlatform("ios")).toEqual(["iPhone"]);
+    expect(getDeviceProfilesForExactPlatform("ios").every((p) => p.platform === "ios")).toBe(true);
+
+    const start = createDefaultForm("macos");
+    const iosForm = changePlatform({ ...start, fingerprint_options: { ...start.fingerprint_options, brand: "Edge", platform_version: "15.6.0" } }, "ios", "macos");
+    expect(iosForm).toMatchObject({ platform: "ios", device_profile: "iphone_15", browser_engine: "cloakbrowser", screen_width: 393, screen_height: 852 });
+    expect(iosForm.fingerprint_options?.brand).toBeNull();
+    expect(iosForm.fingerprint_options?.platform_version).toBeNull();
+    expect(iosForm.fingerprint_options?.noise).toBeNull();
+
+    const backToMac = changePlatform(iosForm, "macos", "macos");
+    expect(backToMac).toMatchObject({ platform: "macos", device_profile: "native_macos", user_agent: null });
+    expect(backToMac.fingerprint_options?.noise).toBe(false);
   });
 });

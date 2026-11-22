@@ -71,9 +71,9 @@ def build_fingerprint_option_args(profile: dict[str, Any]) -> list[str]:
     is_ios = profile.get("platform") == "ios"
     args: list[str] = []
 
-    if options.brand:
+    if options.brand and not is_ios:
         args.append(f"--fingerprint-brand={options.brand}")
-    if options.brand_version:
+    if options.brand_version and not is_ios:
         args.append(f"--fingerprint-brand-version={options.brand_version}")
     if options.platform_version and not is_ios:  # an iPhone has no Client Hints to carry a version
         args.append(f"--fingerprint-platform-version={options.platform_version}")

@@ -337,3 +337,46 @@ def test_saved_panel_theme_is_system_when_unreadable_or_unknown():
     port = unused.getsockname()[1]
     unused.close()
     assert saved_panel_theme(f"http://127.0.0.1:{port}", timeout=0.2) == "system"
+
+
+def test_fetch_latest_release_falls_back_to_web_on_rate_limit(monkeypatch):
+    import io
+    import urllib.error
+    import backend.desktop_app as da
+
+    sha = "a" * 64
+
+    class FakeResp(io.BytesIO):
+        def __init__(self, body: bytes, url: str):
+            super().__init__(body)
+            self._url = url
+
+        def geturl(self) -> str:
+            return self._url
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            self.close()
+
+    def fake_urlopen(req, **_kw):
+        url = req.full_url
+        if "api.github.com" in url:
+            raise urllib.error.HTTPError(url, 403, "rate limit exceeded", {}, None)
+        if url.endswith("/releases/latest"):
+            return FakeResp(b"", "https://github.com/NorwayXZ/CloakBrowser-Manager/releases/tag/v0.10.30")
+        if url.endswith("/SHA256SUMS.txt"):
+            return FakeResp(f"{sha}  CloakBrowser-Manager-0.10.30-arm64.dmg\n".encode(), url)
+        raise AssertionError(f"unexpected url: {url}")
+
+    monkeypatch.setattr(da.urllib.request, "urlopen", fake_urlopen)
+    release = da.fetch_latest_release()
+    assert release is not None
+    assert release["tag_name"] == "v0.10.30"
+    assert release["assets"] == [{
+        "name": "CloakBrowser-Manager-0.10.30-arm64.dmg",
+        "browser_download_url": "https://github.com/NorwayXZ/CloakBrowser-Manager/releases/download/v0.10.30/CloakBrowser-Manager-0.10.30-arm64.dmg",
+        "digest": f"sha256:{sha}",
+        "size": 0,
+    }]

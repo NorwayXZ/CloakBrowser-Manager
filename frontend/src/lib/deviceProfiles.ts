@@ -356,6 +356,17 @@ export function getDeviceProfileFamiliesForPlatform(platform: DevicePlatform): D
   ));
 }
 
+/** Only the presets belonging to one chosen OS (e.g. macOS desktops vs iOS phones). */
+export function getDeviceProfilesForExactPlatform(platform: DevicePlatform): DeviceProfilePreset[] {
+  return DEVICE_PROFILES.filter((profile) => profile.platform === platform);
+}
+
+export function getDeviceProfileFamiliesForExactPlatform(platform: DevicePlatform): DeviceProfileFamily[] {
+  return DEVICE_PROFILE_FAMILIES.filter((family) => (
+    DEVICE_PROFILES.some((profile) => profile.platform === platform && profile.family === family)
+  ));
+}
+
 export function randomFingerprintSeed() {
   return Math.floor(Math.random() * 90000) + 10000;
 }

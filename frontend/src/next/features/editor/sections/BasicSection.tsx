@@ -1,9 +1,9 @@
 import { Download, FileDown, Plus } from "lucide-react";
 import { forwardRef, useState } from "react";
-import { Banner, Button, FormField, Hint, Input, Section, Select, Textarea } from "../../../ui";
+import { Banner, Button, FormField, Hint, Input, Section, Segmented, Select, Textarea } from "../../../ui";
 import type { ProfileGroup } from "../../profiles/types";
 import { downloadCookieExport, editorApi } from "../api";
-import { getDeviceProfileFamiliesForPlatform, getDeviceProfilesForPlatform, getDevicePlatformForHost } from "../deviceProfiles";
+import { getDeviceProfileFamiliesForExactPlatform, getDeviceProfilesForExactPlatform, getDevicePlatformForHost } from "../deviceProfiles";
 import { ACCOUNT_PLATFORM_OPTIONS, defaultCookieDomain, normalizeFormEngine, platformLabel, selectedDevice } from "../model";
 import type { CookieExportFormat, HostOS } from "../types";
 import type { Editor } from "../useEditor";
@@ -27,11 +27,13 @@ export const BasicSection = forwardRef<HTMLInputElement, {
   const { form, set } = editor;
   const engine = normalizeFormEngine(form.browser_engine);
   const platform = getDevicePlatformForHost(hostOS);
-  const presets = getDeviceProfilesForPlatform(platform);
+  const ios = form.platform === "ios";
+  const selectedPlatform = ios ? "ios" : platform;
+  const presets = getDeviceProfilesForExactPlatform(selectedPlatform);
+  const families = getDeviceProfileFamiliesForExactPlatform(selectedPlatform);
   const device = selectedDevice(form, hostOS);
   // On a Mac the kernel derives a whole Apple device from the seed and
   // ignores the template picked here.
-  const ios = form.platform === "ios";
   const seedDerived = hostOS === "macos" && platform === "macos" && engine === "cloakbrowser" && !ios;
 
   return (
@@ -81,26 +83,42 @@ export const BasicSection = forwardRef<HTMLInputElement, {
             <option value="cloakbrowser">防检测浏览器（CloakBrowser）</option>
           </Select>
         </FormField>
-        <div className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-fg">操作系统</span>
-          <span className="inline-flex h-8 w-fit items-center rounded border border-border bg-surface-2 px-2.5 text-sm text-fg">{platformLabel(ios ? "ios" : platform)}</span>
-          <span className="text-xs text-fg-3">
-            {ios
-              ? "iPhone 外观版只改外观（UA、屏幕、触摸、像素密度、苹果显卡名）；底层引擎仍是 Chrome，必须用防检测浏览器，并且总是以受控方式启动。"
-              : "按当前电脑锁定：只提供同系统的设备型号，避免跨系统设备型号互相矛盾。"}
-          </span>
-        </div>
+        <FormField
+          label="操作系统"
+          description={
+            platform === "macos"
+              ? ios
+                ? "已切换到 iPhone 手机浏览器环境（竖屏尺寸、多点触控、iOS Safari 标识与 Apple GPU）；外观层完整伪装为 iPhone，底层运行在防检测内核上。"
+                : "当前为 Mac 桌面浏览器环境；需要手机环境时直接切到「iOS（iPhone）」，下方会自动切换为全套手机配置。"
+              : "按当前电脑锁定：只提供同系统的设备型号，避免跨系统设备型号互相矛盾。"
+          }
+        >
+          {platform === "macos" ? (
+            <Segmented
+              label="操作系统"
+              value={ios ? "ios" : "macos"}
+              options={[
+                ["macos", "macOS（电脑）"],
+                ["ios", "iOS（iPhone 手机）"],
+              ]}
+              onChange={(next) => editor.changePlatform(next)}
+            />
+          ) : (
+            <span className="inline-flex h-8 w-fit items-center rounded border border-border bg-surface-2 px-2.5 text-sm text-fg">{platformLabel(platform)}</span>
+          )}
+        </FormField>
         <FormField
           label="设备型号"
-          
           description={
-            seedDerived
-              ? `在这台 Mac 上，内核按稳定种子生成整套 Apple 设备（GPU、核心数、内存），这里的选择只作记录、不会生效。网站实际看到：${seedDeviceLabel ?? "首次打开后显示"}。`
-              : "一键套用同平台的屏幕、CPU、GPU 组合；稳定原生下主要用作记录，防检测浏览器会写入可控参数。"
+            ios
+              ? "选择具体的 iPhone 手机型号，屏幕尺寸、像素密度与手机硬件标识会同步切换。"
+              : seedDerived
+                ? `在这台 Mac 上，内核按稳定种子生成整套 Apple 设备（GPU、核心数、内存），这里的选择只作记录、不会生效。网站实际看到：${seedDeviceLabel ?? "首次打开后显示"}。`
+                : "一键套用同平台的屏幕、CPU、GPU 组合；稳定原生下主要用作记录，防检测浏览器会写入可控参数。"
           }
         >
           <Select value={device.id} onChange={(event) => editor.changeDevice(event.target.value)}>
-            {getDeviceProfileFamiliesForPlatform(platform).map((family) => (
+            {families.map((family) => (
               <optgroup key={family} label={family}>
                 {presets.filter((preset) => preset.family === family).map((preset) => (
                   <option key={preset.id} value={preset.id}>
@@ -111,8 +129,15 @@ export const BasicSection = forwardRef<HTMLInputElement, {
             ))}
           </Select>
         </FormField>
-        <FormField label="User-Agent"  description="建议留空，跟随真实浏览器；手动改错版本、系统或架构，反而会和真实能力对不上。">
-          <Input mono className="text-xs" value={form.user_agent ?? ""} placeholder="留空则跟随真实浏览器" onChange={(event) => set("user_agent", event.target.value || null)} />
+        <FormField
+          label="User-Agent"
+          description={
+            ios
+              ? "默认已填入真实 iPhone iOS Safari 标识，建议保持默认不要手改；改成桌面浏览器标识会被拦截。"
+              : "建议留空，跟随真实浏览器；手动改错版本、系统或架构，反而会和真实能力对不上。"
+          }
+        >
+          <Input mono className="text-xs" value={form.user_agent ?? ""} placeholder={ios ? "跟随所选 iPhone 机型" : "留空则跟随真实浏览器"} onChange={(event) => set("user_agent", event.target.value || null)} />
         </FormField>
         <FormField label="启动页面"  description="没有恢复上次的标签页时打开这些网址；留空会打开本地的 IP、时间、语言自检页。">
           <Textarea

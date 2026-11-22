@@ -44,6 +44,15 @@ export const RESOLUTION_PRESETS: Record<string, { width: number; height: number 
   "5120 × 2880 (外接 5K)": { width: 5120, height: 2880 },
 };
 
+export const IPHONE_RESOLUTION_PRESETS: Record<string, { width: number; height: number }> = {
+  "375 × 667 (iPhone SE)": { width: 375, height: 667 },
+  "390 × 844 (iPhone 13 / 14)": { width: 390, height: 844 },
+  "393 × 852 (iPhone 15 / 16)": { width: 393, height: 852 },
+  "402 × 874 (iPhone 16 Pro)": { width: 402, height: 874 },
+  "430 × 932 (iPhone 15 Pro Max)": { width: 430, height: 932 },
+  "440 × 956 (iPhone 16 Pro Max)": { width: 440, height: 956 },
+};
+
 const appleGpu = (chip: string) => ({
   vendor: "Google Inc. (Apple)",
   renderer: `ANGLE (Apple, ANGLE Metal Renderer: ${chip}, Unspecified Version)`,
@@ -328,10 +337,39 @@ export function changeEngine(form: EditorForm, engine: EditableEngine, hostOS?: 
   return applyDeviceProfile({ ...form, browser_engine: engine }, selectedDevice(form, hostOS));
 }
 
+function adaptOptionsForPlatform(form: EditorForm, nextPlatform: DevicePlatform): EditorForm["fingerprint_options"] {
+  const prev = form.fingerprint_options ?? {};
+  if (form.platform === nextPlatform) return prev;
+  if (nextPlatform === "ios") {
+    return {
+      ...prev,
+      brand: null,
+      brand_version: null,
+      platform_version: null,
+      taskbar_height: null,
+      screen: undefined,
+      // On iOS all models share "Apple GPU", so leave noise at kernel default (on) unless explicitly forced true.
+      noise: prev.noise === false ? null : prev.noise,
+    };
+  }
+  return {
+    ...prev,
+    noise: prev.noise == null && nextPlatform === "macos" ? false : prev.noise,
+  };
+}
+
+export function changePlatform(form: EditorForm, platform: DevicePlatform, hostOS?: HostOS | null): EditorForm {
+  const allowed = getDevicePlatformForHost(hostOS);
+  const target: DevicePlatform = platformFitsHost(platform, allowed) ? platform : allowed;
+  if (form.platform === target) return form;
+  const preset = getDeviceProfile(getDefaultDeviceProfileId(target));
+  return applyDeviceProfile({ ...form, fingerprint_options: adaptOptionsForPlatform(form, target) }, preset);
+}
+
 export function changeDevice(form: EditorForm, id: string, hostOS?: HostOS | null): EditorForm {
   const allowed = getDevicePlatformForHost(hostOS);
   const next = getDeviceProfilesForPlatform(allowed).find((preset) => preset.id === id) ?? getDeviceProfile(getDefaultDeviceProfileId(allowed));
-  return applyDeviceProfile(form, next);
+  return applyDeviceProfile({ ...form, fingerprint_options: adaptOptionsForPlatform(form, next.platform) }, next);
 }
 
 /** A different device of this host's platform, with a new seed ("随机设备型号"). */
@@ -390,7 +428,8 @@ export function defaultCookieDomain(form: EditorForm): string {
 }
 
 export function currentResolution(form: EditorForm): string {
-  return Object.entries(RESOLUTION_PRESETS).find(([, v]) => v.width === form.screen_width && v.height === form.screen_height)?.[0] ?? "custom";
+  const presets = form.platform === "ios" ? IPHONE_RESOLUTION_PRESETS : RESOLUTION_PRESETS;
+  return Object.entries(presets).find(([, v]) => v.width === form.screen_width && v.height === form.screen_height)?.[0] ?? "custom";
 }
 
 export function realScreenOf(hostScreen?: number[] | null): [number, number] | null {
@@ -452,18 +491,19 @@ export function summaryRows(ctx: SummaryContext): [string, string][] {
   const exitPlace = [proxyTest?.city, proxyTest?.country].filter(Boolean).join(" · ");
   const geolocation = options.geolocation ?? "ip";
   const webrtc = options.webrtc ?? "proxy";
+  const ios = form.platform === "ios";
   const cloakOnly: [string, string][] =
     engine === "cloakbrowser"
       ? [
-          ["浏览器品牌", options.brand ? `${options.brand}${options.brand_version ? ` ${options.brand_version}` : ""}` : "Chrome（跟随内核）"],
+          ["浏览器品牌", ios ? "Mobile Safari（iOS）" : options.brand ? `${options.brand}${options.brand_version ? ` ${options.brand_version}` : ""}` : "Chrome（跟随内核）"],
           ["WebRTC", webrtc === "custom" ? `指定 ${options.webrtc_ip || "（未填）"}` : form.proxy ? `出口 IP${proxyTest?.ip ? ` ${proxyTest.ip}` : ""}` : "真实（直连）"],
           ["地理位置", geolocation === "block" ? "禁止" : geolocation === "real" ? "真实" : `基于 IP${exitPlace ? `（${exitPlace}）` : ""}`],
-          ["指纹噪声", options.noise == null ? "自动" : options.noise ? "开启" : "关闭"],
+          ["指纹噪声", options.noise == null ? (ios ? "开启（按种子独立）" : "自动") : options.noise ? "开启" : "关闭"],
           ["跨电脑 Cookie", options.portable_cookies ? "开启" : "关闭"],
         ]
       : [];
   return [
-    ["浏览器", engine === "system_chrome" ? "Google Chrome 原生" : "CloakBrowser / Chromium"],
+    ["浏览器", engine === "system_chrome" ? "Google Chrome 原生" : ios ? "CloakBrowser（iPhone 手机模式）" : "CloakBrowser / Chromium"],
     ["系统", platformLabel(form.platform === "ios" ? "ios" : getDevicePlatformForHost(hostOS))],
     ["设备型号", device.name],
     ["账号平台", form.account_platform || "未设置"],

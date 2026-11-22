@@ -4,6 +4,7 @@ import {
   currentResolution,
   fingerprintPreviewRows,
   GPU_PRESETS,
+  IPHONE_RESOLUTION_PRESETS,
   MAC_PLATFORM_VERSIONS,
   normalizeFormEngine,
   realScreenOf,
@@ -19,9 +20,11 @@ const numberOrNull = (value: string) => (value ? Number(value) : null);
 export function FingerprintSection({ editor, hostOS, hostScreen, isEdit }: { editor: Editor; hostOS: HostOS | null; hostScreen: number[] | null; isEdit: boolean }) {
   const { form, set, setOption } = editor;
   const engine = normalizeFormEngine(form.browser_engine);
+  const ios = form.platform === "ios";
   const real = realScreenOf(hostScreen);
   const follows = screenFollowsDisplay(form, hostScreen);
   const resolution = currentResolution(form);
+  const resolutionPresets = ios ? IPHONE_RESOLUTION_PRESETS : RESOLUTION_PRESETS;
   const preview = fingerprintPreviewRows({ form, proxyParts: editor.proxyParts, proxyTest: editor.proxyTest, hostOS, hostScreen, isEdit });
 
   return (
@@ -52,9 +55,11 @@ export function FingerprintSection({ editor, hostOS, hostScreen, isEdit }: { edi
         <FormField
           label="分辨率"
           description={
-            follows
-              ? "每次启动时读取这台电脑主显示器的分辨率。检测网站能通过 CSS 媒体查询读到真实屏幕，自定义的分辨率和它对不上会被判为不一致。"
-              : "浏览器看到的逻辑分辨率，不是 Retina 屏的物理像素，例如 MacBook Pro 14 常见 1512 × 982。"
+            ios
+              ? "手机竖屏逻辑分辨率（随上面选的 iPhone 机型自动切换），不会跟随电脑大屏幕。"
+              : follows
+                ? "每次启动时读取这台电脑主显示器的分辨率。检测网站能通过 CSS 媒体查询读到真实屏幕，自定义的分辨率和它对不上会被判为不一致。"
+                : "浏览器看到的逻辑分辨率，不是 Retina 屏的物理像素，例如 MacBook Pro 14 常见 1512 × 982。"
           }
         >
           <Select
@@ -64,16 +69,16 @@ export function FingerprintSection({ editor, hostOS, hostScreen, isEdit }: { edi
                 setOption("screen", "real");
                 return;
               }
-              const preset = RESOLUTION_PRESETS[event.target.value];
+              const preset = resolutionPresets[event.target.value];
               editor.setForm((f) => ({
                 ...f,
-                fingerprint_options: { ...(f.fingerprint_options ?? {}), screen: "custom" },
+                fingerprint_options: { ...(f.fingerprint_options ?? {}), screen: ios ? undefined : "custom" },
                 ...(preset ? { screen_width: preset.width, screen_height: preset.height } : {}),
               }));
             }}
           >
-            {engine === "cloakbrowser" && real && <option value="real">跟随电脑屏幕 {real[0]} × {real[1]}（推荐）</option>}
-            {Object.keys(RESOLUTION_PRESETS).map((name) => (
+            {!ios && engine === "cloakbrowser" && real && <option value="real">跟随电脑屏幕 {real[0]} × {real[1]}（推荐）</option>}
+            {Object.keys(resolutionPresets).map((name) => (
               <option key={name} value={name}>
                 {name}
               </option>
@@ -84,45 +89,49 @@ export function FingerprintSection({ editor, hostOS, hostScreen, isEdit }: { edi
         {!follows && resolution === "custom" && (
           <div className="grid grid-cols-2 gap-2">
             <FormField label="宽" description="会直接影响窗口尺寸和 screen 相关字段，建议只填真实设备常见的比例。">
-              <Input type="number" inputMode="numeric" value={form.screen_width ?? 1920} onChange={(event) => set("screen_width", Number(event.target.value))} />
+              <Input type="number" inputMode="numeric" value={form.screen_width ?? (ios ? 393 : 1920)} onChange={(event) => set("screen_width", Number(event.target.value))} />
             </FormField>
             <FormField label="高">
-              <Input type="number" inputMode="numeric" value={form.screen_height ?? 1080} onChange={(event) => set("screen_height", Number(event.target.value))} />
+              <Input type="number" inputMode="numeric" value={form.screen_height ?? (ios ? 852 : 1080)} onChange={(event) => set("screen_height", Number(event.target.value))} />
             </FormField>
           </div>
         )}
-        <FormField label="CPU 线程" description="留空表示稳定原生用真实 CPU；防检测浏览器按当前设备型号推荐线程数。">
-          <Input type="number" inputMode="numeric" value={form.hardware_concurrency ?? ""} placeholder="按设备型号或真实设备" onChange={(event) => set("hardware_concurrency", numberOrNull(event.target.value))} />
+        <FormField label="CPU 线程" description={ios ? "iPhone 手机默认使用 6 线程（留空也按 6 线程生效）。" : "留空表示稳定原生用真实 CPU；防检测浏览器按当前设备型号推荐线程数。"}>
+          <Input type="number" inputMode="numeric" value={form.hardware_concurrency ?? ""} placeholder={ios ? "6（iPhone 默认）" : "按设备型号或真实设备"} onChange={(event) => set("hardware_concurrency", numberOrNull(event.target.value))} />
         </FormField>
-        <FormField label="浏览器内存" description="navigator.deviceMemory 只给出粗略值，最高 8 GB；设备型号默认 8，不虚构更大的值。">
-          <Select value={form.device_memory ?? ""} onChange={(event) => set("device_memory", numberOrNull(event.target.value))}>
-            <option value="">按真实设备</option>
-            <option value="2">2 GB</option>
-            <option value="4">4 GB</option>
-            <option value="8">8 GB</option>
-          </Select>
+        {!ios && (
+          <FormField label="浏览器内存" description="navigator.deviceMemory 只给出粗略值，最高 8 GB；设备型号默认 8，不虚构更大的值。">
+            <Select value={form.device_memory ?? ""} onChange={(event) => set("device_memory", numberOrNull(event.target.value))}>
+              <option value="">按真实设备</option>
+              <option value="2">2 GB</option>
+              <option value="4">4 GB</option>
+              <option value="8">8 GB</option>
+            </Select>
+          </FormField>
+        )}
+        {!ios && (
+          <FormField label="GPU 预设" description="同时填入厂商和渲染器，避免厂商、芯片和 WebGL 信息互相矛盾。">
+            <Select
+              value=""
+              onChange={(event) => {
+                if (event.target.value) editor.applyGpuPreset(event.target.value);
+                event.target.value = "";
+              }}
+            >
+              <option value="">选择预设…</option>
+              {Object.keys(GPU_PRESETS).map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+        )}
+        <FormField label="GPU 厂商" description={ios ? "iPhone 手机浏览器固定报告 Apple Inc.，不能改成电脑显卡。" : "通常不用改；只有用防检测浏览器并且明确知道目标设备时才填。"}>
+          <Input value={form.gpu_vendor ?? ""} disabled={ios} placeholder="按设备型号或真实设备" onChange={(event) => set("gpu_vendor", event.target.value || null)} />
         </FormField>
-        <FormField label="GPU 预设"  description="同时填入厂商和渲染器，避免厂商、芯片和 WebGL 信息互相矛盾。">
-          <Select
-            value=""
-            onChange={(event) => {
-              if (event.target.value) editor.applyGpuPreset(event.target.value);
-              event.target.value = "";
-            }}
-          >
-            <option value="">选择预设…</option>
-            {Object.keys(GPU_PRESETS).map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </Select>
-        </FormField>
-        <FormField label="GPU 厂商"  description="通常不用改；只有用防检测浏览器并且明确知道目标设备时才填。">
-          <Input value={form.gpu_vendor ?? ""} placeholder="按设备型号或真实设备" onChange={(event) => set("gpu_vendor", event.target.value || null)} />
-        </FormField>
-        <FormField label="GPU 渲染器"  description="WebGL 元数据里最显眼的硬件信息，必须和当前设备型号一致。">
-          <Input value={form.gpu_renderer ?? ""} placeholder="按设备型号或真实设备" onChange={(event) => set("gpu_renderer", event.target.value || null)} />
+        <FormField label="GPU 渲染器" description={ios ? "iPhone 手机浏览器固定报告 Apple GPU，改用电脑显卡会被拦截启动。" : "WebGL 元数据里最显眼的硬件信息，必须和当前设备型号一致。"}>
+          <Input value={form.gpu_renderer ?? ""} disabled={ios} placeholder="按设备型号或真实设备" onChange={(event) => set("gpu_renderer", event.target.value || null)} />
         </FormField>
       </div>
     </Section>
@@ -149,17 +158,21 @@ export function MoreFingerprintSection({ editor, hostOS }: { editor: Editor; hos
   return (
     <Section id="form-more-fingerprint" title="更多指纹" description="CloakBrowser 内核自带的额外伪装项。全部留默认时由内核按稳定种子生成，已经是一套一致的指纹；只在明确需要时才改。">
       <div className="grid max-w-form grid-cols-1 gap-5 md:grid-cols-1">
-        <FormField label="浏览器品牌" description="改 User-Agent 和 Client Hints 里的浏览器名称，内核本身不变。">
-          <Select value={options.brand ?? ""} onChange={(event) => setOption("brand", (event.target.value || null) as FingerprintOptions["brand"])}>
-            <option value="">Chrome（默认）</option>
-            <option value="Edge">Microsoft Edge</option>
-            <option value="Opera">Opera</option>
-            <option value="Vivaldi">Vivaldi</option>
-          </Select>
-        </FormField>
-        <FormField label="品牌版本号">
-          <Input value={options.brand_version ?? ""} placeholder="留空跟随内核" onChange={(event) => setOption("brand_version", event.target.value || null)} />
-        </FormField>
+        {!ios && (
+          <FormField label="浏览器品牌" description="改 User-Agent 和 Client Hints 里的浏览器名称，内核本身不变。">
+            <Select value={options.brand ?? ""} onChange={(event) => setOption("brand", (event.target.value || null) as FingerprintOptions["brand"])}>
+              <option value="">Chrome（默认）</option>
+              <option value="Edge">Microsoft Edge</option>
+              <option value="Opera">Opera</option>
+              <option value="Vivaldi">Vivaldi</option>
+            </Select>
+          </FormField>
+        )}
+        {!ios && (
+          <FormField label="品牌版本号">
+            <Input value={options.brand_version ?? ""} placeholder="留空跟随内核" onChange={(event) => setOption("brand_version", event.target.value || null)} />
+          </FormField>
+        )}
         {!ios && <FormField
           label="系统版本"
           description={mac ? "Client Hints 里的 macOS 版本，例如 15.6.0 是 macOS 15。" : "Client Hints 里的 Windows 版本：10.0.0 是 Windows 10，13.0.0 以上是 Windows 11。"}
