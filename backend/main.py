@@ -1322,15 +1322,21 @@ def _pre_update_backup() -> None:
 
 @app.get("/api/app/update")
 async def get_app_update():
+    current = desktop_app_version()
     raw = db.get_setting(SETTING_LAST_UPDATE)
     try:
         last_result = json.loads(raw) if raw else None
     except ValueError:
         last_result = None
+    if isinstance(last_result, dict) and current:
+        recorded = str(last_result.get("running") or last_result.get("to") or "").lstrip("v")
+        if recorded and recorded != str(current).lstrip("v"):
+            db.delete_setting(SETTING_LAST_UPDATE)
+            last_result = None
     return {
         **update_job.snapshot(),
         "supported": _self_update_supported(),
-        "current_version": desktop_app_version(),
+        "current_version": current,
         "last_result": last_result,
     }
 

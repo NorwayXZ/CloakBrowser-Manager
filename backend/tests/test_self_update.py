@@ -333,3 +333,19 @@ def test_last_update_result_is_reported_once(app_client: TestClient, monkeypatch
     assert result["ok"] is True and result["to"] == "0.5.0"
     app_client.delete("/api/app/update/result")
     assert app_client.get("/api/app/update").json()["last_result"] is None
+
+
+def test_stale_last_update_result_clears_after_newer_install(app_client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    from backend import database as db
+    from backend import main
+
+    self_update.write_pending(db.DATA_DIR, from_version="0.10.26", to_version="0.10.29")
+    monkeypatch.setattr(main, "desktop_app_version", lambda: "0.10.29")
+    main._settle_last_update()
+    assert app_client.get("/api/app/update").json()["last_result"]["to"] == "0.10.29"
+
+    monkeypatch.setattr(main, "desktop_app_version", lambda: "0.10.31")
+    payload = app_client.get("/api/app/update").json()
+    assert payload["current_version"] == "0.10.31"
+    assert payload["last_result"] is None
+    assert db.get_setting(main.SETTING_LAST_UPDATE) is None
