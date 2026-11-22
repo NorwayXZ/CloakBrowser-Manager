@@ -33,8 +33,9 @@ export function EditorPage({ mode }: { mode: "new" | "edit" }) {
   const presets = useProxyPresets();
 
   if (status.isPending || (mode === "edit" && profiles.isPending)) return <EditorSkeleton />;
-  if (status.isError) return <ErrorState message={status.error.message} onRetry={() => void status.refetch()} />;
-  if (mode === "edit" && profiles.isError) return <ErrorState message={profiles.error.message} onRetry={() => void profiles.refetch()} />;
+  // A failed background refetch must not unmount the open editor (and its unsaved edits).
+  if (status.isError && status.data === undefined) return <ErrorState message={status.error.message} onRetry={() => void status.refetch()} />;
+  if (mode === "edit" && profiles.isError && profiles.data === undefined) return <ErrorState message={profiles.error.message} onRetry={() => void profiles.refetch()} />;
   const profile = mode === "edit" ? profiles.data?.find((p) => p.id === id) ?? null : null;
   if (mode === "edit" && !profile) {
     return <EmptyState title="没有这个环境" description="它可能已经被删除，或者移到了回收站。" action={<Button onClick={() => navigate("/profiles")}>回到环境列表</Button>} />;

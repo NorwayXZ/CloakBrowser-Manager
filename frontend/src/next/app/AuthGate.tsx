@@ -23,7 +23,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
       </div>
     );
   }
-  if (auth.isError) {
+  // A failed background refetch keeps the data it already has: only a first load that failed is an error screen.
+  if (auth.isError && auth.data === undefined) {
     return (
       <div className="flex h-full items-center justify-center">
         <ErrorState

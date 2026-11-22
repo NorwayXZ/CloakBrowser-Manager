@@ -134,6 +134,8 @@ export function MoreFingerprintSection({ editor, hostOS }: { editor: Editor; hos
   const engine = normalizeFormEngine(form.browser_engine);
   const options: FingerprintOptions = form.fingerprint_options ?? {};
   const mac = form.platform === "macos";
+  // An iPhone has no Client Hints and no taskbar: those two fields mean nothing there.
+  const ios = form.platform === "ios";
 
   if (engine !== "cloakbrowser") {
     return (
@@ -158,19 +160,19 @@ export function MoreFingerprintSection({ editor, hostOS }: { editor: Editor; hos
         <FormField label="品牌版本号">
           <Input value={options.brand_version ?? ""} placeholder="留空跟随内核" onChange={(event) => setOption("brand_version", event.target.value || null)} />
         </FormField>
-        <FormField
+        {!ios && <FormField
           label="系统版本"
           description={mac ? "Client Hints 里的 macOS 版本，例如 15.6.0 是 macOS 15。" : "Client Hints 里的 Windows 版本：10.0.0 是 Windows 10，13.0.0 以上是 Windows 11。"}
         >
           <Input list="platform-version-options" value={options.platform_version ?? ""} placeholder="留空由内核决定" onChange={(event) => setOption("platform_version", event.target.value.trim() || null)} />
-        </FormField>
-        <datalist id="platform-version-options">
+        </FormField>}
+        {!ios && <datalist id="platform-version-options">
           {(mac ? MAC_PLATFORM_VERSIONS : WINDOWS_PLATFORM_VERSIONS).map(([value, label]) => (
             <option key={value} value={value}>
               {label}
             </option>
           ))}
-        </datalist>
+        </datalist>}
         <FormField
           label="地理位置"
           description={
@@ -226,7 +228,7 @@ export function MoreFingerprintSection({ editor, hostOS }: { editor: Editor; hos
             )}
           </div>
         </FormField>
-        <FormField label="任务栏高度" description="决定 screen.availHeight 比屏幕高度少多少像素，一般不用改。">
+        {!ios && <FormField label="任务栏高度" description="决定 screen.availHeight 比屏幕高度少多少像素，一般不用改。">
           <div className="flex flex-wrap items-center gap-2">
             <Segmented
               label="任务栏高度"
@@ -238,7 +240,7 @@ export function MoreFingerprintSection({ editor, hostOS }: { editor: Editor; hos
               <Input type="number" min={0} max={300} aria-label="任务栏高度（像素）" className="w-24" value={options.taskbar_height} placeholder="像素" onChange={(event) => setOption("taskbar_height", numberOrNull(event.target.value))} />
             )}
           </div>
-        </FormField>
+        </FormField>}
         <fieldset className="flex flex-col gap-3">
           <legend className="mb-2 text-sm font-medium text-fg">兼容选项</legend>
           {form.platform === "windows" && (

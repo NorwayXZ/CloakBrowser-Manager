@@ -68,11 +68,17 @@ def test_kernel_gets_the_host_platform_and_the_phone_hardware(tmp_path: Path):
     assert "--fingerprint-platform=macos" in args  # the kernel has no iOS; the look is layered on top
     assert "--fingerprint-gpu-vendor=Apple Inc." in args and "--fingerprint-gpu-renderer=Apple GPU" in args
     assert "--fingerprint-max-touch-points=5" in args
+    assert "--touch-events=enabled" in args  # ontouchstart exists from a tab's first document
+    assert not any(arg.startswith("--blink-settings") for arg in args)  # it fought the emulation
     assert "--fingerprint-taskbar-height=0" in args
     assert "--fingerprint-screen-width=393" in args and "--fingerprint-screen-height=852" in args
     assert "--fingerprint=4242" in args
     assert not any(a.startswith("--fingerprint-device-memory") for a in args)
-    assert "--fingerprint-noise=false" not in args  # noise off would give every iPhone the same canvas
+    # canvas noise follows the profile's fingerprint options, not the persona
+    assert "--fingerprint-noise=false" not in args
+    assert "--fingerprint-noise=false" in _manager(tmp_path)._build_fingerprint_args(
+        ios_persona.with_defaults(_iphone(fingerprint_options={"noise": False}))
+    )
     assert not any("ios" in a for a in args)
 
 
@@ -129,7 +135,8 @@ def test_init_script_hides_what_only_chrome_has():
     script = ios_persona.init_script({"device_profile": "iphone_se3"})
     for needle in ("userAgentData", "deviceMemory", "window.chrome", "'iPhone'", "Apple Computer, Inc."):
         assert needle in script
-    assert "get devicePixelRatio" not in script and ", 2)" in script  # the SE's ratio, not the default 3
+    assert "return 2;" in script and "return 3;" not in script  # the SE's ratio, not the default 3
+    assert "'connection'" in script and "'getBattery'" in script  # Chrome-only members Safari does not have
     assert "__RATIO__" not in script and "__WORKER_PATCH__" not in script
     assert "WorkerNavigator" in script  # blob workers start with the worker patch
 
@@ -169,3 +176,215 @@ def test_frontend_presets_match_the_backend_table():
         assert match, f"{device_id} is missing from the editor presets"
         assert (int(match.group(1)), int(match.group(2))) == (width, height)
     assert ios_persona.USER_AGENT in text  # the preset writes the same Safari string the backend defaults to
+
+
+# --- workers: the patch goes in front of the script as the browser fetches it -------------------
+
+def test_worker_patch_is_one_line_so_the_workers_line_numbers_hold():
+    assert b"\n" not in ios_persona.WORKER_PATCH
+    assert ios_persona.WORKER_PATCH.startswith(b"(() =>") and ios_persona.WORKER_PATCH.rstrip().endswith(b";")
+
+
+@pytest.mark.parametrize("source, kept_first", [
+    (b"postMessage(1)", None),
+    (b"'use strict';\npostMessage(1)", b"'use strict';"),
+    (b"'use strict'\npostMessage(1)", b"'use strict'"),   # no semicolon: one is added, or the patch would be a call on the string
+    (b'// header\n"use strict"; postMessage(1)', b'// header\n"use strict";'),
+])
+def test_patch_goes_in_front_but_never_before_a_leading_use_strict(source: bytes, kept_first):
+    patched = ios_persona.patch_worker_source(source)
+    assert ios_persona.WORKER_PATCH in patched and patched.endswith(source[len(kept_first or b""):])
+    if kept_first is None:
+        assert patched.startswith(ios_persona.WORKER_PATCH)
+    else:
+        assert patched.startswith(kept_first)
+        assert patched.index(kept_first) < patched.index(ios_persona.WORKER_PATCH)
+        assert patched[len(kept_first):].lstrip(b";").startswith(ios_persona.WORKER_PATCH)
+
+
+def test_worker_source_bytes_are_never_decoded():
+    source = "const s = '你好';\n".encode() + bytes([0xff, 0xfe])  # not valid UTF-8 as a whole
+    assert ios_persona.patch_worker_source(source).endswith(source)
+
+
+class _Session:
+    """A browser-level CDP session that records what the handler sends."""
+
+    def __init__(self, body: bytes = b"postMessage(1)", fail_on: str | None = None) -> None:
+        self.sent: list[tuple[str, dict]] = []
+        self.handlers: dict = {}
+        self.body, self.fail_on = body, fail_on
+
+    def on(self, name, handler):
+        self.handlers[name] = handler
+
+    async def send(self, method, params=None):
+        self.sent.append((method, params or {}))
+        if method == self.fail_on:
+            raise RuntimeError("boom")
+        if method == "Fetch.getResponseBody":
+            import base64
+            return {"body": base64.b64encode(self.body).decode(), "base64Encoded": True}
+        return {}
+
+
+async def _install(session: _Session):
+    import types
+    browser = types.SimpleNamespace(new_browser_cdp_session=lambda: _awaitable(session))
+    context = types.SimpleNamespace(_cloak_browser=browser)
+    await ios_persona.install_worker_patch(context, {"id": "p1"})
+    return context
+
+
+async def _awaitable(value):
+    return value
+
+
+async def _fire(session: _Session, context, **event):
+    import asyncio
+    session.handlers["Fetch.requestPaused"]({"requestId": "r1", **event})
+    for task in list(context._ios_worker_session[1]):
+        await task
+    await asyncio.sleep(0)
+
+
+JS_HEADERS = [{"name": "Content-Type", "value": "text/javascript"}, {"name": "Content-Length", "value": "14"},
+              {"name": "Content-Encoding", "value": "gzip"}]
+
+
+@pytest.mark.asyncio
+async def test_only_worker_script_requests_are_intercepted_and_only_the_other_type():
+    session = _Session()
+    await _install(session)
+    method, params = session.sent[0]
+    assert method == "Fetch.enable"
+    assert params["patterns"] == [{"resourceType": "Other", "requestStage": "Response"}]  # not every request
+
+
+@pytest.mark.asyncio
+async def test_a_javascript_response_is_rewritten_without_stale_length_or_encoding():
+    import base64
+    session = _Session(body=b"postMessage(1)")
+    context = await _install(session)
+    await _fire(session, context, responseStatusCode=200, responseHeaders=JS_HEADERS)
+    sent = {m: p for m, p in session.sent}
+    assert "Fetch.fulfillRequest" in sent and "Fetch.continueResponse" not in sent
+    fulfilled = sent["Fetch.fulfillRequest"]
+    assert base64.b64decode(fulfilled["body"]) == ios_persona.WORKER_PATCH + b"postMessage(1)"
+    names = {h["name"].lower() for h in fulfilled["responseHeaders"]}
+    assert "content-type" in names and not {"content-length", "content-encoding"} & names
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("event", [
+    {"responseStatusCode": 200, "responseHeaders": [{"name": "Content-Type", "value": "image/x-icon"}]},    # favicon
+    {"responseStatusCode": 404, "responseHeaders": JS_HEADERS},
+    {"responseStatusCode": 302, "responseHeaders": JS_HEADERS},
+    {"responseStatusCode": 200, "responseHeaders": [{"name": "Content-Type", "value": "text/javascript"},
+                                                   {"name": "Content-Length", "value": str(10 * 1024 * 1024)}]},
+])
+async def test_everything_else_is_let_through_untouched(event):
+    session = _Session()
+    context = await _install(session)
+    await _fire(session, context, **event)
+    methods = [m for m, _ in session.sent]
+    assert methods == ["Fetch.enable", "Fetch.continueResponse"]
+
+
+@pytest.mark.asyncio
+async def test_a_network_error_continues_the_request_instead_of_the_response():
+    session = _Session()
+    context = await _install(session)
+    await _fire(session, context, responseErrorReason="ConnectionRefused")
+    assert session.sent[-1][0] == "Fetch.continueRequest"
+
+
+@pytest.mark.asyncio
+async def test_a_failure_while_rewriting_never_leaves_the_request_hanging():
+    session = _Session(fail_on="Fetch.fulfillRequest")
+    context = await _install(session)
+    await _fire(session, context, responseStatusCode=200, responseHeaders=JS_HEADERS)
+    assert session.sent[-1][0] == "Fetch.continueResponse"
+
+
+@pytest.mark.asyncio
+async def test_no_browser_session_is_a_warning_not_a_failed_launch():
+    import types
+    await ios_persona.install_worker_patch(types.SimpleNamespace(), {"id": "p1"})  # returns normally
+
+
+def test_init_script_covers_blob_and_data_workers():
+    script = ios_persona.init_script({"device_profile": "iphone_15"})
+    assert "new Proxy(OriginalWorker" in script and "OriginalBlob" in script
+
+
+def test_preflight_rejects_a_gpu_that_is_not_an_iphones(tmp_path: Path):
+    manager = _manager(tmp_path)
+    wrong = manager.preflight(ios_persona.with_defaults(_iphone(
+        gpu_vendor="Google Inc. (NVIDIA)", gpu_renderer="ANGLE (NVIDIA, NVIDIA GeForce RTX 4060)")))
+    assert wrong["can_launch"] is False
+    assert any(issue["code"] == "gpu_platform_mismatch" for issue in wrong["issues"])
+    right = manager.preflight(ios_persona.with_defaults(_iphone()))
+    assert not any(issue["code"] == "gpu_platform_mismatch" for issue in right["issues"])
+
+
+@pytest.mark.asyncio
+async def test_a_tab_opened_while_the_existing_ones_are_walked_is_still_emulated():
+    import asyncio, types
+
+    created: list = []
+
+    class Context:
+        def __init__(self):
+            self.handlers = {}
+            self.pages = [types.SimpleNamespace(name="restored")]
+
+        def on(self, name, handler):
+            self.handlers[name] = handler
+
+        async def new_cdp_session(self, page):
+            created.append(page.name)
+            if page.name == "restored":                       # a tab opens while this await is pending
+                self.handlers["page"](types.SimpleNamespace(name="popup"))
+            await asyncio.sleep(0)
+            return types.SimpleNamespace(send=lambda *a, **k: _awaitable({}), on=lambda *a, **k: None)
+
+    context = Context()
+    await ios_persona.apply_emulation(context, ios_persona.with_defaults({"id": "p", "platform": "ios", "device_profile": "iphone_15"}))
+    await asyncio.sleep(0.05)
+    assert sorted(created) == ["popup", "restored"]
+
+
+class _AgentClient:
+    """Answers only what the launch tool asks: the mcp mode, the profile and the launch itself."""
+
+    def __init__(self, mode: str, platform: str) -> None:
+        self.mode, self.platform, self.launched = mode, platform, False
+
+    async def get(self, path, **_):
+        if path == "/api/settings/mcp":
+            return 200, {"mode": self.mode}
+        return 200, {"id": "p1", "platform": self.platform}
+
+    async def post(self, path, **_):
+        self.launched = True
+        return 200, {"profile_id": "p1", "status": "running", "launch_mode": "debug"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("platform, allowed", [("ios", False), ("macos", True)])
+async def test_an_iphone_is_not_launched_below_the_automation_tier_through_the_manual_door(platform, allowed):
+    from backend import agent_tools
+    client = _AgentClient("full", platform)  # a tier below automation: no CDP for agents
+    result = await agent_tools._launch_profile(client, {"profile_id": "p1", "launch_mode": "manual"})
+    assert client.launched is allowed
+    if not allowed:
+        assert result["reason"] == "mode_not_automation"
+
+
+def test_options_left_over_from_a_mac_never_change_an_iphones_screen_or_hints(tmp_path: Path):
+    leftovers = {"taskbar_height": 95, "platform_version": "15.6.0"}
+    args = _manager(tmp_path)._build_fingerprint_args(ios_persona.with_defaults(_iphone(fingerprint_options=leftovers)))
+    assert "--fingerprint-taskbar-height=0" in args
+    assert not any(a.startswith("--fingerprint-taskbar-height=") and a != "--fingerprint-taskbar-height=0" for a in args)
+    assert not any(a.startswith("--fingerprint-platform-version") for a in args)

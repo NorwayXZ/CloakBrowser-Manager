@@ -2,6 +2,7 @@
  * How a profile is described in the list and the detail panel. Pure functions,
  * carried over from the current panel so both show the same words.
  */
+import { DEVICE_PROFILES } from "../editor/deviceProfiles";
 import type { AgentLease, Profile, ProfileCreate } from "./types";
 
 export const UNGROUPED = "未分组";
@@ -226,6 +227,8 @@ export function platformLabel(profile: Pick<Profile, "platform">): string {
 /** The device line of the list: the seed's device, else the chosen model, else the OS alone. */
 export function deviceText(profile: Profile): string {
   if (profile.seed_device?.applies) return seedDeviceLabel(profile) ?? "首次打开后显示设备";
+  // An iPhone shows as its model ("iPhone 15"), not as the preset id.
+  if (profile.platform === "ios") return DEVICE_PROFILES.find((preset) => preset.id === profile.device_profile)?.name ?? "iPhone";
   return profile.device_profile || platformLabel(profile);
 }
 

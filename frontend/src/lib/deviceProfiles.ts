@@ -1,7 +1,7 @@
 import type { BrowserEngine, HostOS, ProfileCreateData } from "./api";
 
 export type DeviceProfileId = string;
-export type DevicePlatform = "macos" | "windows";
+export type DevicePlatform = "macos" | "windows" | "ios";
 
 export type DeviceProfileFamily =
   | "原生"
@@ -12,7 +12,8 @@ export type DeviceProfileFamily =
   | "iMac"
   | "Mac mini"
   | "Mac Studio"
-  | "Mac Pro";
+  | "Mac Pro"
+  | "iPhone";
 
 export interface DeviceProfilePreset {
   id: DeviceProfileId;
@@ -66,6 +67,29 @@ function appleProfile(
     gpu_vendor: APPLE_GPU_VENDOR,
     gpu_renderer: appleRenderer(chip),
     user_agent: null,
+    color_scheme: null,
+  };
+}
+
+// Safari's own string; backend/ios_persona.py carries the same one. The kernel
+// is Chromium, so an iPhone is a look (UA, screen, touch, Apple GPU), not Safari.
+const IPHONE_USER_AGENT =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1";
+
+function iphoneProfile(id: string, name: string, screenWidth: number, screenHeight: number): DeviceProfilePreset {
+  return {
+    id,
+    name,
+    family: "iPhone",
+    chip: "Apple",
+    platform: "ios",
+    screen_width: screenWidth,
+    screen_height: screenHeight,
+    hardware_concurrency: 6,
+    device_memory: null, // Safari has no navigator.deviceMemory
+    gpu_vendor: "Apple Inc.",
+    gpu_renderer: "Apple GPU",
+    user_agent: IPHONE_USER_AGENT,
     color_scheme: null,
   };
 }
@@ -273,6 +297,14 @@ export const DEVICE_PROFILES: DeviceProfilePreset[] = [
   appleProfile("mac_studio_m3_ultra_2025", "Mac Studio", "Mac Studio M3 Ultra (2025)", "M3 Ultra", 5120, 2880, 28),
 
   appleProfile("mac_pro_m2_ultra_2023", "Mac Pro", "Mac Pro M2 Ultra (2023)", "M2 Ultra", 5120, 2880, 24),
+  iphoneProfile("iphone_se3", "iPhone SE (第 3 代)", 375, 667),
+  iphoneProfile("iphone_13", "iPhone 13", 390, 844),
+  iphoneProfile("iphone_14", "iPhone 14", 390, 844),
+  iphoneProfile("iphone_15", "iPhone 15", 393, 852),
+  iphoneProfile("iphone_15_pro_max", "iPhone 15 Pro Max", 430, 932),
+  iphoneProfile("iphone_16", "iPhone 16", 393, 852),
+  iphoneProfile("iphone_16_pro", "iPhone 16 Pro", 402, 874),
+  iphoneProfile("iphone_16_pro_max", "iPhone 16 Pro Max", 440, 956),
 ];
 
 export const DEVICE_PROFILE_FAMILIES: DeviceProfileFamily[] = [
@@ -285,12 +317,14 @@ export const DEVICE_PROFILE_FAMILIES: DeviceProfileFamily[] = [
   "Mac mini",
   "Mac Studio",
   "Mac Pro",
+  "iPhone",
 ];
 
 export const DEFAULT_DEVICE_PROFILE_ID: DeviceProfileId = "native_macos";
 export const DEFAULT_DEVICE_PROFILE_IDS: Record<DevicePlatform, DeviceProfileId> = {
   macos: "native_macos",
   windows: "native_windows",
+  ios: "iphone_15",
 };
 
 export function getDevicePlatformForHost(hostOS?: HostOS | null): DevicePlatform {
@@ -298,6 +332,7 @@ export function getDevicePlatformForHost(hostOS?: HostOS | null): DevicePlatform
 }
 
 export function getDefaultDeviceProfileId(hostOS?: HostOS | DevicePlatform | null): DeviceProfileId {
+  if (hostOS === "ios") return DEFAULT_DEVICE_PROFILE_IDS.ios;
   return hostOS === "windows" ? DEFAULT_DEVICE_PROFILE_IDS.windows : DEFAULT_DEVICE_PROFILE_IDS.macos;
 }
 
@@ -305,13 +340,19 @@ export function getDeviceProfile(id?: string | null): DeviceProfilePreset {
   return DEVICE_PROFILES.find((profile) => profile.id === id) ?? DEVICE_PROFILES[0]!;
 }
 
+/** An iPhone look runs on a Mac (its fonts, GPU stack and input); a Windows PC has none. */
+export function platformFitsHost(platform: string | undefined, host: DevicePlatform): boolean {
+  return platform === host || (host === "macos" && platform === "ios");
+}
+
+/** The presets this computer can run: its own system's, plus the iPhones on a Mac. */
 export function getDeviceProfilesForPlatform(platform: DevicePlatform): DeviceProfilePreset[] {
-  return DEVICE_PROFILES.filter((profile) => profile.platform === platform);
+  return DEVICE_PROFILES.filter((profile) => platformFitsHost(profile.platform, platform));
 }
 
 export function getDeviceProfileFamiliesForPlatform(platform: DevicePlatform): DeviceProfileFamily[] {
   return DEVICE_PROFILE_FAMILIES.filter((family) => (
-    DEVICE_PROFILES.some((profile) => profile.platform === platform && profile.family === family)
+    DEVICE_PROFILES.some((profile) => platformFitsHost(profile.platform, platform) && profile.family === family)
   ));
 }
 
@@ -327,7 +368,8 @@ export function applyDeviceProfile(
   current: ProfileCreateData,
   preset: DeviceProfilePreset,
 ): ProfileCreateData {
-  const browserEngine = normalizeEngine(current.browser_engine);
+  // Only the kernel takes the iPhone persona's switches.
+  const browserEngine = preset.platform === "ios" ? "cloakbrowser" : normalizeEngine(current.browser_engine);
   const isNative = browserEngine === "system_chrome";
 
   return {

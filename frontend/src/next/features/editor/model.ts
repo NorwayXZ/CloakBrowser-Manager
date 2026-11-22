@@ -263,7 +263,8 @@ export function initialState(profile: Profile | null, hostOS?: HostOS | null): E
   const deviceProfile = getDeviceProfile(profile.device_profile);
   const baseForm: EditorForm = {
     name: profile.name,
-    browser_engine: normalizeFormEngine(profile.browser_engine),
+    // An iPhone always runs on the kernel, whatever an API-created profile stored.
+    browser_engine: profile.platform === "ios" ? "cloakbrowser" : normalizeFormEngine(profile.browser_engine),
     device_profile: deviceProfile.id,
     fingerprint_seed: profile.fingerprint_seed,
     proxy: profile.proxy,
@@ -339,9 +340,11 @@ export function randomizeDevice(form: EditorForm, hostOS?: HostOS | null, random
   // An iPhone stays an iPhone: a new model, never a Mac.
   const kind: DevicePlatform = form.platform === "ios" ? "ios" : allowed;
   const defaultId = getDefaultDeviceProfileId(kind);
+  // The Mac and Windows defaults are the "native" entries, kept out of a re-roll; no iPhone is one.
+  const skipped = kind === "ios" ? "" : defaultId;
   const presets = getDeviceProfilesForPlatform(allowed).filter((preset) => preset.platform === kind);
-  const pool = presets.filter((preset) => preset.id !== defaultId && preset.id !== form.device_profile);
-  const fallback = presets.filter((preset) => preset.id !== defaultId);
+  const pool = presets.filter((preset) => preset.id !== skipped && preset.id !== form.device_profile);
+  const fallback = presets.filter((preset) => preset.id !== skipped);
   const choices = pool.length > 0 ? pool : fallback;
   const next = choices[Math.floor(random() * choices.length)] ?? getDeviceProfile(defaultId);
   return applyDeviceProfile({ ...form, fingerprint_seed: randomFingerprintSeed() }, next);
@@ -396,7 +399,8 @@ export function realScreenOf(hostScreen?: number[] | null): [number, number] | n
 
 /** CloakBrowser profiles follow the computer's screen unless a custom size was chosen. */
 export function screenFollowsDisplay(form: EditorForm, hostScreen?: number[] | null): boolean {
-  return normalizeFormEngine(form.browser_engine) === "cloakbrowser" && realScreenOf(hostScreen) !== null && (form.fingerprint_options?.screen ?? "real") === "real";
+  // An iPhone has the phone's own screen; it never follows this computer's display.
+  return form.platform !== "ios" && normalizeFormEngine(form.browser_engine) === "cloakbrowser" && realScreenOf(hostScreen) !== null && (form.fingerprint_options?.screen ?? "real") === "real";
 }
 
 // ── Summary ─────────────────────────────────────────────────────────────────

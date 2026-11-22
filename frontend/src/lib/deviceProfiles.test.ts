@@ -45,6 +45,18 @@ describe("deviceProfiles", () => {
 
     expect(windowsProfiles.length).toBeGreaterThan(1);
     expect(windowsProfiles.every((profile) => profile.platform === "windows")).toBe(true);
-    expect(macProfiles.every((profile) => profile.platform === "macos")).toBe(true);
+    // A Mac also runs the iPhone looks; nothing else but its own system.
+    expect(macProfiles.every((profile) => profile.platform === "macos" || profile.platform === "ios")).toBe(true);
+    expect(macProfiles.filter((profile) => profile.platform === "macos").length).toBeGreaterThan(1);
+  });
+});
+
+describe("iPhone presets in the previous panel", () => {
+  it("are offered on a Mac only, and force the CloakBrowser engine", () => {
+    expect(getDeviceProfilesForPlatform("macos").some((preset) => preset.platform === "ios")).toBe(true);
+    expect(getDeviceProfilesForPlatform("windows").some((preset) => preset.platform === "ios")).toBe(false);
+    const next = applyDeviceProfile({ name: "t", browser_engine: "system_chrome" }, getDeviceProfile("iphone_15"));
+    expect(next).toMatchObject({ platform: "ios", browser_engine: "cloakbrowser", device_memory: null, gpu_renderer: "Apple GPU" });
+    expect(next.user_agent).toContain("iPhone");
   });
 });

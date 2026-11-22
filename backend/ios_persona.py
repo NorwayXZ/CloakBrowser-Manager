@@ -12,8 +12,10 @@ JavaScriptCore) still sees Chrome: this is a look, not a Safari.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
+import re
 from contextlib import suppress
 from typing import Any
 
@@ -88,8 +90,8 @@ def with_defaults(profile: dict[str, Any]) -> dict[str, Any]:
 
 def persona_args(profile: dict[str, Any]) -> list[str]:
     """Kernel switches for an iPhone persona on a macOS host."""
-    # Noise stays on (the kernel's default): with it off every noise-off profile on this
-    # computer draws the same canvas, which links iPhone accounts to each other.
+    # Canvas noise is not decided here: it follows the profile's fingerprint options
+    # (new profiles get the recommended noise-off preset; "自动" leaves the kernel's default).
     args = [f"--fingerprint-platform={KERNEL_PLATFORM}"]
     seed = profile.get("fingerprint_seed")
     if seed is not None:
@@ -99,6 +101,9 @@ def persona_args(profile: dict[str, Any]) -> list[str]:
         f"--fingerprint-gpu-renderer={profile.get('gpu_renderer') or GPU_RENDERER}",
         f"--fingerprint-hardware-concurrency={profile.get('hardware_concurrency') or HARDWARE_CONCURRENCY}",
         f"--fingerprint-max-touch-points={MAX_TOUCH_POINTS}",
+        # Touch events from a tab's very first document (device emulation only reaches a tab a
+        # moment later). --blink-settings pointer types were tried and fought the emulation.
+        "--touch-events=enabled",
         # A phone has no Dock: the available screen is the whole screen.
         "--fingerprint-taskbar-height=0",
     ]
@@ -117,29 +122,75 @@ _INIT_TEMPLATE = r"""
   const nativeToString = Function.prototype.toString;
   const nativeSources = new WeakMap();
   const markNative = (fn, name) => { try { nativeSources.set(fn, `function ${name}() { [native code] }`); } catch (_) {} return fn; };
-  const patched = markNative(function toString() {
+  // A method has no own `prototype` and cannot be constructed, like the native toString.
+  const patched = markNative({ toString() {
     return nativeSources.has(this) ? nativeSources.get(this) : nativeToString.call(this);
-  }, 'toString');
+  } }.toString, 'toString');
   try { Object.defineProperty(Function.prototype, 'toString', { value: patched, configurable: true, writable: true }); } catch (_) {}
 
-  const getter = (name, value) => markNative(Object.getOwnPropertyDescriptor({ get [name]() { return value; } }, name).get, `get ${name}`);
+  // Native getters throw on a receiver of the wrong kind; these do too.
+  const getter = (name, value, brand) => markNative(Object.getOwnPropertyDescriptor({ get [name]() {
+    if (!(this instanceof brand)) throw new TypeError('Illegal invocation');
+    return value;
+  } }, name).get, `get ${name}`);
   const dropFromPrototype = (proto, name) => { try { delete proto[name]; } catch (_) {} };
   if (typeof Navigator === 'function') {
-    dropFromPrototype(Navigator.prototype, 'userAgentData');
-    dropFromPrototype(Navigator.prototype, 'deviceMemory');
+    // Only Chrome has these; iOS Safari has none of them.
+    for (const name of ['userAgentData', 'deviceMemory', 'connection', 'getBattery', 'bluetooth', 'usb', 'serial', 'hid', 'keyboard', 'xr',
+      'presentation', 'ink', 'login', 'managed', 'virtualKeyboard', 'windowControlsOverlay', 'scheduling', 'cookieDeprecationLabel',
+      'joinAdInterestGroup', 'leaveAdInterestGroup', 'updateAdInterestGroups', 'clearOriginJoinedAdInterestGroups', 'runAdAuction',
+      'createAuctionNonce', 'getInterestGroupAdAuctionData', 'canLoadAdAuctionFencedFrame']) {
+      dropFromPrototype(Navigator.prototype, name);
+    }
     try {
-      Object.defineProperty(Navigator.prototype, 'platform', { get: getter('platform', 'iPhone'), configurable: true });
+      Object.defineProperty(Navigator.prototype, 'platform', { get: getter('platform', 'iPhone', Navigator), configurable: true });
     } catch (_) {}
     try {
-      Object.defineProperty(Navigator.prototype, 'vendor', { get: getter('vendor', 'Apple Computer, Inc.'), configurable: true });
+      Object.defineProperty(Navigator.prototype, 'vendor', { get: getter('vendor', 'Apple Computer, Inc.', Navigator), configurable: true });
     } catch (_) {}
     try {
-      Object.defineProperty(Navigator.prototype, 'standalone', { get: getter('standalone', false), configurable: true });
+      Object.defineProperty(Navigator.prototype, 'standalone', { get: getter('standalone', false, Navigator), configurable: true, enumerable: true });
     } catch (_) {}
   }
   try { delete window.chrome; } catch (_) {}
   // Frames of other sites live in another process, where the emulated ratio does not follow.
-  try { Object.defineProperty(window, 'devicePixelRatio', { get: getter('devicePixelRatio', __RATIO__), configurable: true, enumerable: true }); } catch (_) {}
+  // devicePixelRatio is [Replaceable]: assigning to it turns it into a plain value.
+  try {
+    const ratio = { get devicePixelRatio() {
+      if (!(this instanceof Window)) throw new TypeError('Illegal invocation');
+      return __RATIO__;
+    }, set devicePixelRatio(value) {
+      Object.defineProperty(window, 'devicePixelRatio', { value, writable: true, configurable: true, enumerable: true });
+    } };
+    const descriptor = Object.getOwnPropertyDescriptor(ratio, 'devicePixelRatio');
+    Object.defineProperty(window, 'devicePixelRatio', {
+      get: markNative(descriptor.get, 'get devicePixelRatio'), set: markNative(descriptor.set, 'set devicePixelRatio'), configurable: true, enumerable: true,
+    });
+  } catch (_) {}
+
+  // A worker from a data: URL has no request to rewrite either; put the patch in front of its code.
+  if (typeof Worker === 'function') {
+    const OriginalWorker = Worker;
+    const WorkerProxy = new Proxy(OriginalWorker, {
+      construct(target, args, newTarget) {
+        try {
+          const url = String(args[0]);
+          const head = /^data:(?:text|application)\/(?:x-)?(?:javascript|ecmascript)([^,]*),/i.exec(url);
+          if (head) {
+            const rest = url.slice(head[0].length);
+            args[0] = /;base64/i.test(head[1])
+              ? head[0] + btoa(workerPatch + atob(decodeURIComponent(rest)))
+              : head[0] + encodeURIComponent(workerPatch) + rest;
+          }
+        } catch (_) {}
+        return Reflect.construct(target, args, newTarget === WorkerProxy ? target : newTarget);
+      },
+    });
+    try {
+      Object.defineProperty(window, 'Worker', { value: markNative(WorkerProxy, 'Worker'), configurable: true, writable: true });
+      Object.defineProperty(OriginalWorker.prototype, 'constructor', { value: WorkerProxy, configurable: true, writable: true });
+    } catch (_) {}
+  }
 
   // A worker made from a blob (what fingerprint probes use) starts with the same
   // patch in front of its own code: nothing can run in between, so there is no race.
@@ -164,6 +215,7 @@ _INIT_TEMPLATE = r"""
       Object.defineProperty(PatchedBlob, 'name', { value: 'Blob' });
       Object.defineProperty(PatchedBlob, 'length', { value: OriginalBlob.length });
       Object.defineProperty(window, 'Blob', { value: markNative(PatchedBlob, 'Blob'), configurable: true, writable: true });
+      Object.defineProperty(OriginalBlob.prototype, 'constructor', { value: PatchedBlob, configurable: true, writable: true });
     } catch (_) {}
   }
 })();
@@ -178,25 +230,102 @@ WORKER_SCRIPT = r"""
   const nativeToString = Function.prototype.toString;
   const nativeSources = new WeakMap();
   const markNative = (fn, name) => { try { nativeSources.set(fn, `function ${name}() { [native code] }`); } catch (_) {} return fn; };
-  const patched = markNative(function toString() {
+  const patched = markNative({ toString() {
     return nativeSources.has(this) ? nativeSources.get(this) : nativeToString.call(this);
-  }, 'toString');
+  } }.toString, 'toString');
   try { Object.defineProperty(Function.prototype, 'toString', { value: patched, configurable: true, writable: true }); } catch (_) {}
-  const getter = (name, value) => markNative(Object.getOwnPropertyDescriptor({ get [name]() { return value; } }, name).get, `get ${name}`);
-  try { delete WorkerNavigator.prototype.userAgentData; } catch (_) {}
-  try { delete WorkerNavigator.prototype.deviceMemory; } catch (_) {}
+  const getter = (name, value, brand) => markNative(Object.getOwnPropertyDescriptor({ get [name]() {
+    if (!(this instanceof brand)) throw new TypeError('Illegal invocation');
+    return value;
+  } }, name).get, `get ${name}`);
+  for (const name of ['userAgentData', 'deviceMemory', 'connection', 'usb', 'hid', 'serial']) {
+    try { delete WorkerNavigator.prototype[name]; } catch (_) {}
+  }
   try {
-    Object.defineProperty(WorkerNavigator.prototype, 'platform', { get: getter('platform', 'iPhone'), configurable: true });
+    Object.defineProperty(WorkerNavigator.prototype, 'platform', { get: getter('platform', 'iPhone', WorkerNavigator), configurable: true });
   } catch (_) {}
 })();
 """
-WORKER_TARGETS = {"worker", "shared_worker", "service_worker"}
+# One line, so the worker's own code keeps its line numbers.
+WORKER_PATCH = (" ".join(WORKER_SCRIPT.split()) + ";").encode()
+# A leading 'use strict' must stay the first statement or the worker silently loses strict mode.
+_LEADING_STRICT = re.compile(rb"""\A\s*(?:/\*.*?\*/\s*|//[^\n]*\n\s*)*(?:'use strict'|"use strict")[ \t]*(?:;|(?=\r?\n)|\Z)""", re.S)
+MAX_PATCHED_BYTES = 4 * 1024 * 1024
+
+
+def patch_worker_source(source: bytes) -> bytes:
+    """A worker script with the iPhone patch in front of its own code."""
+    strict = _LEADING_STRICT.match(source)
+    if not strict:
+        return WORKER_PATCH + source
+    end = strict.end()
+    separator = b"" if source[:end].rstrip().endswith(b";") else b";"
+    return source[:end] + separator + WORKER_PATCH + source[end:]
 
 
 def init_script(profile: dict[str, Any]) -> str:
     """The page script for this profile's iPhone (its pixel ratio is the only part that varies)."""
-    return _INIT_TEMPLATE.replace("__WORKER_PATCH__", json.dumps(WORKER_SCRIPT)).replace("__RATIO__", str(pixel_ratio(profile)))
+    return _INIT_TEMPLATE.replace("__WORKER_PATCH__", json.dumps(WORKER_PATCH.decode())).replace("__RATIO__", str(pixel_ratio(profile)))
 
+
+async def install_worker_patch(context: Any, profile: dict[str, Any]) -> None:
+    """Put the patch in front of every worker script as the browser fetches it.
+
+    Dedicated, shared and service workers, module workers and workers made by
+    frames of other sites all load their script over the network (type "Other"),
+    so rewriting the response reaches them before a single line of theirs runs:
+    nothing to race against. A worker made from a blob or a data: URL has no
+    request and is covered by the page script instead.
+    """
+    browser = getattr(context, "_cloak_browser", None) or getattr(context, "browser", None)
+    new_session = getattr(browser, "new_browser_cdp_session", None)
+    if not callable(new_session):
+        logger.warning("iPhone worker patch skipped for %s: no browser-level CDP session", profile.get("id"))
+        return
+    session = await new_session()
+    tasks: set[asyncio.Task] = set()
+    try:
+        context._ios_worker_session = (session, tasks)
+    except Exception:
+        pass
+
+    async def let_through(event: dict[str, Any]) -> None:
+        method = "Fetch.continueRequest" if event.get("responseErrorReason") else "Fetch.continueResponse"
+        await session.send(method, {"requestId": event["requestId"]})
+
+    async def paused(event: dict[str, Any]) -> None:
+        try:
+            headers = {h["name"].lower(): h["value"] for h in event.get("responseHeaders") or []}
+            wanted = (
+                event.get("responseStatusCode") == 200
+                and not event.get("responseErrorReason")
+                and "javascript" in headers.get("content-type", "").lower()
+                and int(headers.get("content-length") or 0) <= MAX_PATCHED_BYTES
+            )
+            if not wanted:
+                await let_through(event)
+                return
+            reply = await session.send("Fetch.getResponseBody", {"requestId": event["requestId"]})
+            body = base64.b64decode(reply["body"]) if reply.get("base64Encoded", True) else reply["body"].encode()
+            kept = [h for h in event["responseHeaders"] if h["name"].lower() not in {"content-length", "content-encoding", "transfer-encoding"}]
+            await session.send("Fetch.fulfillRequest", {
+                "requestId": event["requestId"],
+                "responseCode": 200,
+                "responseHeaders": kept,
+                "body": base64.b64encode(patch_worker_source(body)).decode(),
+            })
+        except Exception as exc:
+            logger.debug("iPhone worker patch skipped for %s: %s", profile.get("id"), exc)
+            with suppress(Exception):
+                await let_through(event)
+
+    def on_paused(event: dict[str, Any]) -> None:
+        task = asyncio.create_task(paused(event))
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
+
+    session.on("Fetch.requestPaused", on_paused)
+    await session.send("Fetch.enable", {"patterns": [{"resourceType": "Other", "requestStage": "Response"}]})
 
 
 async def apply_emulation(context: Any, profile: dict[str, Any]) -> None:
@@ -218,27 +347,18 @@ async def apply_emulation(context: Any, profile: dict[str, Any]) -> None:
     except Exception:
         pass
 
-    async def patch_worker(session: Any, event: dict[str, Any]) -> None:
-        """Run the worker script before the worker's own code, then let it start."""
-        worker_id = event.get("sessionId")
-        info = event.get("targetInfo") or {}
-        if not worker_id or not event.get("waitingForDebugger"):
-            return
+    done: set[int] = set()
+    tasks: set[asyncio.Task] = set()
 
-        async def to_worker(call_id: int, method: str, params: dict[str, Any] | None = None) -> None:
-            message = json.dumps({"id": call_id, "method": method, "params": params or {}})
-            await session.send("Target.sendMessageToTarget", {"sessionId": worker_id, "message": message})
-
-        try:
-            if info.get("type") in WORKER_TARGETS:
-                await to_worker(1, "Runtime.evaluate", {"expression": WORKER_SCRIPT})
-        except Exception as exc:
-            logger.debug("iPhone worker patch skipped for %s: %s", profile.get("id"), exc)
-        finally:
-            with suppress(Exception):
-                await to_worker(2, "Runtime.runIfWaitingForDebugger")
+    def spawn(coroutine: Any) -> None:
+        task = asyncio.create_task(coroutine)  # kept referenced until done, or it may be collected mid-way
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
 
     async def patch_page(page: Any) -> None:
+        if id(page) in done:
+            return
+        done.add(id(page))
         try:
             session = await new_cdp_session(page)
             sessions.append(session)
@@ -252,14 +372,17 @@ async def apply_emulation(context: Any, profile: dict[str, Any]) -> None:
             })
             await session.send("Emulation.setTouchEmulationEnabled", {"enabled": True, "maxTouchPoints": MAX_TOUCH_POINTS})
             await session.send("Emulation.setEmitTouchEventsForMouse", {"enabled": True, "configuration": "mobile"})
-            session.on("Target.attachedToTarget", lambda event: asyncio.create_task(patch_worker(session, event)))
-            await session.send("Target.setAutoAttach", {"autoAttach": True, "waitForDebuggerOnStart": True, "flatten": False})
         except Exception as exc:
             logger.warning("iPhone emulation skipped for a page of %s: %s", profile.get("id"), exc)
 
+    # Hook first, then walk the tabs that exist: a tab opened while the walk awaits is not missed.
+    try:
+        context.on("page", lambda page: spawn(patch_page(page)))
+    except Exception as exc:
+        logger.debug("Could not register the iPhone page hook for %s: %s", profile.get("id"), exc)
     for page in list(getattr(context, "pages", []) or []):
         await patch_page(page)
     try:
-        context.on("page", lambda page: asyncio.create_task(patch_page(page)))
+        await install_worker_patch(context, profile)
     except Exception as exc:
-        logger.debug("Could not register the iPhone page hook for %s: %s", profile.get("id"), exc)
+        logger.warning("iPhone worker patch not installed for %s: %s", profile.get("id"), exc)
