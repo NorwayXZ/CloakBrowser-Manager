@@ -5,7 +5,8 @@ import {
   getDeviceProfileFamiliesForPlatform,
   getDeviceProfilesForPlatform,
 } from "./deviceProfiles";
-import { buildPayload, changeDevice, createDefaultForm, initialState, platformLabel, randomizeDevice, selectedDevice } from "./model";
+import { buildPayload, changeDevice, createDefaultForm, initialState, platformLabel, randomizeDevice, screenFollowsDisplay, selectedDevice } from "./model";
+import { deviceText } from "../profiles/format";
 import type { Profile } from "../profiles/types";
 
 describe("iPhone presets", () => {
@@ -73,5 +74,26 @@ describe("an iPhone profile in the editor", () => {
 
   it("is labelled as an iPhone", () => {
     expect(platformLabel("ios")).toContain("iPhone");
+  });
+
+  it("keeps the kernel engine and its own screen when an API-created profile is opened", () => {
+    const stored = { ...createDefaultForm("macos"), id: "p1", name: "iPhone", platform: "ios", device_profile: "iphone_15", browser_engine: "auto" } as unknown as Profile;
+    const { form } = initialState(stored, "macos");
+    expect(form.browser_engine).toBe("cloakbrowser");
+    expect(screenFollowsDisplay(form, [2560, 1440])).toBe(false);
+    expect(screenFollowsDisplay({ ...form, platform: "macos" }, [2560, 1440])).toBe(true);
+  });
+
+  it("can re-roll to any iPhone but the current one, including the default model", () => {
+    const start = changeDevice(createDefaultForm("macos"), "iphone_16", "macos");
+    const reached = new Set<string>();
+    for (let step = 0; step < 40; step += 1) reached.add(randomizeDevice(start, "macos", () => step / 40).device_profile ?? "");
+    expect(reached.has("iphone_15")).toBe(true);
+    expect(reached.has("iphone_16")).toBe(false);
+  });
+
+  it("is listed by its model name", () => {
+    const stored = { id: "p1", name: "x", platform: "ios", device_profile: "iphone_16_pro" } as unknown as Profile;
+    expect(deviceText(stored)).toBe("iPhone 16 Pro");
   });
 });

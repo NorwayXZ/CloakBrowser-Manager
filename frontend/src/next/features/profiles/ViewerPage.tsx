@@ -56,7 +56,7 @@ export function ViewerPage() {
       </div>
     );
   }
-  if (profiles.isError) return <ErrorState message={profiles.error.message} onRetry={() => void profiles.refetch()} />;
+  if (profiles.isError && profiles.data === undefined) return <ErrorState message={profiles.error.message} onRetry={() => void profiles.refetch()} />;
   if (!profile || !running) return null;
   if (profile.viewer_mode !== "vnc") {
     return (

@@ -2517,6 +2517,13 @@ class BrowserManager:
                 "severity": "error", "code": "gpu_platform_mismatch",
                 "message": "macOS 画像的 GPU 厂商/渲染器不是 Apple，和平台不一致。",
             })
+        if platform == ios_persona.PLATFORM and (
+            (vendor and vendor != ios_persona.GPU_VENDOR) or (renderer and renderer != ios_persona.GPU_RENDERER)
+        ):
+            issues.append({
+                "severity": "error", "code": "gpu_platform_mismatch",
+                "message": f"iPhone 画像的显卡必须是 {ios_persona.GPU_VENDOR} / {ios_persona.GPU_RENDERER}，现在的显卡和 iPhone 对不上。",
+            })
         if platform == "windows" and ("apple" in vendor.lower() or "apple" in renderer.lower()):
             issues.append({
                 "severity": "error", "code": "gpu_platform_mismatch",

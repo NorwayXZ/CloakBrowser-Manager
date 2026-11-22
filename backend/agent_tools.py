@@ -1039,6 +1039,11 @@ async def _launch_profile(client: RestClient, args: dict[str, Any]) -> dict[str,
     # debug opens a CDP port, and CDP can read cookies: automation tier only.
     if launch_mode == "debug" and await fetch_mode(client) != MODE_AUTOMATION:
         return not_automation_result()
+    if launch_mode != "debug" and await fetch_mode(client) != MODE_AUTOMATION:
+        # An iPhone look is applied over CDP, so the Manager starts it in debug mode whatever was asked.
+        profile_status, profile = await client.get(f"/api/profiles/{quote(profile_id, safe='')}")
+        if profile_status < 300 and isinstance(profile, dict) and profile.get("platform") == "ios":
+            return not_automation_result()
     status, payload = await client.post(
         f"/api/profiles/{quote(profile_id, safe='')}/launch",
         json_body={"launch_mode": launch_mode},

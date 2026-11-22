@@ -25,6 +25,7 @@ import {
   getDeviceProfileFamiliesForPlatform,
   getDeviceProfilesForPlatform,
   getDevicePlatformForHost,
+  platformFitsHost,
   getDeviceProfile,
   randomFingerprintSeed,
 } from "../lib/deviceProfiles";
@@ -349,6 +350,7 @@ function OptionCheckbox({
 }
 
 function platformLabel(platform: DevicePlatform): string {
+  if (platform === "ios") return "iPhone（iOS 外观）";
   return platform === "windows" ? "Windows" : "macOS";
 }
 
@@ -539,7 +541,8 @@ export function ProfileForm({
 
   useEffect(() => {
     if (profile) {
-      const browserEngine = normalizeFormEngine(profile.browser_engine);
+      // An iPhone always runs on the kernel, whatever an API-created profile stored.
+      const browserEngine = profile.platform === "ios" ? "cloakbrowser" : normalizeFormEngine(profile.browser_engine);
       const deviceProfile = getDeviceProfile(profile.device_profile);
       const baseForm: ProfileCreateData = {
         name: profile.name,
@@ -579,11 +582,11 @@ export function ProfileForm({
         notes: profile.notes,
         tags: profile.tags ?? [],
       };
-      const coercedDeviceProfile = deviceProfile.platform === allowedPlatform
+      const coercedDeviceProfile = platformFitsHost(deviceProfile.platform, allowedPlatform)
         ? deviceProfile
         : getDeviceProfile(getDefaultDeviceProfileId(allowedPlatform));
       setForm(
-        (baseForm.platform === allowedPlatform && deviceProfile.platform === allowedPlatform)
+        (platformFitsHost(baseForm.platform, allowedPlatform) && platformFitsHost(deviceProfile.platform, allowedPlatform))
           ? baseForm
           : applyDeviceProfile(baseForm, coercedDeviceProfile),
       );
@@ -690,7 +693,7 @@ export function ProfileForm({
     setSaving(true);
     setSaveError(null);
     try {
-      const safeForm = form.platform === allowedPlatform && form.device_profile === selectedDeviceProfile.id
+      const safeForm = platformFitsHost(form.platform, allowedPlatform) && form.device_profile === selectedDeviceProfile.id
         ? form
         : applyDeviceProfile(form, selectedDeviceProfile);
       await onSave(form.proxy ? safeForm : { ...safeForm, proxy: null });
@@ -727,8 +730,10 @@ export function ProfileForm({
   };
 
   const randomizeDeviceProfile = () => {
-    const defaultProfileId = getDefaultDeviceProfileId(allowedPlatform);
-    const platformProfiles = getDeviceProfilesForPlatform(allowedPlatform);
+    // An iPhone stays an iPhone: a new model, never a Mac.
+    const kind: DevicePlatform = form.platform === "ios" ? "ios" : allowedPlatform;
+    const defaultProfileId = getDefaultDeviceProfileId(kind);
+    const platformProfiles = getDeviceProfilesForPlatform(allowedPlatform).filter((preset) => preset.platform === kind);
     const profilePool = platformProfiles.filter((preset) => (
       preset.id !== defaultProfileId && preset.id !== form.device_profile
     ));
@@ -813,7 +818,9 @@ export function ProfileForm({
   const realScreen = hostScreen && hostScreen.length === 2 ? hostScreen : null;
   // Sites read the real display through CSS media queries, so a CloakBrowser
   // profile follows it unless a custom size was chosen.
-  const screenFollowsDisplay = currentEngine === "cloakbrowser"
+  // An iPhone has the phone's own screen; it never follows this computer's display.
+  const screenFollowsDisplay = form.platform !== "ios"
+    && currentEngine === "cloakbrowser"
     && realScreen !== null
     && (form.fingerprint_options?.screen ?? "real") === "real";
   const screenLabel = screenFollowsDisplay && realScreen
@@ -822,7 +829,7 @@ export function ProfileForm({
   const platformProfiles = getDeviceProfilesForPlatform(allowedPlatform);
   const platformFamilies = getDeviceProfileFamiliesForPlatform(allowedPlatform);
   const rawSelectedDeviceProfile = getDeviceProfile(form.device_profile);
-  const selectedDeviceProfile = rawSelectedDeviceProfile.platform === allowedPlatform
+  const selectedDeviceProfile = platformFitsHost(rawSelectedDeviceProfile.platform, allowedPlatform)
     ? rawSelectedDeviceProfile
     : getDeviceProfile(getDefaultDeviceProfileId(allowedPlatform));
   const rendererName = form.gpu_renderer?.split("Renderer: ")[1] ?? form.gpu_renderer;
@@ -851,7 +858,7 @@ export function ProfileForm({
   const handleEngineChange = (engine: "system_chrome" | "cloakbrowser") => {
     setForm((prev) => applyDeviceProfile(
       { ...prev, browser_engine: engine },
-      selectedDeviceProfile.platform === allowedPlatform
+      platformFitsHost(selectedDeviceProfile.platform, allowedPlatform)
         ? selectedDeviceProfile
         : getDeviceProfile(getDefaultDeviceProfileId(allowedPlatform)),
     ));
@@ -920,7 +927,7 @@ export function ProfileForm({
 
   const summaryRows = [
     ["浏览器", currentEngine === "system_chrome" ? "Google Chrome 原生" : "CloakBrowser / Chromium"],
-    ["系统", platformLabel(allowedPlatform)],
+    ["系统", platformLabel(form.platform === "ios" ? "ios" : allowedPlatform)],
     ["画像", selectedDeviceProfile.name],
     ["账号平台", form.account_platform || "未设置"],
     ["User-Agent", form.user_agent || "跟随真实浏览器"],
@@ -940,7 +947,7 @@ export function ProfileForm({
 
   const fingerprintPreviewRows = [
     ["运行模式", currentEngine === "system_chrome" ? "系统 Chrome 原生" : "CloakBrowser 画像"],
-    ["操作系统", platformLabel(allowedPlatform)],
+    ["操作系统", platformLabel(form.platform === "ios" ? "ios" : allowedPlatform)],
     ["设备画像", selectedDeviceProfile.name],
     ["CPU / 芯片", selectedDeviceProfile.chip],
     ["屏幕", screenFollowsDisplay ? screenLabel : `${form.screen_width ?? selectedDeviceProfile.screen_width} × ${form.screen_height ?? selectedDeviceProfile.screen_height}`],
@@ -1061,6 +1068,7 @@ export function ProfileForm({
                       <select
                         className="input max-w-xs"
                         value={currentEngine}
+                        disabled={form.platform === "ios"}
                         onChange={(e) => handleEngineChange(e.target.value as "system_chrome" | "cloakbrowser")}
                       >
                         <option value="system_chrome">稳定原生（系统 Chrome）</option>
@@ -1076,9 +1084,11 @@ export function ProfileForm({
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">操作系统</label>
                     <div>
                       <div className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
-                        {platformLabel(allowedPlatform)}
+                        {platformLabel(form.platform === "ios" ? "ios" : allowedPlatform)}
                       </div>
-                      <FieldNote>已按当前电脑隔离：macOS 只显示 macOS 画像，Windows 只显示 Windows 画像，避免跨系统画像互相打架。</FieldNote>
+                      <FieldNote>{form.platform === "ios"
+                        ? "iPhone 外观版只改外观（UA、屏幕、触摸、像素密度、苹果显卡名）；底层引擎仍是 Chrome，必须用防检测浏览器。"
+                        : "已按当前电脑隔离：macOS 只显示 macOS 画像，Windows 只显示 Windows 画像，避免跨系统画像互相打架。"}</FieldNote>
                     </div>
 
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">设备画像</label>
@@ -1664,7 +1674,7 @@ export function ProfileForm({
                     <FieldNote>改的是 User-Agent 和 Client Hints 里的浏览器名称与版本，内核本身不变。</FieldNote>
                   </div>
 
-                  <label className="pt-2 text-right text-sm font-medium text-slate-600">系统版本</label>
+                  {form.platform !== "ios" && <><label className="pt-2 text-right text-sm font-medium text-slate-600">系统版本</label>
                   <div>
                     <input
                       className="input max-w-sm"
@@ -1683,7 +1693,7 @@ export function ProfileForm({
                         ? "Client Hints 里的 macOS 版本，例如 15.6.0 表示 macOS 15。"
                         : "Client Hints 里的 Windows 版本：10.0.0 是 Windows 10，13.0.0 以上是 Windows 11。"}
                     </FieldNote>
-                  </div>
+                  </div></>}
 
                   <label className="pt-1.5 text-right text-sm font-medium text-slate-600">地理位置</label>
                   <div>
@@ -1769,7 +1779,7 @@ export function ProfileForm({
                     <FieldNote>navigator.storage.estimate() 报告的磁盘配额，单位 MB。真实电脑通常是几十 GB 以上；新建画像默认 50000（≈50 GB），实测可消除 BrowserScan 的无痕模式扣分。</FieldNote>
                   </div>
 
-                  <label className="pt-1.5 text-right text-sm font-medium text-slate-600">任务栏高度</label>
+                  {form.platform !== "ios" && <><label className="pt-1.5 text-right text-sm font-medium text-slate-600">任务栏高度</label>
                   <div>
                     <Segmented
                       label="任务栏高度"
@@ -1789,7 +1799,7 @@ export function ProfileForm({
                       />
                     )}
                     <FieldNote>决定 screen.availHeight 比屏幕高度少多少像素，一般不用改。</FieldNote>
-                  </div>
+                  </div></>}
 
                   <label className="pt-0.5 text-right text-sm font-medium text-slate-600">兼容选项</label>
                   <div className="space-y-3">

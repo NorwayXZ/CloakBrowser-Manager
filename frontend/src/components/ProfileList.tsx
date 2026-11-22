@@ -14,6 +14,7 @@ function platformLabel(platform: string) {
   if (platform === "windows") return "Windows";
   if (platform === "macos") return "macOS";
   if (platform === "linux") return "Linux";
+  if (platform === "ios") return "iPhone";
   return platform || "未知";
 }
 

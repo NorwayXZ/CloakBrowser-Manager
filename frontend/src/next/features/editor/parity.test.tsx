@@ -93,9 +93,8 @@ describe("save without changes sends the same payload as the current editor", ()
 
 describe("choices are the current editor's", () => {
   it("offers the same device presets", () => {
-    // The iPhone looks only exist in the redesigned panel (the previous one is a switch-back net).
-    expect(newDevices.DEVICE_PROFILES.filter((preset) => preset.platform !== "ios")).toEqual(oldDevices.DEVICE_PROFILES);
-    expect({ macos: newDevices.DEFAULT_DEVICE_PROFILE_IDS.macos, windows: newDevices.DEFAULT_DEVICE_PROFILE_IDS.windows }).toEqual(oldDevices.DEFAULT_DEVICE_PROFILE_IDS);
+    expect(newDevices.DEVICE_PROFILES).toEqual(oldDevices.DEVICE_PROFILES);
+    expect(newDevices.DEFAULT_DEVICE_PROFILE_IDS).toEqual(oldDevices.DEFAULT_DEVICE_PROFILE_IDS);
   });
 
   it("offers the same GPU and resolution presets", () => {

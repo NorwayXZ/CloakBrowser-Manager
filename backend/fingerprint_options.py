@@ -68,13 +68,14 @@ def build_fingerprint_option_args(profile: dict[str, Any]) -> list[str]:
     """Switches for the options that differ from the binary's defaults."""
     options = parse_fingerprint_options(profile)
     is_windows = profile.get("platform") == "windows"
+    is_ios = profile.get("platform") == "ios"
     args: list[str] = []
 
     if options.brand:
         args.append(f"--fingerprint-brand={options.brand}")
     if options.brand_version:
         args.append(f"--fingerprint-brand-version={options.brand_version}")
-    if options.platform_version:
+    if options.platform_version and not is_ios:  # an iPhone has no Client Hints to carry a version
         args.append(f"--fingerprint-platform-version={options.platform_version}")
     if options.noise is False:
         args.append(NOISE_OFF_ARG)
@@ -82,7 +83,7 @@ def build_fingerprint_option_args(profile: dict[str, Any]) -> list[str]:
         args.append("--fingerprint-sapi-voices=false")
     if options.storage_quota_mb is not None:
         args.append(f"--fingerprint-storage-quota={options.storage_quota_mb}")
-    if options.taskbar_height is not None:
+    if options.taskbar_height is not None and not is_ios:  # the persona's own 0: a phone has no Dock
         args.append(f"--fingerprint-taskbar-height={options.taskbar_height}")
     if is_windows and options.windows_font_metrics:
         args.append("--fingerprint-windows-font-metrics")
