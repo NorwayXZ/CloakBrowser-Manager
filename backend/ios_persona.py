@@ -88,7 +88,9 @@ def with_defaults(profile: dict[str, Any]) -> dict[str, Any]:
 
 def persona_args(profile: dict[str, Any]) -> list[str]:
     """Kernel switches for an iPhone persona on a macOS host."""
-    args = [f"--fingerprint-platform={KERNEL_PLATFORM}", "--fingerprint-noise=false"]
+    # Noise stays on (the kernel's default): with it off every noise-off profile on this
+    # computer draws the same canvas, which links iPhone accounts to each other.
+    args = [f"--fingerprint-platform={KERNEL_PLATFORM}"]
     seed = profile.get("fingerprint_seed")
     if seed is not None:
         args.insert(0, f"--fingerprint={seed}")

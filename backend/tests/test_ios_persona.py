@@ -72,6 +72,7 @@ def test_kernel_gets_the_host_platform_and_the_phone_hardware(tmp_path: Path):
     assert "--fingerprint-screen-width=393" in args and "--fingerprint-screen-height=852" in args
     assert "--fingerprint=4242" in args
     assert not any(a.startswith("--fingerprint-device-memory") for a in args)
+    assert "--fingerprint-noise=false" not in args  # noise off would give every iPhone the same canvas
     assert not any("ios" in a for a in args)
 
 
