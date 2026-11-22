@@ -383,8 +383,9 @@ async def test_an_iphone_is_not_launched_below_the_automation_tier_through_the_m
 
 
 def test_options_left_over_from_a_mac_never_change_an_iphones_screen_or_hints(tmp_path: Path):
-    leftovers = {"taskbar_height": 95, "platform_version": "15.6.0"}
+    leftovers = {"taskbar_height": 95, "platform_version": "15.6.0", "brand": "Edge", "brand_version": "130"}
     args = _manager(tmp_path)._build_fingerprint_args(ios_persona.with_defaults(_iphone(fingerprint_options=leftovers)))
     assert "--fingerprint-taskbar-height=0" in args
     assert not any(a.startswith("--fingerprint-taskbar-height=") and a != "--fingerprint-taskbar-height=0" for a in args)
     assert not any(a.startswith("--fingerprint-platform-version") for a in args)
+    assert not any(a.startswith("--fingerprint-brand") for a in args)

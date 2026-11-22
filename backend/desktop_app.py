@@ -84,6 +84,42 @@ def asset_keyword(system: str | None = None, machine: str | None = None) -> str:
     return f"{arch}.dmg"
 
 
+def _fetch_latest_via_web(context: ssl.SSLContext, timeout: float = 10) -> dict | None:
+    """Fallback when api.github.com is rate-limited (60/hr on shared exit IPs):
+    resolve /releases/latest redirect and build the asset list from SHA256SUMS.txt."""
+    head = urllib.request.Request(RELEASES_PAGE, method="HEAD", headers={"User-Agent": "CloakBrowser-Manager"})
+    try:
+        with urllib.request.urlopen(head, timeout=timeout, context=context) as response:
+            final_url = response.geturl()
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise
+    match = re.search(r"/releases/tag/([^/?#]+)", final_url)
+    if not match:
+        return None
+    tag = match.group(1)
+    base = f"https://github.com/{GITHUB_REPO}/releases/download/{tag}"
+    sums_req = urllib.request.Request(f"{base}/SHA256SUMS.txt", headers={"User-Agent": "CloakBrowser-Manager"})
+    assets: list[dict[str, object]] = []
+    try:
+        with urllib.request.urlopen(sums_req, timeout=timeout, context=context) as sums_resp:
+            text = sums_resp.read().decode("utf-8", "replace")
+        for line in text.splitlines():
+            parts = line.strip().split(None, 1)
+            if len(parts) == 2 and len(parts[0]) == 64:
+                name = parts[1].lstrip("*").strip()
+                assets.append({
+                    "name": name,
+                    "browser_download_url": f"{base}/{name}",
+                    "digest": f"sha256:{parts[0].lower()}",
+                    "size": 0,
+                })
+    except urllib.error.HTTPError:
+        pass
+    return {"tag_name": tag, "html_url": final_url, "assets": assets}
+
+
 def fetch_latest_release(timeout: float = 10) -> dict | None:
     """Latest GitHub release, or None when the repo has not published one."""
     request = urllib.request.Request(
@@ -102,6 +138,8 @@ def fetch_latest_release(timeout: float = 10) -> dict | None:
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
             return None
+        if exc.code in {403, 429}:
+            return _fetch_latest_via_web(context, timeout=timeout)
         raise
 
 

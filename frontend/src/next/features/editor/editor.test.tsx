@@ -525,4 +525,25 @@ describe("saving and leaving", () => {
     renderApp("/profiles/nope/edit");
     expect(await screen.findByText("没有这个环境")).toBeInTheDocument();
   });
+
+  it("switches between macOS desktop and iOS mobile environments from the OS selector", async () => {
+    const { fetchMock } = await openEditor("/profiles/new", "macos", [2560, 1440]);
+    const deviceSelect = screen.getByLabelText("设备型号");
+    expect(within(deviceSelect).queryByRole("option", { name: "iPhone 15" })).not.toBeInTheDocument();
+    expect(within(deviceSelect).getByRole("option", { name: "真实 Mac 原生" })).toBeInTheDocument();
+
+    fireEvent.click(radio("操作系统", "iOS（iPhone 手机）"));
+    expect(within(deviceSelect).getByRole("option", { name: "iPhone 15" })).toBeInTheDocument();
+    expect(within(deviceSelect).queryByRole("option", { name: "真实 Mac 原生" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("浏览器内存")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("GPU 预设")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("浏览器品牌")).not.toBeInTheDocument();
+    const resolutionSelect = screen.getByRole("combobox", { name: "分辨率" });
+    expect(within(resolutionSelect).queryByRole("option", { name: /跟随电脑屏幕/ })).not.toBeInTheDocument();
+    expect(within(resolutionSelect).getByRole("option", { name: "393 × 852 (iPhone 15 / 16)" })).toBeInTheDocument();
+
+    setName("My iPhone");
+    const body = await create(fetchMock);
+    expect(body).toMatchObject({ platform: "ios", device_profile: "iphone_15", browser_engine: "cloakbrowser", screen_width: 393, screen_height: 852 });
+  });
 });

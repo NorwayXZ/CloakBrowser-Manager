@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Profile } from "../profiles/types";
-import { randomFingerprintSeed } from "./deviceProfiles";
+import { randomFingerprintSeed, type DevicePlatform } from "./deviceProfiles";
 import {
   applyProxyGeo,
   buildPayload,
   changeDevice,
   changeEngine,
+  changePlatform,
   GPU_PRESETS,
   initialState,
   parseProxy,
@@ -116,6 +117,7 @@ export function useEditor(profile: Profile | null, hostOS: HostOS | null) {
     discardDraft: () => writeDraft(profileId, null),
     payload: () => buildPayload(form, hostOS),
     changeEngine: (engine: EditableEngine) => setForm((f) => changeEngine(f, engine, hostOS)),
+    changePlatform: (platform: DevicePlatform) => setForm((f) => changePlatform(f, platform, hostOS)),
     changeDevice: (id: string) => setForm((f) => changeDevice(f, id, hostOS)),
     randomizeDevice: () => setForm((f) => randomizeDevice(f, hostOS)),
     randomizeSeed: () => set("fingerprint_seed", randomFingerprintSeed()),

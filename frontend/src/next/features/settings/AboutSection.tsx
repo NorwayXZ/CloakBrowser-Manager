@@ -136,14 +136,17 @@ function UpdateSection({ packaged, running }: { packaged: boolean; running: numb
 function CheckResult({ result, onDismiss }: { result: UpdateCheck; onDismiss: () => void }) {
   const { manager, browser, browserError } = result;
   const restart = manager.restart_required;
+  const checkFailed = !manager.download_url && !restart && !manager.updated && manager.after === null;
   const title = manager.download_url
     ? `发现新版本${manager.after ? ` ${manager.after}` : ""}，需要下载安装`
     : restart || browser?.restart_required
       ? "已拉取更新，需要重启才生效"
       : manager.updated || browser?.updated
         ? "已更新"
-        : "已是最新";
-  const tone = manager.download_url || restart || browser?.restart_required ? "info" : "success";
+        : checkFailed
+          ? "未能连接 GitHub 检查新版本"
+          : "已是最新";
+  const tone = checkFailed ? "warning" : manager.download_url || restart || browser?.restart_required ? "info" : "success";
   return (
     <Banner
       tone={tone}

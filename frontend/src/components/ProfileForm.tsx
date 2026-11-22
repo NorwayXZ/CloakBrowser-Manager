@@ -22,7 +22,8 @@ import {
   applyDeviceProfile,
   type DevicePlatform,
   getDefaultDeviceProfileId,
-  getDeviceProfileFamiliesForPlatform,
+  getDeviceProfileFamiliesForExactPlatform,
+  getDeviceProfilesForExactPlatform,
   getDeviceProfilesForPlatform,
   getDevicePlatformForHost,
   platformFitsHost,
@@ -826,8 +827,10 @@ export function ProfileForm({
   const screenLabel = screenFollowsDisplay && realScreen
     ? `跟随电脑 ${realScreen[0]} × ${realScreen[1]}`
     : `${form.screen_width ?? 1920} × ${form.screen_height ?? 1080}`;
+  const selectedOsPlatform: DevicePlatform = form.platform === "ios" ? "ios" : allowedPlatform;
   const platformProfiles = getDeviceProfilesForPlatform(allowedPlatform);
-  const platformFamilies = getDeviceProfileFamiliesForPlatform(allowedPlatform);
+  const visibleProfiles = getDeviceProfilesForExactPlatform(selectedOsPlatform);
+  const platformFamilies = getDeviceProfileFamiliesForExactPlatform(selectedOsPlatform);
   const rawSelectedDeviceProfile = getDeviceProfile(form.device_profile);
   const selectedDeviceProfile = platformFitsHost(rawSelectedDeviceProfile.platform, allowedPlatform)
     ? rawSelectedDeviceProfile
@@ -850,9 +853,36 @@ export function ProfileForm({
     || proxyTest?.suggested_locale
     || proxyGeoFallbackLabel;
 
+  const adaptLegacyOptions = (prev: ProfileCreateData, nextPlatform: DevicePlatform): FingerprintOptions => {
+    const cur = prev.fingerprint_options ?? {};
+    if (prev.platform === nextPlatform) return cur;
+    if (nextPlatform === "ios") {
+      return {
+        ...cur,
+        brand: null,
+        brand_version: null,
+        platform_version: null,
+        taskbar_height: null,
+        screen: undefined,
+        noise: cur.noise === false ? null : cur.noise,
+      };
+    }
+    return {
+      ...cur,
+      noise: cur.noise == null && nextPlatform === "macos" ? false : cur.noise,
+    };
+  };
+
+  const handlePlatformChange = (nextPlatform: DevicePlatform) => {
+    const target: DevicePlatform = platformFitsHost(nextPlatform, allowedPlatform) ? nextPlatform : allowedPlatform;
+    if (form.platform === target) return;
+    const preset = getDeviceProfile(getDefaultDeviceProfileId(target));
+    setForm((prev) => applyDeviceProfile({ ...prev, fingerprint_options: adaptLegacyOptions(prev, target) }, preset));
+  };
+
   const handleDeviceProfileChange = (id: string) => {
     const nextProfile = platformProfiles.find((preset) => preset.id === id) ?? getDeviceProfile(getDefaultDeviceProfileId(allowedPlatform));
-    setForm((prev) => applyDeviceProfile(prev, nextProfile));
+    setForm((prev) => applyDeviceProfile({ ...prev, fingerprint_options: adaptLegacyOptions(prev, nextProfile.platform) }, nextProfile));
   };
 
   const handleEngineChange = (engine: "system_chrome" | "cloakbrowser") => {
@@ -1083,12 +1113,26 @@ export function ProfileForm({
 
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">操作系统</label>
                     <div>
-                      <div className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
-                        {platformLabel(form.platform === "ios" ? "ios" : allowedPlatform)}
-                      </div>
+                      {allowedPlatform === "macos" ? (
+                        <Segmented
+                          label="操作系统"
+                          value={form.platform === "ios" ? "ios" : "macos"}
+                          options={[
+                            ["macos", "macOS（电脑）"],
+                            ["ios", "iOS（iPhone 手机）"],
+                          ]}
+                          onChange={(next) => handlePlatformChange(next)}
+                        />
+                      ) : (
+                        <div className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
+                          {platformLabel(allowedPlatform)}
+                        </div>
+                      )}
                       <FieldNote>{form.platform === "ios"
-                        ? "iPhone 外观版只改外观（UA、屏幕、触摸、像素密度、苹果显卡名）；底层引擎仍是 Chrome，必须用防检测浏览器。"
-                        : "已按当前电脑隔离：macOS 只显示 macOS 画像，Windows 只显示 Windows 画像，避免跨系统画像互相打架。"}</FieldNote>
+                        ? "已切换到 iPhone 手机浏览器环境（竖屏尺寸、多点触控、iOS Safari 标识与 Apple GPU）；外观层完整伪装为 iPhone，底层运行在防检测内核上。"
+                        : allowedPlatform === "macos"
+                          ? "当前为 Mac 桌面浏览器环境；需要手机环境时直接切到「iOS（iPhone 手机）」，下方会自动切换为全套手机配置。"
+                          : "已按当前电脑隔离：Windows 只显示 Windows 画像，避免跨系统画像互相打架。"}</FieldNote>
                     </div>
 
                     <label className="pt-2 text-right text-sm font-medium text-slate-600">设备画像</label>
@@ -1100,7 +1144,7 @@ export function ProfileForm({
                       >
                         {platformFamilies.map((family) => (
                           <optgroup key={family} label={family}>
-                            {platformProfiles.filter((preset) => preset.family === family).map((preset) => (
+                            {visibleProfiles.filter((preset) => preset.family === family).map((preset) => (
                               <option key={preset.id} value={preset.id}>{preset.name}</option>
                             ))}
                           </optgroup>
@@ -1583,51 +1627,56 @@ export function ProfileForm({
                     <div className="mt-1 text-xs text-slate-500">留空表示稳定原生使用真实 CPU；伪装画像会按当前系统画像预设推荐线程数。</div>
                   </div>
 
-                  <label className="pt-2 text-right text-sm font-medium text-slate-600">浏览器内存</label>
-                  <div>
-                    <select
-                      className="input max-w-sm"
-                      value={form.device_memory ?? ""}
-                      onChange={(e) => set("device_memory", e.target.value ? Number(e.target.value) : null)}
-                    >
-                      <option value="">按真实设备</option>
-                      <option value="2">2 GB</option>
-                      <option value="4">4 GB</option>
-                      <option value="8">8 GB</option>
-                    </select>
-                    <div className="mt-1 text-xs text-slate-500">Chrome 的 navigator.deviceMemory 只暴露粗略值并且最高为 8 GB；画像默认使用 8，不虚构 16/32/64 GB。</div>
-                  </div>
+                  {form.platform !== "ios" && (
+                    <>
+                      <label className="pt-2 text-right text-sm font-medium text-slate-600">浏览器内存</label>
+                      <div>
+                        <select
+                          className="input max-w-sm"
+                          value={form.device_memory ?? ""}
+                          onChange={(e) => set("device_memory", e.target.value ? Number(e.target.value) : null)}
+                        >
+                          <option value="">按真实设备</option>
+                          <option value="2">2 GB</option>
+                          <option value="4">4 GB</option>
+                          <option value="8">8 GB</option>
+                        </select>
+                        <div className="mt-1 text-xs text-slate-500">Chrome 的 navigator.deviceMemory 只暴露粗略值并且最高为 8 GB；画像默认使用 8，不虚构 16/32/64 GB。</div>
+                      </div>
 
-                  <label className="pt-2 text-right text-sm font-medium text-slate-600">GPU 预设</label>
-                  <div>
-                    <select
-                      className="input max-w-xl"
-                      value=""
-                      onChange={(e) => {
-                        const name = e.target.value;
-                        if (name) applyGpuPreset(name);
-                        // Reset the control so the same preset can be applied
-                        // again even after the field already holds its value.
-                        e.target.value = "";
-                      }}
-                    >
-                      <option value="">选择预设...</option>
-                      {Object.keys(GPU_PRESETS).map((name) => (
-                        <option key={name} value={name}>{name}</option>
-                      ))}
-                    </select>
-                    <div className="mt-1 text-xs text-slate-500">GPU 预设会同时填充厂商和渲染器，避免厂商、芯片和 WebGL 信息互相打架。</div>
-                  </div>
+                      <label className="pt-2 text-right text-sm font-medium text-slate-600">GPU 预设</label>
+                      <div>
+                        <select
+                          className="input max-w-xl"
+                          value=""
+                          onChange={(e) => {
+                            const name = e.target.value;
+                            if (name) applyGpuPreset(name);
+                            // Reset the control so the same preset can be applied
+                            // again even after the field already holds its value.
+                            e.target.value = "";
+                          }}
+                        >
+                          <option value="">选择预设...</option>
+                          {Object.keys(GPU_PRESETS).map((name) => (
+                            <option key={name} value={name}>{name}</option>
+                          ))}
+                        </select>
+                        <div className="mt-1 text-xs text-slate-500">GPU 预设会同时填充厂商和渲染器，避免厂商、芯片和 WebGL 信息互相打架。</div>
+                      </div>
+                    </>
+                  )}
 
                   <label className="pt-2 text-right text-sm font-medium text-slate-600">GPU 厂商</label>
                   <div>
                     <input
                       className="input max-w-3xl"
                       value={form.gpu_vendor ?? ""}
+                      disabled={form.platform === "ios"}
                       onChange={(e) => set("gpu_vendor", e.target.value || null)}
                       placeholder="按画像或真实设备"
                     />
-                    <div className="mt-1 text-xs text-slate-500">通常不用手动改；只有选择伪装画像并且明确知道目标设备时才建议填写。</div>
+                    <div className="mt-1 text-xs text-slate-500">{form.platform === "ios" ? "iPhone 手机浏览器固定报告 Apple Inc.，不能改成电脑显卡。" : "通常不用手动改；只有选择伪装画像并且明确知道目标设备时才建议填写。"}</div>
                   </div>
 
                   <label className="pt-2 text-right text-sm font-medium text-slate-600">GPU 渲染器</label>
@@ -1635,10 +1684,11 @@ export function ProfileForm({
                     <input
                       className="input max-w-3xl"
                       value={form.gpu_renderer ?? ""}
+                      disabled={form.platform === "ios"}
                       onChange={(e) => set("gpu_renderer", e.target.value || null)}
                       placeholder="按画像或真实设备"
                     />
-                    <div className="mt-1 text-xs text-slate-500">这是 WebGL 元数据里最显眼的硬件信息，必须和当前系统画像保持一致。</div>
+                    <div className="mt-1 text-xs text-slate-500">{form.platform === "ios" ? "iPhone 手机浏览器固定报告 Apple GPU，改用电脑显卡会被拦截启动。" : "这是 WebGL 元数据里最显眼的硬件信息，必须和当前系统画像保持一致。"}</div>
                   </div>
                 </div>
               </section>
@@ -1651,7 +1701,7 @@ export function ProfileForm({
                   这些是 CloakBrowser 内核自带的额外伪装项，全部留默认时由内核按稳定种子自动生成，已经是一套一致的指纹；只在明确知道需要时才改。
                 </SectionIntro>
                 <div className="grid max-w-3xl grid-cols-[120px_minmax(0,1fr)] items-start gap-x-5 gap-y-4">
-                  <label className="pt-2 text-right text-sm font-medium text-slate-600">浏览器品牌</label>
+                  {form.platform !== "ios" && <><label className="pt-2 text-right text-sm font-medium text-slate-600">浏览器品牌</label>
                   <div>
                     <div className="flex max-w-xl gap-2">
                       <select
@@ -1672,7 +1722,7 @@ export function ProfileForm({
                       />
                     </div>
                     <FieldNote>改的是 User-Agent 和 Client Hints 里的浏览器名称与版本，内核本身不变。</FieldNote>
-                  </div>
+                  </div></>}
 
                   {form.platform !== "ios" && <><label className="pt-2 text-right text-sm font-medium text-slate-600">系统版本</label>
                   <div>
