@@ -141,6 +141,8 @@ def fresh_identity(profile: dict[str, Any], *, host_os: str | None, native: bool
     spoofed GPU/CPU/memory/UA are cleared and only the screen comes from the
     preset. Timezone and locale go back to "follow the exit IP".
     """
+    if profile.get("platform") == "ios":
+        return _fresh_iphone(profile)
     platform = target_platform(profile, host_os)
     presets = [p for p in DEVICE_PRESETS if p["platform"] == platform]
     pool = [p for p in presets if p["id"] != profile.get("device_profile")] or presets
@@ -163,6 +165,31 @@ def fresh_identity(profile: dict[str, Any], *, host_os: str | None, native: bool
         "cookies_json": None,
     }
     return fields
+
+
+def _fresh_iphone(profile: dict[str, Any]) -> dict[str, Any]:
+    """A reset keeps an iPhone profile an iPhone: new seed, a different model."""
+    from . import ios_persona
+
+    ids = [i for i in ios_persona.IPHONES if i != profile.get("device_profile")] or list(ios_persona.IPHONES)
+    device_id = secrets.choice(ids)
+    _, width, height, _ = ios_persona.IPHONES[device_id]
+    return {
+        "fingerprint_seed": new_seed(profile.get("fingerprint_seed")),
+        "device_profile": device_id,
+        "platform": "ios",
+        "screen_width": width,
+        "screen_height": height,
+        "gpu_vendor": None,
+        "gpu_renderer": None,
+        "hardware_concurrency": None,
+        "device_memory": None,
+        "user_agent": None,
+        "color_scheme": None,
+        "timezone": None,
+        "locale": None,
+        "cookies_json": None,
+    }
 
 
 def owned_data_dir(profile: dict[str, Any], profiles_root: Path) -> Path | None:

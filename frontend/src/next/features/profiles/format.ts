@@ -219,6 +219,7 @@ export function seedDeviceLabel(profile: { seed_device?: { [key: string]: unknow
 }
 
 export function platformLabel(profile: Pick<Profile, "platform">): string {
+  if (profile.platform === "ios") return "iPhone";
   return profile.platform === "macos" ? "macOS" : profile.platform === "windows" ? "Windows" : profile.platform;
 }
 

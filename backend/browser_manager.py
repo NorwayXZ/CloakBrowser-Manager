@@ -39,7 +39,7 @@ from .fingerprint_options import (
     unsupported_option_labels,
     webrtc_ip_arg,
 )
-from . import chrome_versions, seed_device
+from . import chrome_versions, ios_persona, seed_device
 from .host_display import primary_screen_size, primary_visible_frame
 from .fingerprint_report import DEFAULT_NETWORK_PROBE_URL, analyze_fingerprint, run_fingerprint_probe
 from .cloak_runtime import get_effective_chromium_version
@@ -2356,6 +2356,8 @@ class BrowserManager:
         self._auto_launch_task: asyncio.Task | None = None
 
     def _browser_engine(self, profile: dict[str, Any] | None = None) -> str:
+        if profile and ios_persona.is_ios(profile):
+            return "cloakbrowser"  # only the kernel takes the persona's switches
         profile_engine = str((profile or {}).get("browser_engine") or "auto").strip().lower()
         if profile_engine in {"chrome", "system-chrome", "system_chrome"}:
             if self.runtime.runtime_mode == "docker":
@@ -2395,6 +2397,7 @@ class BrowserManager:
             or self.runtime.viewer_mode == "vnc"
             or self._browser_engine(profile) != "cloakbrowser"
             or parse_fingerprint_options(profile).screen != "real"
+            or ios_persona.is_ios(profile)
         ):
             return profile
         size = primary_screen_size()
@@ -2427,7 +2430,19 @@ class BrowserManager:
         host = self.runtime.host_os
         platform = str(profile.get("platform") or "").lower()
 
-        if host in {"macos", "windows"} and platform and platform != host:
+        if platform == ios_persona.PLATFORM:
+            if host != "macos":
+                issues.append({
+                    "severity": "error",
+                    "code": "ios_needs_macos_host",
+                    "message": "iPhone 外观版目前只支持 macOS 电脑（需要苹果的字体和显卡环境）。",
+                })
+            issues.append({
+                "severity": "warning",
+                "code": "ios_look_only",
+                "message": "iPhone 外观版只改外观（UA、屏幕、触摸、像素密度、苹果显卡名）；底层引擎仍是 Chrome，深度检测能看出来。",
+            })
+        elif host in {"macos", "windows"} and platform and platform != host:
             issues.append({
                 "severity": "error",
                 "code": "host_platform_mismatch",
@@ -2457,6 +2472,11 @@ class BrowserManager:
                 issues.append({
                     "severity": "error", "code": "ua_platform_mismatch",
                     "message": "自定义 User-Agent 没有 macOS 标识，和当前 macOS 画像不一致。",
+                })
+            if platform == ios_persona.PLATFORM and "iPhone" not in ua:
+                issues.append({
+                    "severity": "error", "code": "ua_platform_mismatch",
+                    "message": "自定义 User-Agent 没有 iPhone 标识，和当前 iOS 画像不一致。",
                 })
             if platform == "windows" and "Windows NT" not in ua:
                 issues.append({
@@ -2662,6 +2682,11 @@ class BrowserManager:
         xray_process: XrayProcess | None = None
         try:
             profile = self.follow_real_screen(profile)
+            if ios_persona.is_ios(profile):
+                profile = ios_persona.with_defaults(profile)
+                # The phone look is applied through the managed (CDP) session; a
+                # plain manual process would show the desktop's own values.
+                requested_launch_mode = "debug"
             preflight = self.preflight(profile, requested_launch_mode)
             if not preflight["can_launch"]:
                 messages = "；".join(issue["message"] for issue in preflight["issues"] if issue["severity"] == "error")
@@ -3066,6 +3091,9 @@ class BrowserManager:
                     )
                 if fingerprint_init_js:
                     init_scripts.append(fingerprint_init_js)
+                if ios_persona.is_ios(profile):
+                    await ios_persona.apply_emulation(context, profile)
+                    init_scripts.append(ios_persona.init_script(profile))
                 for script in init_scripts:
                     await context.add_init_script(script)
                 for page in context.pages:
@@ -3771,6 +3799,8 @@ class BrowserManager:
 
     def _build_persona_args(self, profile: dict[str, Any]) -> list[str]:
         """Seed, platform and device-hardware switches for the persona."""
+        if ios_persona.is_ios(profile):
+            return ios_persona.persona_args(profile)
         args: list[str] = []
         if self.runtime.viewer_mode == "vnc":
             args.append("--use-angle=swiftshader")

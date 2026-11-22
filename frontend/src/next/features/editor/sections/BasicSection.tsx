@@ -31,7 +31,8 @@ export const BasicSection = forwardRef<HTMLInputElement, {
   const device = selectedDevice(form, hostOS);
   // On a Mac the kernel derives a whole Apple device from the seed and
   // ignores the template picked here.
-  const seedDerived = hostOS === "macos" && platform === "macos" && engine === "cloakbrowser";
+  const ios = form.platform === "ios";
+  const seedDerived = hostOS === "macos" && platform === "macos" && engine === "cloakbrowser" && !ios;
 
   return (
     <Section id="form-basic" title="基础设置" description="名称、分组、账号平台只用于管理；浏览器、设备型号、User-Agent、Cookie 和启动页面会影响实际打开的浏览器。">
@@ -75,15 +76,19 @@ export const BasicSection = forwardRef<HTMLInputElement, {
             </Hint>
           }
         >
-          <Select value={engine} onChange={(event) => editor.changeEngine(event.target.value as "system_chrome" | "cloakbrowser")}>
+          <Select value={engine} disabled={ios} onChange={(event) => editor.changeEngine(event.target.value as "system_chrome" | "cloakbrowser")}>
             <option value="system_chrome">稳定原生（系统 Chrome）</option>
             <option value="cloakbrowser">防检测浏览器（CloakBrowser）</option>
           </Select>
         </FormField>
         <div className="flex flex-col gap-1.5">
           <span className="text-sm font-medium text-fg">操作系统</span>
-          <span className="inline-flex h-8 w-fit items-center rounded border border-border bg-surface-2 px-2.5 text-sm text-fg">{platformLabel(platform)}</span>
-          <span className="text-xs text-fg-3">按当前电脑锁定：只提供同系统的设备型号，避免跨系统设备型号互相矛盾。</span>
+          <span className="inline-flex h-8 w-fit items-center rounded border border-border bg-surface-2 px-2.5 text-sm text-fg">{platformLabel(ios ? "ios" : platform)}</span>
+          <span className="text-xs text-fg-3">
+            {ios
+              ? "iPhone 外观版只改外观（UA、屏幕、触摸、像素密度、苹果显卡名）；底层引擎仍是 Chrome，必须用防检测浏览器，并且总是以受控方式启动。"
+              : "按当前电脑锁定：只提供同系统的设备型号，避免跨系统设备型号互相矛盾。"}
+          </span>
         </div>
         <FormField
           label="设备型号"

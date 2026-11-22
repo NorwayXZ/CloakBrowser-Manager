@@ -45,6 +45,8 @@ describe("deviceProfiles", () => {
 
     expect(windowsProfiles.length).toBeGreaterThan(1);
     expect(windowsProfiles.every((profile) => profile.platform === "windows")).toBe(true);
-    expect(macProfiles.every((profile) => profile.platform === "macos")).toBe(true);
+    // A Mac also runs the iPhone looks; nothing else but its own system.
+    expect(macProfiles.every((profile) => profile.platform === "macos" || profile.platform === "ios")).toBe(true);
+    expect(macProfiles.filter((profile) => profile.platform === "macos").length).toBeGreaterThan(1);
   });
 });

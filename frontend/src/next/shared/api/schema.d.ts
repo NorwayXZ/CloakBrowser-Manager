@@ -3248,7 +3248,7 @@ export interface components {
              * @default windows
              * @enum {string}
              */
-            platform: "windows" | "macos" | "linux";
+            platform: "windows" | "macos" | "linux" | "ios";
             /** Proxy */
             proxy?: string | null;
             /**
@@ -3609,7 +3609,7 @@ export interface components {
             /** Notes */
             notes?: string | null;
             /** Platform */
-            platform?: ("windows" | "macos" | "linux") | null;
+            platform?: ("windows" | "macos" | "linux" | "ios") | null;
             /** Proxy */
             proxy?: string | null;
             /** Proxy Connection Mode */

@@ -11,6 +11,7 @@ import {
   getDeviceProfile,
   getDeviceProfilesForPlatform,
   getDevicePlatformForHost,
+  platformFitsHost,
   randomFingerprintSeed,
   type DevicePlatform,
   type DeviceProfilePreset,
@@ -111,6 +112,7 @@ export const SECTIONS = [
 ] as const;
 
 export function platformLabel(platform: DevicePlatform): string {
+  if (platform === "ios") return "iPhone（iOS 外观）";
   return platform === "windows" ? "Windows" : "macOS";
 }
 
@@ -297,9 +299,9 @@ export function initialState(profile: Profile | null, hostOS?: HostOS | null): E
     notes: profile.notes,
     tags: (profile.tags ?? []) as EditorForm["tags"],
   };
-  const coerced = deviceProfile.platform === allowedPlatform ? deviceProfile : getDeviceProfile(getDefaultDeviceProfileId(allowedPlatform));
+  const coerced = platformFitsHost(deviceProfile.platform, allowedPlatform) ? deviceProfile : getDeviceProfile(getDefaultDeviceProfileId(allowedPlatform));
   return {
-    form: baseForm.platform === allowedPlatform && deviceProfile.platform === allowedPlatform ? baseForm : applyDeviceProfile(baseForm, coerced),
+    form: platformFitsHost(baseForm.platform, allowedPlatform) && platformFitsHost(deviceProfile.platform, allowedPlatform) ? baseForm : applyDeviceProfile(baseForm, coerced),
     proxyParts: parseProxy(profile.proxy),
     startupUrlsText: (profile.startup_urls ?? []).join("\n"),
     launchArgsOpen: (profile.launch_args ?? []).length > 0,
@@ -310,14 +312,14 @@ export function initialState(profile: Profile | null, hostOS?: HostOS | null): E
 export function selectedDevice(form: EditorForm, hostOS?: HostOS | null): DeviceProfilePreset {
   const allowed = getDevicePlatformForHost(hostOS);
   const raw = getDeviceProfile(form.device_profile);
-  return raw.platform === allowed ? raw : getDeviceProfile(getDefaultDeviceProfileId(allowed));
+  return platformFitsHost(raw.platform, allowed) ? raw : getDeviceProfile(getDefaultDeviceProfileId(allowed));
 }
 
 /** What is sent on save: the device is forced onto this host's platform, and an empty proxy is null. */
 export function buildPayload(form: EditorForm, hostOS?: HostOS | null): EditorForm {
   const allowed = getDevicePlatformForHost(hostOS);
   const device = selectedDevice(form, hostOS);
-  const safe = form.platform === allowed && form.device_profile === device.id ? form : applyDeviceProfile(form, device);
+  const safe = platformFitsHost(form.platform, allowed) && form.device_profile === device.id ? form : applyDeviceProfile(form, device);
   return form.proxy ? safe : { ...safe, proxy: null };
 }
 
@@ -334,8 +336,10 @@ export function changeDevice(form: EditorForm, id: string, hostOS?: HostOS | nul
 /** A different device of this host's platform, with a new seed ("随机设备型号"). */
 export function randomizeDevice(form: EditorForm, hostOS?: HostOS | null, random: () => number = Math.random): EditorForm {
   const allowed = getDevicePlatformForHost(hostOS);
-  const defaultId = getDefaultDeviceProfileId(allowed);
-  const presets = getDeviceProfilesForPlatform(allowed);
+  // An iPhone stays an iPhone: a new model, never a Mac.
+  const kind: DevicePlatform = form.platform === "ios" ? "ios" : allowed;
+  const defaultId = getDefaultDeviceProfileId(kind);
+  const presets = getDeviceProfilesForPlatform(allowed).filter((preset) => preset.platform === kind);
   const pool = presets.filter((preset) => preset.id !== defaultId && preset.id !== form.device_profile);
   const fallback = presets.filter((preset) => preset.id !== defaultId);
   const choices = pool.length > 0 ? pool : fallback;
@@ -456,7 +460,7 @@ export function summaryRows(ctx: SummaryContext): [string, string][] {
       : [];
   return [
     ["浏览器", engine === "system_chrome" ? "Google Chrome 原生" : "CloakBrowser / Chromium"],
-    ["系统", platformLabel(getDevicePlatformForHost(hostOS))],
+    ["系统", platformLabel(form.platform === "ios" ? "ios" : getDevicePlatformForHost(hostOS))],
     ["设备型号", device.name],
     ["账号平台", form.account_platform || "未设置"],
     ["User-Agent", form.user_agent || "跟随真实浏览器"],
@@ -484,7 +488,7 @@ export function fingerprintPreviewRows(ctx: SummaryContext): [string, string][] 
   const { timezone, locale } = timezoneLocale(ctx);
   return [
     ["运行模式", engine === "system_chrome" ? "系统 Chrome 原生" : "防检测浏览器"],
-    ["操作系统", platformLabel(getDevicePlatformForHost(hostOS))],
+    ["操作系统", platformLabel(form.platform === "ios" ? "ios" : getDevicePlatformForHost(hostOS))],
     ["设备型号", device.name],
     ["CPU / 芯片", device.chip],
     ["屏幕", screenFollowsDisplay(form, hostScreen) ? screenLabel(ctx) : `${form.screen_width ?? device.screen_width} × ${form.screen_height ?? device.screen_height}`],
