@@ -64,11 +64,35 @@ def test_browserscan_lists_deductions():
     assert "扣分：Different time zones -10%" in verdict[2]
 
 
+def test_browserscan_reads_hidden_authenticity_on_narrow_mobile_viewport():
+    verdict = sc.judge_browserscan({
+        "text": "Bot Detection:\nNoDetection\n100%\nWhat websites see about you",
+        "hiddenAuth": "Browser fingerprint authenticity: 100%",
+    })
+    assert verdict is not None
+    assert verdict[0] == "pass"
+    assert "机器人检测：No" in verdict[2]
+
+
 @pytest.mark.parametrize(("raw", "status"), [
     ({"passed": 31, "failed": 0, "warn": 0}, "pass"),
     ({"passed": 29, "failed": 2, "warn": 0}, "fail"),
     ({"passed": 30, "failed": 0, "warn": 1}, "warn"),
     ({"passed": 3, "failed": 0, "warn": 0}, None),
+    ({
+        "ua": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1",
+        "passed": 7,
+        "failed": 4,
+        "warn": 0,
+        "failedNames": ["Chrome (New)", "Permissions (New)", "Plugins Length (Old)", "Plugins is of type PluginArray"],
+    }, "pass"),
+    ({
+        "ua": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1",
+        "passed": 6,
+        "failed": 5,
+        "warn": 0,
+        "failedNames": ["WebDriver (New)", "Chrome (New)", "Permissions (New)", "Plugins Length (Old)", "Plugins is of type PluginArray"],
+    }, "fail"),
 ])
 def test_sannysoft(raw, status):
     verdict = sc.judge_sannysoft(raw)

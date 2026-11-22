@@ -25,6 +25,7 @@ import json
 import logging
 import os
 import platform
+import secrets
 import subprocess
 import sys
 from contextlib import suppress
@@ -141,178 +142,192 @@ async def ensure_webkit_installed() -> Path:
 
 _WORKER_TEMPLATE = r"""
 (() => {
+  'use strict';
   if (typeof WorkerNavigator !== 'function') return;
   const hc = __HC__;
   const nativeToString = Function.prototype.toString;
-  const nativeSources = new WeakMap();
+  const sharedMap = new WeakMap();
   const jscCode = (bare) => `function ${bare}() {\n\x20\x20\x20\x20[native code]\n}`;
-  const markNative = (fn, bare, fnName) => {
+  const mark = (fn, bare, fnName) => {
     try {
       if (fnName !== undefined) Object.defineProperty(fn, 'name', { value: fnName, configurable: true });
-      nativeSources.set(fn, jscCode(bare));
+      sharedMap.set(fn, jscCode(bare));
     } catch (_) {}
     return fn;
   };
-  const patchedToString = markNative({ toString() {
-    if (typeof this === 'function' && nativeSources.has(this)) return nativeSources.get(this);
-    return nativeToString.call(this);
-  } }.toString, 'toString', 'toString');
+  const patchedToString = mark({
+    toString() {
+      if (typeof this === 'function' && sharedMap.has(this)) return sharedMap.get(this);
+      return nativeToString.call(this);
+    }
+  }.toString, 'toString', 'toString');
   try {
     Object.defineProperty(Function.prototype, 'toString', {
       value: patchedToString, configurable: true, writable: true, enumerable: false,
     });
   } catch (_) {}
 
-  const jscGetter = (Ctor, iface, prop, compute) => {
-    const fn = Object.getOwnPropertyDescriptor({
-      get [prop]() {
-        if (!(this instanceof Ctor)) {
-          throw new TypeError(`The ${iface}.${prop} getter can only be used on instances of ${iface}`);
-        }
-        return compute.call(this);
-      },
-    }, prop).get;
-    return markNative(fn, prop, `get ${prop}`);
-  };
-
-  try {
-    Object.defineProperty(WorkerNavigator.prototype, 'platform', {
-      get: jscGetter(WorkerNavigator, 'WorkerNavigator', 'platform', () => 'iPhone'),
-      enumerable: true,
-      configurable: true,
-    });
-  } catch (_) {}
-  try {
-    Object.defineProperty(WorkerNavigator.prototype, 'hardwareConcurrency', {
-      get: jscGetter(WorkerNavigator, 'WorkerNavigator', 'hardwareConcurrency', () => hc),
-      enumerable: true,
-      configurable: true,
-    });
-  } catch (_) {}
-  if ('webdriver' in WorkerNavigator.prototype) {
+  const patchWorkerGetter = (prop, getVal) => {
     try {
-      Object.defineProperty(WorkerNavigator.prototype, 'webdriver', {
-        get: jscGetter(WorkerNavigator, 'WorkerNavigator', 'webdriver', () => false),
-        enumerable: true,
-        configurable: true,
+      const desc = Object.getOwnPropertyDescriptor(WorkerNavigator.prototype, prop);
+      if (!desc || !desc.get) return;
+      const origGet = desc.get;
+      const getter = mark(Object.getOwnPropertyDescriptor({
+        get [prop]() {
+          if (!(this instanceof WorkerNavigator)) return origGet.call(this);
+          return getVal.call(this);
+        }
+      }, prop).get, prop, `get ${prop}`);
+      Object.defineProperty(WorkerNavigator.prototype, prop, {
+        get: getter, enumerable: desc.enumerable, configurable: desc.configurable,
       });
     } catch (_) {}
-  }
+  };
+
+  patchWorkerGetter('platform', () => 'iPhone');
+  patchWorkerGetter('hardwareConcurrency', () => hc);
+  patchWorkerGetter('webdriver', () => false);
 })();
 """
 
 _PAGE_TEMPLATE = r"""
 (() => {
+  'use strict';
   const cfg = __CONFIG__;
+  const SECRET = __SECRET__;
   const workerPatch = __WORKER_PATCH__;
 
+  // Share one WeakMap across same-origin frames (via unforgeable per-launch SECRET)
+  // so fresh phantom iframes calling iframe.Function.prototype.toString.call(fn)
+  // see exact JSC [native code] sources without exposing any global property.
   const nativeToString = Function.prototype.toString;
-  const nativeSources = new WeakMap();
+  let sharedMap = null;
+  for (const host of [window.top, window.parent]) {
+    try {
+      if (host && host !== window) {
+        const res = host.Function.prototype.toString.call(nativeToString, SECRET);
+        if (res && typeof res.get === 'function' && typeof res.set === 'function') {
+          sharedMap = res;
+          break;
+        }
+      }
+    } catch (_) {}
+  }
+  if (!sharedMap) sharedMap = new WeakMap();
+
   const jscCode = (bare) => `function ${bare}() {\n\x20\x20\x20\x20[native code]\n}`;
-  const markNative = (fn, bare, fnName) => {
+  const mark = (fn, bare, fnName) => {
     try {
       if (fnName !== undefined) Object.defineProperty(fn, 'name', { value: fnName, configurable: true });
-      nativeSources.set(fn, jscCode(bare));
+      sharedMap.set(fn, jscCode(bare));
     } catch (_) {}
     return fn;
   };
-  const patchedToString = markNative({ toString() {
-    if (typeof this === 'function' && nativeSources.has(this)) return nativeSources.get(this);
-    return nativeToString.call(this);
-  } }.toString, 'toString', 'toString');
+  const patchedToString = mark({
+    toString() {
+      if (arguments.length === 1 && arguments[0] === SECRET) return sharedMap;
+      if (typeof this === 'function' && sharedMap.has(this)) return sharedMap.get(this);
+      return nativeToString.call(this);
+    }
+  }.toString, 'toString', 'toString');
   try {
     Object.defineProperty(Function.prototype, 'toString', {
       value: patchedToString, configurable: true, writable: true, enumerable: false,
     });
   } catch (_) {}
 
-  const jscGetter = (Ctor, iface, prop, compute) => {
-    const fn = Object.getOwnPropertyDescriptor({
-      get [prop]() {
-        if (!(this instanceof Ctor)) {
-          throw new TypeError(`The ${iface}.${prop} getter can only be used on instances of ${iface}`);
+  // Concise getters/methods have no .prototype descriptor and delegate invalid
+  // receivers back to WebKit's original C++ accessor for exact TypeError & stack depth.
+  const patchGetter = (Proto, Ctor, prop, getVal) => {
+    try {
+      const desc = Object.getOwnPropertyDescriptor(Proto, prop);
+      if (!desc || !desc.get) return;
+      const origGet = desc.get;
+      const getter = mark(Object.getOwnPropertyDescriptor({
+        get [prop]() {
+          if (!(this instanceof Ctor)) return origGet.call(this);
+          return getVal.call(this);
         }
-        return compute.call(this);
-      },
-    }, prop).get;
-    return markNative(fn, prop, `get ${prop}`);
+      }, prop).get, prop, `get ${prop}`);
+      Object.defineProperty(Proto, prop, {
+        get: getter, enumerable: desc.enumerable, configurable: desc.configurable,
+      });
+    } catch (_) {}
+  };
+
+  const patchMethod = (Proto, Ctor, prop, impl) => {
+    try {
+      const desc = Object.getOwnPropertyDescriptor(Proto, prop);
+      if (!desc || typeof desc.value !== 'function') return;
+      const origFn = desc.value;
+      const fn = mark({
+        [prop]() {
+          if (!(this instanceof Ctor)) return origFn.apply(this, arguments);
+          return impl.apply(this, arguments);
+        }
+      }[prop], prop, prop);
+      Object.defineProperty(Proto, prop, {
+        value: fn, writable: desc.writable, enumerable: desc.enumerable, configurable: desc.configurable,
+      });
+    } catch (_) {}
   };
 
   // Desktop macOS Safari exposes window.safari; iOS Mobile Safari does not.
   try { delete window.safari; } catch (_) {}
 
-  if (typeof Navigator === 'function') {
-    const defineNav = (prop, compute) => {
-      try {
-        Object.defineProperty(Navigator.prototype, prop, {
-          get: jscGetter(Navigator, 'Navigator', prop, compute),
-          enumerable: true,
-          configurable: true,
-        });
-      } catch (_) {}
-    };
-
-    defineNav('webdriver', () => false);
-    defineNav('platform', () => 'iPhone');
-    defineNav('maxTouchPoints', () => cfg.maxTouchPoints);
-    defineNav('hardwareConcurrency', () => cfg.hc);
-    defineNav('pdfViewerEnabled', () => false);
-
-    // iOS Mobile Safari reports 0 plugins and 0 mimeTypes while preserving real prototype brands.
-    const makeEmptyCollection = (realObj, hasRefresh) => {
-      if (!realObj) return null;
-      const itemFn = markNative({ item(index) { return null; } }.item, 'item', 'item');
-      const namedItemFn = markNative({ namedItem(name) { return null; } }.namedItem, 'namedItem', 'namedItem');
-      const refreshFn = hasRefresh ? markNative({ refresh() {} }.refresh, 'refresh', 'refresh') : null;
-      const iterFn = markNative({ *[Symbol.iterator]() {} }[Symbol.iterator], '[Symbol.iterator]', '[Symbol.iterator]');
-      return new Proxy(realObj, {
-        get(target, prop, receiver) {
-          if (prop === 'length') return 0;
-          if (prop === 'item') return itemFn;
-          if (prop === 'namedItem') return namedItemFn;
-          if (hasRefresh && prop === 'refresh') return refreshFn;
-          if (prop === Symbol.iterator) return iterFn;
-          if (typeof prop === 'string' && /^(?:0|[1-9]\d*)$/.test(prop)) return undefined;
-          const val = Reflect.get(target, prop, target);
-          if (typeof val === 'object' && val !== null && (val.constructor?.name === 'Plugin' || val.constructor?.name === 'MimeType')) {
-            return undefined;
-          }
-          return typeof val === 'function' ? val.bind(target) : val;
-        },
-        has(target, prop) {
-          if (typeof prop === 'string' && /^(?:0|[1-9]\d*)$/.test(prop)) return false;
-          const val = Reflect.get(target, prop, target);
-          if (typeof val === 'object' && val !== null && (val.constructor?.name === 'Plugin' || val.constructor?.name === 'MimeType')) {
-            return false;
-          }
-          return Reflect.has(target, prop);
-        },
-        ownKeys() {
-          return [];
-        },
-        getOwnPropertyDescriptor(target, prop) {
-          return undefined;
-        },
-      });
-    };
-
+  // iOS Mobile Safari reports 0 plugins and 0 mimeTypes on real PluginArray / MimeTypeArray
+  // prototypes (no ES6 Proxy so Object.getOwnPropertyNames & spread never trip Proxy invariants).
+  if (typeof PluginArray === 'function' && typeof MimeTypeArray === 'function' && typeof Navigator === 'function') {
     try {
-      const emptyPlugins = makeEmptyCollection(navigator.plugins, true);
-      const emptyMimeTypes = makeEmptyCollection(navigator.mimeTypes, false);
-      if (emptyPlugins) defineNav('plugins', () => emptyPlugins);
-      if (emptyMimeTypes) defineNav('mimeTypes', () => emptyMimeTypes);
+      const emptyIter = mark({ *[Symbol.iterator]() {} }[Symbol.iterator], '[Symbol.iterator]', '[Symbol.iterator]');
+      patchGetter(PluginArray.prototype, PluginArray, 'length', () => 0);
+      patchMethod(PluginArray.prototype, PluginArray, 'item', (index) => null);
+      patchMethod(PluginArray.prototype, PluginArray, 'namedItem', (name) => null);
+      patchMethod(PluginArray.prototype, PluginArray, 'refresh', () => undefined);
+      Object.defineProperty(PluginArray.prototype, Symbol.iterator, {
+        value: emptyIter, writable: true, enumerable: false, configurable: true,
+      });
+
+      patchGetter(MimeTypeArray.prototype, MimeTypeArray, 'length', () => 0);
+      patchMethod(MimeTypeArray.prototype, MimeTypeArray, 'item', (index) => null);
+      patchMethod(MimeTypeArray.prototype, MimeTypeArray, 'namedItem', (name) => null);
+      Object.defineProperty(MimeTypeArray.prototype, Symbol.iterator, {
+        value: emptyIter, writable: true, enumerable: false, configurable: true,
+      });
+
+      const emptyPlugins = Object.create(PluginArray.prototype);
+      const emptyMimeTypes = Object.create(MimeTypeArray.prototype);
+      patchGetter(Navigator.prototype, Navigator, 'plugins', () => emptyPlugins);
+      patchGetter(Navigator.prototype, Navigator, 'mimeTypes', () => emptyMimeTypes);
     } catch (_) {}
   }
 
-  // Headed macOS window chrome adds titlebar height to outerHeight; clamp to phone screen.
+  if (typeof Navigator === 'function') {
+    patchGetter(Navigator.prototype, Navigator, 'webdriver', () => false);
+    patchGetter(Navigator.prototype, Navigator, 'platform', () => 'iPhone');
+    patchGetter(Navigator.prototype, Navigator, 'maxTouchPoints', () => cfg.maxTouchPoints);
+    patchGetter(Navigator.prototype, Navigator, 'hardwareConcurrency', () => cfg.hc);
+    patchGetter(Navigator.prototype, Navigator, 'pdfViewerEnabled', () => false);
+  }
+
+  // Headed macOS window chrome adds titlebar height to outerHeight; clamp only when exceeding phone screen.
   if (typeof Window === 'function') {
-    for (const [prop, val] of [['outerWidth', cfg.width], ['outerHeight', cfg.height]]) {
+    for (const [prop, maxVal] of [['outerWidth', cfg.width], ['outerHeight', cfg.height]]) {
       try {
-        Object.defineProperty(window, prop, {
-          get: jscGetter(Window, 'Window', prop, () => val),
-          enumerable: true,
-          configurable: true,
-        });
+        const owner = Object.getOwnPropertyDescriptor(window, prop) ? window : Window.prototype;
+        const desc = Object.getOwnPropertyDescriptor(owner, prop);
+        if (desc && desc.get) {
+          const origGet = desc.get;
+          const getter = mark(Object.getOwnPropertyDescriptor({
+            get [prop]() {
+              const raw = origGet.call(this);
+              return typeof raw === 'number' && raw > maxVal ? maxVal : raw;
+            }
+          }, prop).get, prop, `get ${prop}`);
+          Object.defineProperty(owner, prop, {
+            get: getter, enumerable: desc.enumerable, configurable: desc.configurable,
+          });
+        }
       } catch (_) {}
     }
   }
@@ -333,23 +348,26 @@ _PAGE_TEMPLATE = r"""
       }
       return { ...rtcCfg, iceServers: filtered };
     };
-    const RTCProxy = new Proxy(OrigRTC, {
-      construct(target, args, newTarget) {
-        const nextArgs = args.length > 0 ? [stripStun(args[0]), ...args.slice(1)] : args;
-        return Reflect.construct(target, nextArgs, newTarget === RTCProxy ? target : newTarget);
-      },
-    });
+    const WrappedRTC = function RTCPeerConnection() {
+      if (!new.target) return OrigRTC.apply(this, arguments);
+      const args = Array.prototype.slice.call(arguments);
+      if (args.length > 0) args[0] = stripStun(args[0]);
+      return Reflect.construct(OrigRTC, args, new.target === WrappedRTC ? OrigRTC : new.target);
+    };
     try {
-      markNative(RTCProxy, 'RTCPeerConnection', 'RTCPeerConnection');
-      Object.defineProperty(window, 'RTCPeerConnection', { value: RTCProxy, configurable: true, writable: true });
-      Object.defineProperty(OrigRTC.prototype, 'constructor', { value: RTCProxy, configurable: true, writable: true });
+      Object.setPrototypeOf(WrappedRTC, OrigRTC);
+      WrappedRTC.prototype = OrigRTC.prototype;
+      Object.defineProperty(WrappedRTC, 'length', { value: OrigRTC.length, configurable: true });
+      mark(WrappedRTC, 'RTCPeerConnection', 'RTCPeerConnection');
+      Object.defineProperty(window, 'RTCPeerConnection', { value: WrappedRTC, configurable: true, writable: true });
+      Object.defineProperty(OrigRTC.prototype, 'constructor', { value: WrappedRTC, configurable: true, writable: true });
       if ('webkitRTCPeerConnection' in window) {
-        Object.defineProperty(window, 'webkitRTCPeerConnection', { value: RTCProxy, configurable: true, writable: true });
+        Object.defineProperty(window, 'webkitRTCPeerConnection', { value: WrappedRTC, configurable: true, writable: true });
       }
     } catch (_) {}
   }
 
-  // Deterministic per-seed Canvas & Audio micro-noise so multiple iPhone profiles do not link.
+  // Deterministic per-seed Canvas & OfflineAudioContext micro-noise so multiple iPhone profiles do not link.
   if (cfg.noise && typeof cfg.seed === 'number') {
     const seed0 = (cfg.seed >>> 0) || 1;
     const prng = (idx) => {
@@ -403,75 +421,68 @@ _PAGE_TEMPLATE = r"""
         }
       };
 
-      const patchedGetImageData = markNative({ getImageData(sx, sy, sw, sh) {
+      patchMethod(CanvasRenderingContext2D.prototype, CanvasRenderingContext2D, 'getImageData', function(sx, sy, sw, sh) {
         const img = origGetImageData.apply(this, arguments);
         try { nudgePixels(img.data, img.width, img.height); } catch (_) {}
         return img;
-      } }.getImageData, 'getImageData', 'getImageData');
-
-      const patchedToDataURL = markNative({ toDataURL() {
-        if (!(this instanceof HTMLCanvasElement)) return origToDataURL.apply(this, arguments);
+      });
+      patchMethod(HTMLCanvasElement.prototype, HTMLCanvasElement, 'toDataURL', function() {
         const noisy = cloneNoisyCanvas(this);
         return origToDataURL.apply(noisy || this, arguments);
-      } }.toDataURL, 'toDataURL', 'toDataURL');
-
-      const patchedToBlob = markNative({ toBlob() {
-        if (!(this instanceof HTMLCanvasElement)) return origToBlob.apply(this, arguments);
+      });
+      patchMethod(HTMLCanvasElement.prototype, HTMLCanvasElement, 'toBlob', function(callback) {
         const noisy = cloneNoisyCanvas(this);
         return origToBlob.apply(noisy || this, arguments);
-      } }.toBlob, 'toBlob', 'toBlob');
-
-      try {
-        Object.defineProperty(CanvasRenderingContext2D.prototype, 'getImageData', { value: patchedGetImageData, configurable: true, writable: true });
-        Object.defineProperty(HTMLCanvasElement.prototype, 'toDataURL', { value: patchedToDataURL, configurable: true, writable: true });
-        Object.defineProperty(HTMLCanvasElement.prototype, 'toBlob', { value: patchedToBlob, configurable: true, writable: true });
-      } catch (_) {}
+      });
     }
 
-    if (typeof AudioBuffer === 'function') {
-      const origGetChannelData = AudioBuffer.prototype.getChannelData;
-      const nudgedBuffers = new WeakSet();
-      const patchedGetChannelData = markNative({ getChannelData(channel) {
-        const arr = origGetChannelData.apply(this, arguments);
-        try {
-          if (!nudgedBuffers.has(arr)) {
-            nudgedBuffers.add(arr);
+    // Nudge rendered OfflineAudioContext buffers once on completion so AudioBuffer.getChannelData
+    // and AudioBuffer.copyFromChannel remain 100% native and sample-identical.
+    const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    if (typeof OAC === 'function' && OAC.prototype && typeof OAC.prototype.startRendering === 'function') {
+      const origStart = OAC.prototype.startRendering;
+      patchMethod(OAC.prototype, OAC, 'startRendering', function() {
+        return origStart.apply(this, arguments).then((buf) => {
+          try {
             const eps = ((seed0 % 97) - 48) * 1e-8;
-            for (let i = 0; i < arr.length; i += 13) {
-              if (arr[i] !== 0) arr[i] += eps * (((prng(i) & 1) === 0) ? 1 : -1);
+            for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+              const arr = buf.getChannelData(ch);
+              for (let i = 0; i < arr.length; i += 13) {
+                if (arr[i] !== 0) arr[i] += eps * (((prng(i + ch * 997) & 1) === 0) ? 1 : -1);
+              }
             }
-          }
-        } catch (_) {}
-        return arr;
-      } }.getChannelData, 'getChannelData', 'getChannelData');
-      try {
-        Object.defineProperty(AudioBuffer.prototype, 'getChannelData', { value: patchedGetChannelData, configurable: true, writable: true });
-      } catch (_) {}
+          } catch (_) {}
+          return buf;
+        });
+      });
     }
   }
 
   // Workers from data: URLs and Blobs get the same JSC WorkerNavigator patch before their code runs.
   if (typeof Worker === 'function') {
     const OriginalWorker = Worker;
-    const WorkerProxy = new Proxy(OriginalWorker, {
-      construct(target, args, newTarget) {
-        try {
-          const url = String(args[0]);
-          const head = /^data:(?:text|application)\/(?:x-)?(?:javascript|ecmascript)([^,]*),/i.exec(url);
-          if (head) {
-            const rest = url.slice(head[0].length);
-            args[0] = /;base64/i.test(head[1])
-              ? head[0] + btoa(workerPatch + atob(decodeURIComponent(rest)))
-              : head[0] + encodeURIComponent(workerPatch) + rest;
-          }
-        } catch (_) {}
-        return Reflect.construct(target, args, newTarget === WorkerProxy ? target : newTarget);
-      },
-    });
+    const WrappedWorker = function Worker(scriptURL) {
+      if (!new.target) return OriginalWorker.apply(this, arguments);
+      const args = Array.prototype.slice.call(arguments);
+      try {
+        const url = String(args[0]);
+        const head = /^data:(?:text|application)\/(?:x-)?(?:javascript|ecmascript)([^,]*),/i.exec(url);
+        if (head) {
+          const rest = url.slice(head[0].length);
+          args[0] = /;base64/i.test(head[1])
+            ? head[0] + btoa(workerPatch + atob(decodeURIComponent(rest)))
+            : head[0] + encodeURIComponent(workerPatch) + rest;
+        }
+      } catch (_) {}
+      return Reflect.construct(OriginalWorker, args, new.target === WrappedWorker ? OriginalWorker : new.target);
+    };
     try {
-      markNative(WorkerProxy, 'Worker', 'Worker');
-      Object.defineProperty(window, 'Worker', { value: WorkerProxy, configurable: true, writable: true });
-      Object.defineProperty(OriginalWorker.prototype, 'constructor', { value: WorkerProxy, configurable: true, writable: true });
+      Object.setPrototypeOf(WrappedWorker, OriginalWorker);
+      WrappedWorker.prototype = OriginalWorker.prototype;
+      Object.defineProperty(WrappedWorker, 'length', { value: OriginalWorker.length, configurable: true });
+      mark(WrappedWorker, 'Worker', 'Worker');
+      Object.defineProperty(window, 'Worker', { value: WrappedWorker, configurable: true, writable: true });
+      Object.defineProperty(OriginalWorker.prototype, 'constructor', { value: WrappedWorker, configurable: true, writable: true });
     } catch (_) {}
   }
 
@@ -486,16 +497,19 @@ _PAGE_TEMPLATE = r"""
         return !head || /postMessage|onmessage|addEventListener\s*\(\s*['"]message|importScripts|navigator|Intl|OffscreenCanvas/.test(head);
       } catch (_) { return false; }
     };
-    const PatchedBlob = function Blob(parts, options) {
-      const next = wantsPatch(parts, options) ? [workerPatch + '\n', ...(Array.isArray(parts) ? parts : [parts])] : parts;
-      return new OriginalBlob(next, options);
+    const PatchedBlob = function Blob() {
+      if (!new.target) return OriginalBlob.apply(this, arguments);
+      const args = Array.prototype.slice.call(arguments);
+      if (args.length > 0 && wantsPatch(args[0], args[1])) {
+        args[0] = [workerPatch + '\n', ...(Array.isArray(args[0]) ? args[0] : [args[0]])];
+      }
+      return Reflect.construct(OriginalBlob, args, new.target === PatchedBlob ? OriginalBlob : new.target);
     };
     try {
       Object.setPrototypeOf(PatchedBlob, OriginalBlob);
       PatchedBlob.prototype = OriginalBlob.prototype;
-      Object.defineProperty(PatchedBlob, 'name', { value: 'Blob', configurable: true });
       Object.defineProperty(PatchedBlob, 'length', { value: OriginalBlob.length, configurable: true });
-      markNative(PatchedBlob, 'Blob', 'Blob');
+      mark(PatchedBlob, 'Blob', 'Blob');
       Object.defineProperty(window, 'Blob', { value: PatchedBlob, configurable: true, writable: true });
       Object.defineProperty(OriginalBlob.prototype, 'constructor', { value: PatchedBlob, configurable: true, writable: true });
     } catch (_) {}
@@ -534,9 +548,11 @@ def init_script(profile: dict[str, Any], *, has_proxy: bool = False) -> str:
         "seed": int(seed) if isinstance(seed, int) else None,
     }
     patch_str = worker_patch_bytes(filled).decode("utf-8")
+    secret = secrets.token_hex(16)
     return (
         _PAGE_TEMPLATE
         .replace("__CONFIG__", json.dumps(cfg))
+        .replace("__SECRET__", json.dumps(secret))
         .replace("__WORKER_PATCH__", json.dumps(patch_str))
     )
 

@@ -135,8 +135,23 @@ async def test_live_webkit_ios_passes_full_self_check_and_jsc_stealth(tmp_path: 
                   try { getDesc(Navigator.prototype, 'webdriver').get.call({}); } catch (e) { receiverErr = e.message; }
                   const f = document.createElement('iframe');
                   document.body.appendChild(f);
-                  const syncIframe = { wd: f.contentWindow.navigator.webdriver, pf: f.contentWindow.navigator.platform, safari: 'safari' in f.contentWindow };
+                  const wdGet = getDesc(Navigator.prototype, 'webdriver').get;
+                  const syncIframe = {
+                    wd: f.contentWindow.navigator.webdriver,
+                    pf: f.contentWindow.navigator.platform,
+                    safari: 'safari' in f.contentWindow,
+                    crossWdStr: f.contentWindow.Function.prototype.toString.call(wdGet),
+                    crossToStr: f.contentWindow.Function.prototype.toString.call(Function.prototype.toString),
+                  };
                   f.remove();
+                  const oac = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, 256, 44100);
+                  const osc = oac.createOscillator();
+                  osc.connect(oac.destination);
+                  osc.start(0);
+                  const audioBuf = await oac.startRendering();
+                  const copyArr = new Float32Array(256);
+                  audioBuf.copyFromChannel(copyArr, 0);
+                  const audioMatches = String([...audioBuf.getChannelData(0)].slice(0, 32)) === String([...copyArr].slice(0, 32));
                   const worker = await new Promise((resolve, reject) => {
                     const w = new Worker('/w.js');
                     w.onmessage = e => { w.terminate(); resolve(e.data); };
@@ -148,14 +163,18 @@ async def test_live_webkit_ios_passes_full_self_check_and_jsc_stealth(tmp_path: 
                     hasSafari: 'safari' in window,
                     wd: navigator.webdriver,
                     wdOwn: Object.prototype.hasOwnProperty.call(navigator, 'webdriver'),
-                    wdStr: String(getDesc(Navigator.prototype, 'webdriver').get),
+                    wdStr: String(wdGet),
+                    wdHasProto: Object.prototype.hasOwnProperty.call(wdGet, 'prototype'),
                     receiverErr,
                     pf: navigator.platform,
                     mtp: navigator.maxTouchPoints,
                     hc: navigator.hardwareConcurrency,
                     pdf: navigator.pdfViewerEnabled,
                     plugins: navigator.plugins.length,
+                    pluginKeys: Object.getOwnPropertyNames(navigator.plugins),
+                    pluginSpread: [...navigator.plugins].length,
                     mimes: navigator.mimeTypes.length,
+                    audioMatches,
                     syncIframe,
                     worker,
                   };
@@ -166,13 +185,22 @@ async def test_live_webkit_ios_passes_full_self_check_and_jsc_stealth(tmp_path: 
             assert probe["hasSafari"] is False
             assert probe["wd"] is False and probe["wdOwn"] is False
             assert probe["wdStr"] == "function webdriver() {\n    [native code]\n}"
+            assert probe["wdHasProto"] is False
             assert probe["receiverErr"] == "The Navigator.webdriver getter can only be used on instances of Navigator"
             assert probe["pf"] == "iPhone"
             assert probe["mtp"] == 5
             assert probe["hc"] == 6
             assert probe["pdf"] is False
             assert probe["plugins"] == 0 and probe["mimes"] == 0
-            assert probe["syncIframe"] == {"wd": False, "pf": "iPhone", "safari": False}
+            assert probe["pluginKeys"] == [] and probe["pluginSpread"] == 0
+            assert probe["audioMatches"] is True
+            assert probe["syncIframe"] == {
+                "wd": False,
+                "pf": "iPhone",
+                "safari": False,
+                "crossWdStr": "function webdriver() {\n    [native code]\n}",
+                "crossToStr": "function toString() {\n    [native code]\n}",
+            }
             assert probe["worker"] == {
                 "platform": "iPhone",
                 "hc": 6,
