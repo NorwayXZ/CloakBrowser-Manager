@@ -26,6 +26,7 @@ import logging
 import os
 import platform
 import secrets
+import shlex
 import subprocess
 import sys
 from contextlib import suppress
@@ -158,6 +159,74 @@ async def ensure_webkit_installed() -> Path:
         if existing is not None:
             return existing
         return await asyncio.to_thread(ensure_webkit_installed_sync)
+
+
+def ensure_macos_tabs_dylib() -> Path | None:
+    """Locate the bundled macOS titlebar-tab dylib, or compile it once in dev mode."""
+    if sys.platform != "darwin":
+        return None
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    candidates: list[Path] = []
+    if meipass:
+        candidates.append(Path(meipass) / "backend" / "libcloak_webkit_tabs.dylib")
+    here = Path(__file__).resolve().parent
+    candidates.append(here / "libcloak_webkit_tabs.dylib")
+    candidates.append(here.parent / "build" / "macos" / "libcloak_webkit_tabs.dylib")
+
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+
+    src = here.parent / "packaging" / "macos" / "webkit_tabs.m"
+    if not src.is_file():
+        return None
+    out = playwright_browsers_cache_dir() / "libcloak_webkit_tabs.dylib"
+    try:
+        if not out.is_file() or out.stat().st_mtime < src.stat().st_mtime:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            subprocess.run(
+                [
+                    "clang", "-O2", "-fobjc-arc", "-dynamiclib",
+                    "-framework", "Cocoa", "-framework", "WebKit",
+                    "-mmacosx-version-min=11.0",
+                    str(src), "-o", str(out),
+                ],
+                check=True,
+                capture_output=True,
+                timeout=30,
+            )
+            subprocess.run(["codesign", "--force", "--sign", "-", str(out)], check=True, capture_output=True, timeout=10)
+        return out
+    except Exception as exc:
+        logger.debug("Could not compile macOS WebKit tab bar dylib: %s", exc)
+        return None
+
+
+def _write_macos_headed_launcher(
+    *,
+    webkit_dir: Path,
+    webkit_bin_dir: Path,
+    dylib_path: Path,
+    profile_name: str,
+    start_url: str,
+) -> Path | None:
+    pw_bin = webkit_bin_dir / "Playwright.app" / "Contents" / "MacOS" / "Playwright"
+    if not pw_bin.is_file():
+        return None
+    launcher = webkit_dir / "launch_webkit_ui.sh"
+    script = (
+        "#!/bin/bash\n"
+        f"export CLOAK_PROFILE_NAME={shlex.quote(profile_name or 'iPhone')}\n"
+        f"export CLOAK_START_URL={shlex.quote(start_url or 'about:blank')}\n"
+        f"export DYLD_FRAMEWORK_PATH={shlex.quote(str(webkit_bin_dir))}\n"
+        f"export DYLD_LIBRARY_PATH={shlex.quote(str(webkit_bin_dir))}\n"
+        f"export DYLD_INSERT_LIBRARIES={shlex.quote(str(dylib_path))}\n"
+        f"exec {shlex.quote(str(pw_bin))} \"$@\"\n"
+    )
+    launcher.write_text(script, encoding="utf-8")
+    launcher.chmod(0o755)
+    return launcher
 
 
 # ── JSC-native iPhone Safari Stealth & Coherence Script ──────────────────────
@@ -669,6 +738,7 @@ async def launch_webkit_ios_context(
     geo_mode: str,
     profile_cookies: list[dict[str, Any]],
     startup_urls: list[str],
+    start_page_url: str | None = None,
     humanize: bool = False,
     human_preset: str = "default",
     on_all_windows_closed: Callable[[], Any] | None = None,
@@ -695,7 +765,21 @@ async def launch_webkit_ios_context(
         "has_touch": True,
         "user_agent": ua,
     }
-    if sys.platform != "win32" and (webkit_bin_dir / "pw_run.sh").is_file():
+    native_tabs_active = False
+    if not headless and sys.platform == "darwin":
+        dylib = ensure_macos_tabs_dylib()
+        if dylib is not None:
+            launcher = _write_macos_headed_launcher(
+                webkit_dir=webkit_dir,
+                webkit_bin_dir=webkit_bin_dir,
+                dylib_path=dylib,
+                profile_name=str(filled.get("name") or "iPhone"),
+                start_url=str(start_page_url or (startup_urls[0] if startup_urls else "about:blank")),
+            )
+            if launcher is not None:
+                kwargs["executable_path"] = str(launcher)
+                native_tabs_active = True
+    if "executable_path" not in kwargs and sys.platform != "win32" and (webkit_bin_dir / "pw_run.sh").is_file():
         kwargs["executable_path"] = str(webkit_bin_dir / "pw_run.sh")
     if locale:
         kwargs["locale"] = locale
@@ -717,7 +801,7 @@ async def launch_webkit_ios_context(
     closing = False
     try:
         context = await pw.webkit.launch_persistent_context(str(webkit_dir), **kwargs)
-        script = init_script(filled, has_proxy=bool(browser_proxy), same_window_links=not headless)
+        script = init_script(filled, has_proxy=bool(browser_proxy), same_window_links=(not headless and not native_tabs_active))
         await context.add_init_script(script)
         await install_worker_route(context, filled)
         effective_webkit_locale: str | None = None

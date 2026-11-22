@@ -24,6 +24,8 @@ datas = [
     (str(ROOT / "docs" / "AGENT.md"), "docs"),
     (str(BUILD_DIR / "app_version.json"), "."),
 ]
+if (BUILD_DIR / "libcloak_webkit_tabs.dylib").is_file():
+    datas.append((str(BUILD_DIR / "libcloak_webkit_tabs.dylib"), "backend"))
 datas += collect_data_files("cloakbrowser")
 for package in ("cloakbrowser", "playwright", "fastapi", "uvicorn", "pydantic", "geoip2", "maxminddb"):
     datas += copy_metadata(package)

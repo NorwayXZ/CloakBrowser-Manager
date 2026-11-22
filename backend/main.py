@@ -2882,7 +2882,7 @@ async def profile_start_page(profile_id: str, request: Request):
         os.environ.get("CLOAKBROWSER_NETWORK_PROBE_URL")
         or DEFAULT_NETWORK_PROBE_URL
     )
-    links_html = _start_page_links_html(same_window=(raw_engine == "webkit"))
+    links_html = _start_page_links_html()
 
     return HTMLResponse(
         f"""<!doctype html>

@@ -3028,6 +3028,7 @@ class BrowserManager:
                         geo_mode=geo_mode,
                         profile_cookies=profile_cookies,
                         startup_urls=[],
+                        start_page_url=native_start_page_url(profile_id),
                         humanize=bool(profile.get("humanize", False)),
                         human_preset=str(profile.get("human_preset") or "default"),
                         on_all_windows_closed=lambda: self.stop(profile_id, reason="关闭了浏览器窗口"),

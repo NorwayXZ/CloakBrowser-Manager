@@ -55,6 +55,11 @@ for size in 16 32 128 256 512; do
 done
 iconutil -c icns "$ICONSET" -o "$BUILD/AppIcon.icns"
 
+echo "[build] webkit titlebar tabs dylib"
+clang -O2 -fobjc-arc -dynamiclib -framework Cocoa -framework WebKit -mmacosx-version-min=11.0 \
+    "$HERE/webkit_tabs.m" -o "$BUILD/libcloak_webkit_tabs.dylib"
+codesign --force --sign - "$BUILD/libcloak_webkit_tabs.dylib"
+
 echo "[build] app bundle"
 "$VENV/bin/python" -m PyInstaller --noconfirm --clean \
     --distpath "$BUILD/dist" --workpath "$BUILD/work" \

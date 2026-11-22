@@ -85,6 +85,28 @@ def test_activate_playwright_browsers_path_overrides_pyinstaller_zero_hook(monke
     assert webkit_ios.os.environ["PLAYWRIGHT_BROWSERS_PATH"] == str(cache2)
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS AppKit titlebar tab bar only")
+def test_macos_tabs_dylib_and_headed_launcher(tmp_path: Path):
+    dylib = webkit_ios.ensure_macos_tabs_dylib()
+    assert dylib is not None and dylib.is_file()
+    fake_bin = tmp_path / "wk"
+    pw_exec = fake_bin / "Playwright.app" / "Contents" / "MacOS" / "Playwright"
+    pw_exec.parent.mkdir(parents=True)
+    pw_exec.write_text("#!/bin/sh\n", encoding="utf-8")
+    launcher = webkit_ios._write_macos_headed_launcher(
+        webkit_dir=tmp_path,
+        webkit_bin_dir=fake_bin,
+        dylib_path=dylib,
+        profile_name="A 'iPhone' $1",
+        start_url="http://127.0.0.1:8080/profile/p1/start",
+    )
+    assert launcher is not None and launcher.is_file()
+    body = launcher.read_text(encoding="utf-8")
+    assert "DYLD_INSERT_LIBRARIES=" in body
+    assert "CLOAK_PROFILE_NAME=" in body
+    assert "CLOAK_START_URL=" in body
+
+
 @pytest.mark.asyncio
 @pytest.mark.skipif(sys.platform != "darwin" or not webkit_ios.is_webkit_installed(), reason="requires installed macOS WebKit")
 async def test_live_webkit_ios_passes_full_self_check_and_jsc_stealth(tmp_path: Path):
