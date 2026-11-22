@@ -1300,7 +1300,7 @@ _WRITABLE_PROFILE_FIELDS = (
 
 _PROFILE_WRITE_PROPS: dict[str, Any] = {
     "name": {"type": "string", "description": "画像名称（只用来自己识别）"},
-    "platform": {"type": "string", "enum": ["windows", "macos", "linux"], "description": "设备系统；新建时不填就用本机系统（本地版只能启动和本机同系统的画像）"},
+    "platform": {"type": "string", "enum": ["windows", "macos", "linux", "ios"], "description": "设备系统；新建时不填就用本机系统（本地版只能启动和本机同系统的画像）。ios = iPhone 外观版，只能在 Mac 上用，device_profile 填 iphone_15、iphone_16_pro 等；它只改外观，底层仍是 Chrome"},
     "group_name": {"type": "string", "description": "分组名称（先用 list_groups 查；没有就先 create_group）"},
     "proxy_id": {"type": "string", "description": "list_proxies 里的 proxy_id；不填表示不改/直连"},
     "device_profile": {"type": "string", "description": "设备模板 id（list_device_templates 查）"},

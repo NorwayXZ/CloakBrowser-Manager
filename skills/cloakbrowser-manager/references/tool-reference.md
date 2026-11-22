@@ -381,7 +381,7 @@ Manager 总览：应用版本、内核版本、运行中的浏览器数、画像
 | 参数 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `name` | string | 是 | 画像名称（只用来自己识别） |
-| `platform` | windows / macos / linux |  | 设备系统；新建时不填就用本机系统（本地版只能启动和本机同系统的画像） |
+| `platform` | windows / macos / linux / ios |  | 设备系统；新建时不填就用本机系统（本地版只能启动和本机同系统的画像）。ios = iPhone 外观版，只能在 Mac 上用，device_profile 填 iphone_15、iphone_16_pro 等；它只改外观，底层仍是 Chrome |
 | `group_name` | string |  | 分组名称（先用 list_groups 查；没有就先 create_group） |
 | `proxy_id` | string |  | list_proxies 里的 proxy_id；不填表示不改/直连 |
 | `device_profile` | string |  | 设备模板 id（list_device_templates 查） |
@@ -414,7 +414,7 @@ Manager 总览：应用版本、内核版本、运行中的浏览器数、画像
 | --- | --- | --- | --- |
 | `profile_id` | string | 是 | 画像 id（先用 list_profiles 查） |
 | `name` | string |  | 画像名称（只用来自己识别） |
-| `platform` | windows / macos / linux |  | 设备系统；新建时不填就用本机系统（本地版只能启动和本机同系统的画像） |
+| `platform` | windows / macos / linux / ios |  | 设备系统；新建时不填就用本机系统（本地版只能启动和本机同系统的画像）。ios = iPhone 外观版，只能在 Mac 上用，device_profile 填 iphone_15、iphone_16_pro 等；它只改外观，底层仍是 Chrome |
 | `group_name` | string |  | 分组名称（先用 list_groups 查；没有就先 create_group） |
 | `proxy_id` | string |  | list_proxies 里的 proxy_id；不填表示不改/直连 |
 | `device_profile` | string |  | 设备模板 id（list_device_templates 查） |

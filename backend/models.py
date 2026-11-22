@@ -123,7 +123,7 @@ class ProfileCreate(BaseModel):
     proxy_id: str | None = None
     timezone: str | None = None  # "America/New_York"
     locale: str | None = None  # "en-US"
-    platform: Literal["windows", "macos", "linux"] = "windows"
+    platform: Literal["windows", "macos", "linux", "ios"] = "windows"
     user_agent: str | None = None
     screen_width: int = 1920
     screen_height: int = 1080
@@ -165,7 +165,7 @@ class ProfileUpdate(BaseModel):
     proxy_id: str | None = None
     timezone: str | None = Field(default=None)
     locale: str | None = Field(default=None)
-    platform: Literal["windows", "macos", "linux"] | None = None
+    platform: Literal["windows", "macos", "linux", "ios"] | None = None
     user_agent: str | None = Field(default=None)
     screen_width: int | None = None
     screen_height: int | None = None

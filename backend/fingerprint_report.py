@@ -654,7 +654,7 @@ def analyze_fingerprint(
             message="navigator.webdriver should be false",
         )
 
-    if page.get("secureContext") is True and not ua_data:
+    if page.get("secureContext") is True and not ua_data and expected_platform != "ios":
         _add_issue(
             issues,
             severity="warning",
@@ -724,6 +724,44 @@ def analyze_fingerprint(
                 expected="Macintosh UA + MacIntel",
                 actual={"userAgent": user_agent, "platform": platform},
                 message="macOS profile should expose a coherent Mac user agent and platform",
+            )
+    elif expected_platform == "ios":
+        if "iPhone" not in user_agent or platform != "iPhone":
+            _add_issue(
+                issues,
+                severity="error",
+                signal="platform",
+                scope="main",
+                expected="iPhone UA + iPhone",
+                actual={"userAgent": user_agent, "platform": platform},
+                message="iOS profile should expose a coherent iPhone user agent and platform",
+            )
+        # Safari has no Client Hints and no deviceMemory; Chrome-only values give the persona away.
+        leaks = [
+            name for name, present in (
+                ("navigator.userAgentData", bool(ua_data)),
+                ("navigator.deviceMemory", nav.get("deviceMemory") is not None),
+            ) if present
+        ]
+        if leaks:
+            _add_issue(
+                issues,
+                severity="error",
+                signal="ios_chrome_only_api",
+                scope="main",
+                expected="absent, as in Safari",
+                actual=leaks,
+                message="iPhone profile still exposes Chrome-only APIs: " + ", ".join(leaks),
+            )
+        if nav.get("maxTouchPoints") != 5:
+            _add_issue(
+                issues,
+                severity="warning",
+                signal="navigator.maxTouchPoints",
+                scope="main",
+                expected=5,
+                actual=nav.get("maxTouchPoints"),
+                message="An iPhone reports 5 touch points",
             )
     elif expected_platform == "windows":
         if "Windows NT" not in user_agent or platform not in ("Win32", "Win64"):
