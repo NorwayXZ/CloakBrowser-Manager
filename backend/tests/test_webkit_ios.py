@@ -99,12 +99,16 @@ def test_macos_tabs_dylib_and_headed_launcher(tmp_path: Path):
         dylib_path=dylib,
         profile_name="A 'iPhone' $1",
         start_url="http://127.0.0.1:8080/profile/p1/start",
+        base_width=393,
+        base_height=852,
     )
     assert launcher is not None and launcher.is_file()
     body = launcher.read_text(encoding="utf-8")
     assert "DYLD_INSERT_LIBRARIES=" in body
     assert "CLOAK_PROFILE_NAME=" in body
     assert "CLOAK_START_URL=" in body
+    assert "CLOAK_BASE_WIDTH=393" in body
+    assert "CLOAK_BASE_HEIGHT=852" in body
 
 
 @pytest.mark.asyncio

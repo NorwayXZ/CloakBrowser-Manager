@@ -210,6 +210,8 @@ def _write_macos_headed_launcher(
     dylib_path: Path,
     profile_name: str,
     start_url: str,
+    base_width: int = 393,
+    base_height: int = 852,
 ) -> Path | None:
     pw_bin = webkit_bin_dir / "Playwright.app" / "Contents" / "MacOS" / "Playwright"
     if not pw_bin.is_file():
@@ -221,6 +223,8 @@ def _write_macos_headed_launcher(
         f"export CLOAK_PROFILE_NAME={shlex.quote(profile_name or 'iPhone')}\n"
         f"export CLOAK_START_URL={shlex.quote(start_url or 'about:blank')}\n"
         f"export CLOAK_ORIGIN_FILE={shlex.quote(str(origin_file))}\n"
+        f"export CLOAK_BASE_WIDTH={int(base_width)}\n"
+        f"export CLOAK_BASE_HEIGHT={int(base_height)}\n"
         f"export DYLD_FRAMEWORK_PATH={shlex.quote(str(webkit_bin_dir))}\n"
         f"export DYLD_LIBRARY_PATH={shlex.quote(str(webkit_bin_dir))}\n"
         f"export DYLD_INSERT_LIBRARIES={shlex.quote(str(dylib_path))}\n"
@@ -777,6 +781,8 @@ async def launch_webkit_ios_context(
                 dylib_path=dylib,
                 profile_name=str(filled.get("name") or "iPhone"),
                 start_url=str(start_page_url or (startup_urls[0] if startup_urls else "about:blank")),
+                base_width=width,
+                base_height=height,
             )
             if launcher is not None:
                 kwargs["executable_path"] = str(launcher)

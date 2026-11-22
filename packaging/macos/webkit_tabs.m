@@ -1,16 +1,21 @@
-// Native macOS AppKit compact icon tab bar for Playwright WebKit ("Playwright.app").
+// Native macOS AppKit compact icon tab bar, page zoom, and zero-leak monitor
+// display scaling for Playwright WebKit ("Playwright.app").
 //
 // Injected only into the UIProcess of headed WebKit iPhone launches via a local
 // wrapper script (DYLD_INSERT_LIBRARIES is cleared immediately in the constructor
 // so WebContent / Networking / GPU XPC subprocesses never load this library).
 //
 // Replaces the "Playwright: ..." window title in NSTitlebarView with:
-//   [Profile Badge]  [Logo Tab 1] [Logo Tab 2] [Logo Tab 3] ...  [+]
-// and stacks all BrowserWindowController windows into one synchronized single-window
-// deck so links and new tabs stay inside one phone window.
+//   [Profile Badge]  [Logo Tab 1] [Logo Tab 2] ...  [+]   [125%]
+// Stacks all BrowserWindowController windows into one synchronized single-window
+// deck, supports Cmd + Scroll / Pinch / Cmd+/- page magnification, and scales
+// the entire phone window on the Mac monitor via AppKit superview bounds scaling
+// while keeping WKWebView's logical frame locked to exact iPhone dimensions
+// (e.g. 393x852) so websites see zero viewport/screen discrepancy.
 
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WebKit.h>
+#import <math.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
 #include <stdlib.h>
@@ -25,6 +30,9 @@
 static NSString *gProfileName = @"iPhone";
 static NSString *gStartURL = @"about:blank";
 static NSString *gOriginFilePath = nil;
+static CGFloat gBaseWidth = 393.0;
+static CGFloat gBaseHeight = 852.0;
+static CGFloat gInitialScaleEnv = 1.0;
 static NSMutableDictionary<NSString *, NSImage *> *gHostFavicons = nil;
 
 static IMP gOrigMakeKeyAndOrderFront = NULL;
@@ -40,23 +48,53 @@ static IMP gOrigSetFrameTopLeft = NULL;
 static IMP gOrigCascadeTopLeft = NULL;
 static BOOL gInProgrammaticFrameCall = NO;
 
-static void CloakPersistOrigin(NSPoint pt) {
+static CGFloat CloakWindowChromeHeight(NSWindow *win) {
+    if (win && win.contentView) {
+        CGFloat diff = win.frame.size.height - win.contentView.frame.size.height;
+        if (diff >= 28.0 && diff <= 140.0) {
+            return diff;
+        }
+    }
+    return 69.0;
+}
+
+static void CloakPersistGeometry(NSPoint pt, CGFloat scale) {
     if (!gOriginFilePath) return;
-    NSString *s = [NSString stringWithFormat:@"%.1f,%.1f\n", pt.x, pt.y];
+    NSString *s = [NSString stringWithFormat:@"%.1f,%.1f,%.3f\n", pt.x, pt.y, scale];
     [s writeToFile:gOriginFilePath atomically:YES encoding:NSUTF8StringEncoding error:nil];
 }
 
-static BOOL CloakLoadSavedOrigin(NSPoint *outPt) {
-    if (!gOriginFilePath) return NO;
+static void CloakLoadSavedGeometry(NSPoint *outPt, BOOL *outHasOrigin, CGFloat *outScale) {
+    if (outHasOrigin) *outHasOrigin = NO;
+    if (outScale) *outScale = gInitialScaleEnv;
+    if (!gOriginFilePath) return;
+
     NSString *s = [NSString stringWithContentsOfFile:gOriginFilePath encoding:NSUTF8StringEncoding error:nil];
-    if (!s || s.length == 0) return NO;
-    NSArray<NSString *> *parts = [[s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] componentsSeparatedByString:@","];
-    if (parts.count != 2) return NO;
-    CGFloat x = [parts[0] doubleValue];
-    CGFloat y = [parts[1] doubleValue];
-    if (!isfinite(x) || !isfinite(y)) return NO;
-    if (outPt) *outPt = NSMakePoint(x, y);
-    return YES;
+    if (!s || s.length == 0) return;
+
+    NSString *trimmed = [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSArray<NSString *> *parts = [trimmed componentsSeparatedByString:@","];
+    if (parts.count >= 2) {
+        NSString *p0 = [parts[0] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        NSString *p1 = [parts[1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        if (p0.length > 0 && p1.length > 0) {
+            CGFloat x = [p0 doubleValue];
+            CGFloat y = [p1 doubleValue];
+            if (isfinite(x) && isfinite(y)) {
+                if (outPt) *outPt = NSMakePoint(x, y);
+                if (outHasOrigin) *outHasOrigin = YES;
+            }
+        }
+    }
+    if (parts.count >= 3) {
+        NSString *p2 = [parts[2] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        if (p2.length > 0) {
+            CGFloat sc = [p2 doubleValue];
+            if (isfinite(sc) && sc >= 0.80 && sc <= 2.00) {
+                if (outScale) *outScale = sc;
+            }
+        }
+    }
 }
 
 // Extract a meaningful brand initial from a URL host (e.g. demo.fingerprint.com -> "F").
@@ -118,6 +156,8 @@ static NSColor *CloakBrandColorForURL(NSURL *url) {
 @property (nonatomic, assign) NSRect sharedFrame;
 @property (nonatomic, assign) BOOL hasSharedFrame;
 @property (nonatomic, assign) BOOL hasSettledSize;
+@property (nonatomic, assign) CGFloat displayScale;
+@property (nonatomic, assign) BOOL enforcingViewBounds;
 @property (nonatomic, assign) BOOL userDragging;
 @property (nonatomic, assign) BOOL switching;
 @property (nonatomic, assign) BOOL closingAll;
@@ -134,6 +174,15 @@ static NSColor *CloakBrandColorForURL(NSURL *url) {
 - (void)openNewTab;
 - (void)refreshAllBars;
 - (void)scheduleFaviconFetchForItem:(CloakTabItem *)item;
+
+- (CGFloat)clampDisplayScale:(CGFloat)scale forWindow:(NSWindow *)win;
+- (NSSize)windowFrameSizeForScale:(CGFloat)scale window:(NSWindow *)win;
+- (void)enforceWebViewLogicalBoundsForItem:(CloakTabItem *)item;
+- (void)enforceWebViewLogicalBoundsForWindow:(NSWindow *)win;
+- (void)setWindowDisplayScale:(CGFloat)scale;
+- (CGFloat)activePageMagnification;
+- (void)zoomActivePageByFactor:(CGFloat)factor centeredAtWindowPoint:(NSPoint)winPt useCenter:(BOOL)useCenter;
+- (void)resetActivePageZoom;
 @end
 
 @implementation CloakTabItem
@@ -181,6 +230,7 @@ static NSColor *CloakBrandColorForURL(NSURL *url) {
             self.window.titleVisibility = NSWindowTitleHidden;
             self.window.representedURL = nil;
         }
+        [[CloakTabDeck shared] enforceWebViewLogicalBoundsForItem:self];
         [[CloakTabDeck shared] refreshAllBars];
     });
 }
@@ -202,12 +252,13 @@ static NSColor *CloakBrandColorForURL(NSURL *url) {
 
 @end
 
-// ── Native Titlebar Compact Logo Tab Strip View ──────────────────────────────
+// ── Native Titlebar Compact Logo Tab Strip + Zoom Pill View ──────────────────
 
 @interface CloakTabBarView : NSView <NSViewToolTipOwner>
 @property (nonatomic, assign) NSInteger hoveredIndex;
 @property (nonatomic, assign) BOOL hoveringClose;
 @property (nonatomic, assign) BOOL hoveringPlus;
+@property (nonatomic, assign) BOOL hoveringZoom;
 @property (nonatomic, assign) CGFloat scrollOffset;
 @property (nonatomic, strong) NSTrackingArea *trackingArea;
 @end
@@ -246,26 +297,33 @@ static NSColor *CloakBrandColorForURL(NSURL *url) {
     [self addTrackingArea:self.trackingArea];
 }
 
-// Compute horizontal metrics: [Badge] [Tab 0] [Tab 1] ... [+]
+// Compute horizontal metrics: [Badge] [Tab 0] [Tab 1] ... [+]   [125%]
 - (void)getBadgeRect:(NSRect *)outBadge
            stripRect:(NSRect *)outStrip
             plusRect:(NSRect *)outPlus
+            zoomRect:(NSRect *)outZoom
             tabWidth:(CGFloat *)outTabW
                  gap:(CGFloat *)outGap {
     CGFloat h = self.bounds.size.height;
     CGFloat w = self.bounds.size.width;
+    CloakTabDeck *deck = [CloakTabDeck shared];
 
     NSDictionary *badgeAttrs = @{
         NSFontAttributeName: [NSFont systemFontOfSize:10.5 weight:NSFontWeightSemibold],
     };
     CGSize nameSize = [gProfileName sizeWithAttributes:badgeAttrs];
-    CGFloat badgeW = MIN(48.0, MAX(22.0, ceil(nameSize.width) + 12.0));
+    CGFloat badgeW = MIN(46.0, MAX(22.0, ceil(nameSize.width) + 12.0));
     NSRect badge = NSMakeRect(0.0, floor((h - 20.0) * 0.5), badgeW, 20.0);
 
-    CGFloat stripX = NSMaxX(badge) + 5.0;
-    CGFloat maxStripW = MAX(24.0, w - 23.0 - 4.0 - stripX);
+    CGFloat pageMag = [deck activePageMagnification];
+    CGFloat zoomW = (pageMag > 1.02) ? 46.0 : 38.0;
+    NSRect zoom = NSMakeRect(MAX(NSMaxX(badge) + 32.0, w - zoomW), floor((h - 20.0) * 0.5), zoomW, 20.0);
 
-    NSUInteger count = MAX(1u, [CloakTabDeck shared].items.count);
+    CGFloat stripX = NSMaxX(badge) + 5.0;
+    CGFloat rightLimit = NSMinX(zoom) - 4.0;
+    CGFloat maxStripW = MAX(22.0, rightLimit - 21.0 - 3.0 - stripX);
+
+    NSUInteger count = MAX(1u, deck.items.count);
     CGFloat gap = 3.0;
     CGFloat ideal = 28.0;
     CGFloat minW = 21.0;
@@ -275,7 +333,7 @@ static NSColor *CloakBrandColorForURL(NSURL *url) {
     CGFloat totalW = count * tabW + (count - 1) * gap;
     CGFloat stripW = MIN(maxStripW, totalW);
     NSRect strip = NSMakeRect(stripX, 0.0, stripW, h);
-    NSRect plus = NSMakeRect(MIN(w - 22.0, NSMaxX(strip) + 4.0), floor((h - 20.0) * 0.5), 20.0, 20.0);
+    NSRect plus = NSMakeRect(MIN(rightLimit - 20.0, NSMaxX(strip) + 3.0), floor((h - 20.0) * 0.5), 20.0, 20.0);
 
     if (self.scrollOffset > MAX(0.0, totalW - stripW)) {
         self.scrollOffset = MAX(0.0, totalW - stripW);
@@ -285,6 +343,7 @@ static NSColor *CloakBrandColorForURL(NSURL *url) {
     if (outBadge) *outBadge = badge;
     if (outStrip) *outStrip = strip;
     if (outPlus) *outPlus = plus;
+    if (outZoom) *outZoom = zoom;
     if (outTabW) *outTabW = tabW;
     if (outGap) *outGap = gap;
 }
@@ -307,7 +366,7 @@ static NSColor *CloakBrandColorForURL(NSURL *url) {
     NSUInteger idx = [deck.items indexOfObjectIdenticalTo:deck.activeItem];
     if (idx == NSNotFound) return;
     NSRect strip; CGFloat tabW = 28.0, gap = 3.0;
-    [self getBadgeRect:NULL stripRect:&strip plusRect:NULL tabWidth:&tabW gap:&gap];
+    [self getBadgeRect:NULL stripRect:&strip plusRect:NULL zoomRect:NULL tabWidth:&tabW gap:&gap];
     CGFloat itemStart = idx * (tabW + gap);
     CGFloat itemEnd = itemStart + tabW;
     if (itemStart < self.scrollOffset) {
@@ -372,9 +431,9 @@ static NSColor *CloakBrandColorForURL(NSURL *url) {
         isDark = [best isEqualToString:NSAppearanceNameDarkAqua];
     }
 
-    NSRect badgeRect, stripRect, plusRect;
+    NSRect badgeRect, stripRect, plusRect, zoomRect;
     CGFloat tabW = 28.0, gap = 3.0;
-    [self getBadgeRect:&badgeRect stripRect:&stripRect plusRect:&plusRect tabWidth:&tabW gap:&gap];
+    [self getBadgeRect:&badgeRect stripRect:&stripRect plusRect:&plusRect zoomRect:&zoomRect tabWidth:&tabW gap:&gap];
 
     // 1. Environment badge (e.g. "A")
     NSBezierPath *badgePath = [NSBezierPath bezierPathWithRoundedRect:badgeRect xRadius:5.0 yRadius:5.0];
@@ -445,7 +504,6 @@ static NSColor *CloakBrandColorForURL(NSURL *url) {
         );
         [self drawIconForItem:item inRect:iconRect];
 
-        // Active emerald underline indicator
         if (isActive) {
             CGFloat barW = MIN(14.0, tabW - 8.0);
             NSRect indRect = NSMakeRect(NSMidX(tabRect) - barW * 0.5, NSMaxY(tabRect) - 2.0, barW, 2.0);
@@ -454,9 +512,7 @@ static NSColor *CloakBrandColorForURL(NSURL *url) {
             [ind fill];
         }
 
-        // Hover close "×" micro-badge when multiple tabs are open
         if (isHover && items.count > 1) {
-            NSRect closeHit = [self closeHitRectForTabRect:tabRect];
             NSRect closeDot = NSMakeRect(NSMaxX(tabRect) - 10.0, NSMinY(tabRect) + 1.0, 9.5, 9.5);
             NSBezierPath *cPath = [NSBezierPath bezierPathWithOvalInRect:closeDot];
             if (self.hoveringClose) {
@@ -477,7 +533,6 @@ static NSColor *CloakBrandColorForURL(NSURL *url) {
             xPath.lineCapStyle = NSLineCapStyleRound;
             [[NSColor whiteColor] setStroke];
             [xPath stroke];
-            (void)closeHit;
         }
     }
     [NSGraphicsContext restoreGraphicsState];
@@ -500,19 +555,74 @@ static NSColor *CloakBrandColorForURL(NSURL *url) {
     [(isDark ? [NSColor colorWithWhite:0.88 alpha:(self.hoveringPlus ? 1.0 : 0.78)]
              : [NSColor colorWithWhite:0.20 alpha:(self.hoveringPlus ? 1.0 : 0.75)]) setStroke];
     [plusGlyph stroke];
+
+    // 4. Right-pinned Zoom / Window Scale Pill ([125%] or [🔍160%])
+    CGFloat pageMag = [deck activePageMagnification];
+    BOOL isPageZoomed = (pageMag > 1.02);
+    NSBezierPath *zoomPill = [NSBezierPath bezierPathWithRoundedRect:zoomRect xRadius:5.0 yRadius:5.0];
+    if (isPageZoomed) {
+        [(isDark ? [NSColor colorWithSRGBRed:0.06 green:0.73 blue:0.51 alpha:(self.hoveringZoom ? 0.30 : 0.20)]
+                 : [NSColor colorWithSRGBRed:0.05 green:0.60 blue:0.42 alpha:(self.hoveringZoom ? 0.22 : 0.14)]) setFill];
+        [zoomPill fill];
+        [(isDark ? [NSColor colorWithSRGBRed:0.20 green:0.83 blue:0.60 alpha:0.50]
+                 : [NSColor colorWithSRGBRed:0.05 green:0.60 blue:0.42 alpha:0.42]) setStroke];
+        zoomPill.lineWidth = 1.0;
+        [zoomPill stroke];
+    } else {
+        [(isDark ? [NSColor colorWithWhite:1.0 alpha:(self.hoveringZoom ? 0.15 : 0.08)]
+                 : [NSColor colorWithWhite:0.0 alpha:(self.hoveringZoom ? 0.11 : 0.06)]) setFill];
+        [zoomPill fill];
+        [(isDark ? [NSColor colorWithWhite:1.0 alpha:0.16]
+                 : [NSColor colorWithWhite:0.0 alpha:0.14]) setStroke];
+        zoomPill.lineWidth = 1.0;
+        [zoomPill stroke];
+    }
+
+    long pct = lround((isPageZoomed ? pageMag : deck.displayScale) * 100.0);
+    NSString *zoomLabel = [NSString stringWithFormat:@"%ld%%", pct];
+    NSColor *zoomFg = isPageZoomed
+        ? (isDark ? [NSColor colorWithSRGBRed:0.43 green:0.91 blue:0.72 alpha:1.0]
+                  : [NSColor colorWithSRGBRed:0.04 green:0.47 blue:0.34 alpha:1.0])
+        : (isDark ? [NSColor colorWithWhite:0.90 alpha:(self.hoveringZoom ? 1.0 : 0.85)]
+                  : [NSColor colorWithWhite:0.18 alpha:(self.hoveringZoom ? 1.0 : 0.85)]);
+    NSDictionary *zoomAttrs = @{
+        NSFontAttributeName: [NSFont monospacedDigitSystemFontOfSize:9.5 weight:NSFontWeightSemibold],
+        NSForegroundColorAttributeName: zoomFg,
+    };
+    CGSize zSz = [zoomLabel sizeWithAttributes:zoomAttrs];
+    if (isPageZoomed) {
+        // Tiny vector magnifier icon on the left of percentage
+        CGFloat gx = zoomRect.origin.x + 5.0;
+        CGFloat gy = NSMidY(zoomRect) - 4.0;
+        NSBezierPath *lens = [NSBezierPath bezierPathWithOvalInRect:NSMakeRect(gx, gy, 6.0, 6.0)];
+        lens.lineWidth = 1.2;
+        [zoomFg setStroke];
+        [lens stroke];
+        NSBezierPath *handle = [NSBezierPath bezierPath];
+        [handle moveToPoint:NSMakePoint(gx + 5.2, gy + 5.2)];
+        [handle lineToPoint:NSMakePoint(gx + 7.6, gy + 7.6)];
+        handle.lineWidth = 1.2;
+        handle.lineCapStyle = NSLineCapStyleRound;
+        [handle stroke];
+        [zoomLabel drawAtPoint:NSMakePoint(gx + 9.5, NSMidY(zoomRect) - zSz.height * 0.5) withAttributes:zoomAttrs];
+    } else {
+        [zoomLabel drawAtPoint:NSMakePoint(NSMidX(zoomRect) - zSz.width * 0.5, NSMidY(zoomRect) - zSz.height * 0.5) withAttributes:zoomAttrs];
+    }
 }
 
 - (void)updateHoverForPoint:(NSPoint)pt {
-    NSRect badgeRect, stripRect, plusRect;
+    NSRect badgeRect, stripRect, plusRect, zoomRect;
     CGFloat tabW = 28.0, gap = 3.0;
-    [self getBadgeRect:&badgeRect stripRect:&stripRect plusRect:&plusRect tabWidth:&tabW gap:&gap];
+    [self getBadgeRect:&badgeRect stripRect:&stripRect plusRect:&plusRect zoomRect:&zoomRect tabWidth:&tabW gap:&gap];
 
     NSInteger nextIdx = -1;
     BOOL nextClose = NO;
     BOOL nextPlus = NSPointInRect(pt, plusRect);
+    BOOL nextZoom = !nextPlus && NSPointInRect(pt, zoomRect);
 
-    NSArray<CloakTabItem *> *items = [CloakTabDeck shared].items;
-    if (!nextPlus && NSPointInRect(pt, stripRect)) {
+    CloakTabDeck *deck = [CloakTabDeck shared];
+    NSArray<CloakTabItem *> *items = deck.items;
+    if (!nextPlus && !nextZoom && NSPointInRect(pt, stripRect)) {
         for (NSUInteger i = 0; i < items.count; i++) {
             NSRect tr = [self rectForTabAtIndex:i stripRect:stripRect tabWidth:tabW gap:gap];
             if (NSPointInRect(pt, tr)) {
@@ -526,7 +636,11 @@ static NSColor *CloakBrandColorForURL(NSURL *url) {
     }
 
     NSString *tip = nil;
-    if (nextPlus) {
+    if (nextZoom) {
+        long winPct = lround(deck.displayScale * 100.0);
+        long pagePct = lround([deck activePageMagnification] * 100.0);
+        tip = [NSString stringWithFormat:@"窗口展示 %ld%% · 网页放大 %ld%%（点击调整窗口大小，按住 ⌘+滚轮放大网页）", winPct, pagePct];
+    } else if (nextPlus) {
         tip = @"新建标签页 (⌘T)";
     } else if (nextIdx >= 0 && (NSUInteger)nextIdx < items.count) {
         tip = [items[(NSUInteger)nextIdx] displayTitle];
@@ -537,10 +651,11 @@ static NSColor *CloakBrandColorForURL(NSURL *url) {
         self.toolTip = tip;
     }
 
-    if (nextIdx != self.hoveredIndex || nextClose != self.hoveringClose || nextPlus != self.hoveringPlus) {
+    if (nextIdx != self.hoveredIndex || nextClose != self.hoveringClose || nextPlus != self.hoveringPlus || nextZoom != self.hoveringZoom) {
         self.hoveredIndex = nextIdx;
         self.hoveringClose = nextClose;
         self.hoveringPlus = nextPlus;
+        self.hoveringZoom = nextZoom;
         self.needsDisplay = YES;
     }
 }
@@ -550,20 +665,99 @@ static NSColor *CloakBrandColorForURL(NSURL *url) {
 }
 
 - (void)mouseExited:(NSEvent *)event {
-    if (self.hoveredIndex != -1 || self.hoveringClose || self.hoveringPlus) {
+    if (self.hoveredIndex != -1 || self.hoveringClose || self.hoveringPlus || self.hoveringZoom) {
         self.hoveredIndex = -1;
         self.hoveringClose = NO;
         self.hoveringPlus = NO;
+        self.hoveringZoom = NO;
         self.toolTip = nil;
         self.needsDisplay = YES;
     }
 }
 
+- (NSMenu *)buildZoomMenu {
+    CloakTabDeck *deck = [CloakTabDeck shared];
+    NSMenu *menu = [[NSMenu alloc] initWithTitle:@"Zoom"];
+
+    NSMenuItem *hdr1 = [[NSMenuItem alloc] initWithTitle:@"窗口展示大小（不改手机指纹 393×852）" action:nil keyEquivalent:@""];
+    hdr1.enabled = NO;
+    [menu addItem:hdr1];
+
+    struct { NSInteger pct; NSString *desc; } presets[] = {
+        { 100, @"100%  原始大小" },
+        { 115, @"115%  稍大" },
+        { 125, @"125%  舒适推荐" },
+        { 140, @"140%  大号清晰" },
+        { 155, @"155%  超大尺寸" },
+    };
+    NSInteger curWinPct = lround(deck.displayScale * 100.0);
+    for (size_t i = 0; i < sizeof(presets) / sizeof(presets[0]); i++) {
+        NSMenuItem *mi = [[NSMenuItem alloc] initWithTitle:presets[i].desc action:@selector(ctxSetWindowScale:) keyEquivalent:@""];
+        mi.target = self;
+        mi.tag = presets[i].pct;
+        if (labs(curWinPct - presets[i].pct) <= 3) {
+            mi.state = NSControlStateValueOn;
+        }
+        [menu addItem:mi];
+    }
+
+    [menu addItem:[NSMenuItem separatorItem]];
+    NSMenuItem *hdr2 = [[NSMenuItem alloc] initWithTitle:@"当前网页放大镜（按住 ⌘ + 滚轮上推）" action:nil keyEquivalent:@""];
+    hdr2.enabled = NO;
+    [menu addItem:hdr2];
+
+    NSMenuItem *zIn = [[NSMenuItem alloc] initWithTitle:@"放大网页内容 (⌘+)" action:@selector(ctxPageZoomIn:) keyEquivalent:@""];
+    zIn.target = self;
+    [menu addItem:zIn];
+
+    NSMenuItem *zOut = [[NSMenuItem alloc] initWithTitle:@"缩小网页内容 (⌘-)" action:@selector(ctxPageZoomOut:) keyEquivalent:@""];
+    zOut.target = self;
+    [menu addItem:zOut];
+
+    long pagePct = lround([deck activePageMagnification] * 100.0);
+    NSString *resetTitle = (pagePct > 102)
+        ? [NSString stringWithFormat:@"还原网页 100%%（当前 %ld%%，⌘0）", pagePct]
+        : @"还原网页 100% (⌘0)";
+    NSMenuItem *zReset = [[NSMenuItem alloc] initWithTitle:resetTitle action:@selector(ctxPageZoomReset:) keyEquivalent:@""];
+    zReset.target = self;
+    [menu addItem:zReset];
+
+    return menu;
+}
+
+- (void)ctxSetWindowScale:(NSMenuItem *)sender {
+    if (sender.tag >= 80 && sender.tag <= 200) {
+        [[CloakTabDeck shared] setWindowDisplayScale:((CGFloat)sender.tag / 100.0)];
+    }
+}
+
+- (void)ctxPageZoomIn:(__unused id)sender {
+    [[CloakTabDeck shared] zoomActivePageByFactor:1.20 centeredAtWindowPoint:NSZeroPoint useCenter:YES];
+}
+
+- (void)ctxPageZoomOut:(__unused id)sender {
+    [[CloakTabDeck shared] zoomActivePageByFactor:(1.0 / 1.20) centeredAtWindowPoint:NSZeroPoint useCenter:YES];
+}
+
+- (void)ctxPageZoomReset:(__unused id)sender {
+    [[CloakTabDeck shared] resetActivePageZoom];
+}
+
 - (void)mouseDown:(NSEvent *)event {
     NSPoint pt = [self convertPoint:event.locationInWindow fromView:nil];
-    NSRect badgeRect, stripRect, plusRect;
+    NSRect badgeRect, stripRect, plusRect, zoomRect;
     CGFloat tabW = 28.0, gap = 3.0;
-    [self getBadgeRect:&badgeRect stripRect:&stripRect plusRect:&plusRect tabWidth:&tabW gap:&gap];
+    [self getBadgeRect:&badgeRect stripRect:&stripRect plusRect:&plusRect zoomRect:&zoomRect tabWidth:&tabW gap:&gap];
+
+    if (NSPointInRect(pt, zoomRect)) {
+        if ((event.modifierFlags & NSEventModifierFlagOption) != 0 && [[CloakTabDeck shared] activePageMagnification] > 1.02) {
+            [[CloakTabDeck shared] resetActivePageZoom];
+            return;
+        }
+        NSMenu *zoomMenu = [self buildZoomMenu];
+        [zoomMenu popUpMenuPositioningItem:nil atLocation:NSMakePoint(zoomRect.origin.x, NSMaxY(zoomRect) + 3.0) inView:self];
+        return;
+    }
 
     if (NSPointInRect(pt, plusRect)) {
         [[CloakTabDeck shared] openNewTab];
@@ -593,20 +787,23 @@ static NSColor *CloakBrandColorForURL(NSURL *url) {
         deck.sharedFrame = self.window.frame;
         deck.hasSharedFrame = YES;
         deck.hasSettledSize = YES;
-        CloakPersistOrigin(deck.sharedFrame.origin);
+        CloakPersistGeometry(deck.sharedFrame.origin, deck.displayScale);
     }
     deck.userDragging = NO;
 }
 
 - (void)otherMouseDown:(NSEvent *)event {
-    // Middle-click closes a tab when >1 tab is open.
     if (event.buttonNumber != 2) {
         [super otherMouseDown:event];
         return;
     }
     NSPoint pt = [self convertPoint:event.locationInWindow fromView:nil];
-    NSRect stripRect; CGFloat tabW = 28.0, gap = 3.0;
-    [self getBadgeRect:NULL stripRect:&stripRect plusRect:NULL tabWidth:&tabW gap:&gap];
+    NSRect stripRect, zoomRect; CGFloat tabW = 28.0, gap = 3.0;
+    [self getBadgeRect:NULL stripRect:&stripRect plusRect:NULL zoomRect:&zoomRect tabWidth:&tabW gap:&gap];
+    if (NSPointInRect(pt, zoomRect)) {
+        [[CloakTabDeck shared] resetActivePageZoom];
+        return;
+    }
     NSArray<CloakTabItem *> *items = [CloakTabDeck shared].items;
     if (items.count > 1 && NSPointInRect(pt, stripRect)) {
         for (NSUInteger i = 0; i < items.count; i++) {
@@ -627,8 +824,11 @@ static NSColor *CloakBrandColorForURL(NSURL *url) {
 
 - (NSMenu *)menuForEvent:(NSEvent *)event {
     NSPoint pt = [self convertPoint:event.locationInWindow fromView:nil];
-    NSRect stripRect; CGFloat tabW = 28.0, gap = 3.0;
-    [self getBadgeRect:NULL stripRect:&stripRect plusRect:NULL tabWidth:&tabW gap:&gap];
+    NSRect stripRect, zoomRect; CGFloat tabW = 28.0, gap = 3.0;
+    [self getBadgeRect:NULL stripRect:&stripRect plusRect:NULL zoomRect:&zoomRect tabWidth:&tabW gap:&gap];
+    if (NSPointInRect(pt, zoomRect)) {
+        return [self buildZoomMenu];
+    }
     NSArray<CloakTabItem *> *items = [CloakTabDeck shared].items;
     if (!NSPointInRect(pt, stripRect)) return nil;
 
@@ -701,7 +901,7 @@ static NSColor *CloakBrandColorForURL(NSURL *url) {
 
 @end
 
-// ── Single-Window Tab Deck Coordinator ───────────────────────────────────────
+// ── Single-Window Tab Deck & Zero-Leak Scaling Coordinator ───────────────────
 
 static const void *kTabBarAssocKey = &kTabBarAssocKey;
 
@@ -720,9 +920,13 @@ static const void *kTabBarAssocKey = &kTabBarAssocKey;
     self = [super init];
     if (self) {
         _items = [NSMutableArray array];
-        NSPoint savedPt;
-        if (CloakLoadSavedOrigin(&savedPt)) {
-            _sharedFrame = NSMakeRect(savedPt.x, savedPt.y, 393.0, 921.0);
+        NSPoint savedPt = NSZeroPoint;
+        BOOL hasOrigin = NO;
+        CGFloat savedScale = gInitialScaleEnv;
+        CloakLoadSavedGeometry(&savedPt, &hasOrigin, &savedScale);
+        _displayScale = savedScale;
+        if (hasOrigin) {
+            _sharedFrame = NSMakeRect(savedPt.x, savedPt.y, round(gBaseWidth * savedScale), round(gBaseHeight * savedScale) + 69.0);
             _hasSharedFrame = YES;
         }
     }
@@ -742,6 +946,148 @@ static const void *kTabBarAssocKey = &kTabBarAssocKey;
         if (item.window == win) return item;
     }
     return nil;
+}
+
+- (CGFloat)clampDisplayScale:(CGFloat)scale forWindow:(NSWindow *)win {
+    NSScreen *scr = win.screen ?: [NSScreen mainScreen];
+    CGFloat chromeH = CloakWindowChromeHeight(win);
+    CGFloat maxByScreen = 1.80;
+    if (scr) {
+        CGFloat availH = scr.visibleFrame.size.height - 8.0;
+        if (availH > chromeH + 200.0) {
+            maxByScreen = MIN(1.80, (availH - chromeH) / gBaseHeight);
+        }
+    }
+    if (maxByScreen < 1.0) maxByScreen = 1.0;
+    if (scale < 0.85) scale = 0.85;
+    if (scale > maxByScreen) scale = maxByScreen;
+    return scale;
+}
+
+- (NSSize)windowFrameSizeForScale:(CGFloat)scale window:(NSWindow *)win {
+    CGFloat chromeH = CloakWindowChromeHeight(win);
+    return NSMakeSize(round(gBaseWidth * scale), round(gBaseHeight * scale) + chromeH);
+}
+
+// Keep WKWebView's logical viewport locked to (gBaseWidth x gBaseHeight) while
+// its superview stretches on the monitor, so AppKit scales on GPU with zero JS/DOM leak.
+- (void)enforceWebViewLogicalBoundsForItem:(CloakTabItem *)item {
+    if (!item || !item.webView || self.enforcingViewBounds) return;
+    self.enforcingViewBounds = YES;
+    WKWebView *wv = item.webView;
+    wv.allowsMagnification = YES;
+    wv.autoresizingMask = NSViewNotSizable;
+
+    NSView *sup = wv.superview;
+    NSSize baseSz = NSMakeSize(gBaseWidth, gBaseHeight);
+    if (sup) {
+        if (!NSEqualPoints(sup.bounds.origin, NSZeroPoint)) {
+            [sup setBoundsOrigin:NSZeroPoint];
+        }
+        if (!NSEqualSizes(sup.bounds.size, baseSz)) {
+            [sup setBoundsSize:baseSz];
+        }
+        sup.needsDisplay = YES;
+    }
+    NSRect baseRect = NSMakeRect(0.0, 0.0, gBaseWidth, gBaseHeight);
+    if (!NSEqualRects(wv.frame, baseRect)) {
+        wv.frame = baseRect;
+    }
+    self.enforcingViewBounds = NO;
+}
+
+- (void)enforceWebViewLogicalBoundsForWindow:(NSWindow *)win {
+    CloakTabItem *item = [self itemForWindow:win];
+    if (item) {
+        [self enforceWebViewLogicalBoundsForItem:item];
+    }
+}
+
+- (void)onWebViewGeometryChanged:(NSNotification *)note {
+    if (self.enforcingViewBounds) return;
+    NSView *v = note.object;
+    if (![v isKindOfClass:[NSView class]] || !v.window) return;
+    [self enforceWebViewLogicalBoundsForWindow:v.window];
+}
+
+- (void)setWindowDisplayScale:(CGFloat)scale {
+    NSWindow *activeWin = self.activeItem.window;
+    CGFloat clamped = [self clampDisplayScale:scale forWindow:activeWin];
+    self.displayScale = clamped;
+    NSSize newSize = [self windowFrameSizeForScale:clamped window:activeWin];
+
+    if (self.hasSharedFrame) {
+        CGFloat topY = NSMaxY(self.sharedFrame);
+        CGFloat newX = self.sharedFrame.origin.x;
+        CGFloat newY = topY - newSize.height;
+        NSScreen *scr = activeWin.screen ?: [NSScreen mainScreen];
+        if (scr) {
+            NSRect vis = scr.visibleFrame;
+            if (newY < NSMinY(vis)) newY = NSMinY(vis);
+            if (newY + newSize.height > NSMaxY(vis)) newY = NSMaxY(vis) - newSize.height;
+            if (newX + newSize.width > NSMaxX(vis)) newX = MAX(NSMinX(vis), NSMaxX(vis) - newSize.width);
+        }
+        self.sharedFrame = NSMakeRect(round(newX), round(newY), newSize.width, newSize.height);
+    }
+    self.hasSettledSize = YES;
+
+    self.switching = YES;
+    for (CloakTabItem *it in self.items) {
+        if (!it.window) continue;
+        BOOL isAct = (it == self.activeItem);
+        if (self.hasSharedFrame) {
+            if (gOrigSetFrameDisplay) {
+                ((void (*)(id, SEL, NSRect, BOOL))gOrigSetFrameDisplay)(it.window, @selector(setFrame:display:), self.sharedFrame, isAct);
+            } else {
+                [it.window setFrame:self.sharedFrame display:isAct];
+            }
+        }
+        [self enforceWebViewLogicalBoundsForItem:it];
+    }
+    self.switching = NO;
+
+    if (self.hasSharedFrame) {
+        CloakPersistGeometry(self.sharedFrame.origin, self.displayScale);
+    }
+    [self refreshAllBars];
+}
+
+- (CGFloat)activePageMagnification {
+    WKWebView *wv = self.activeItem.webView;
+    if (!wv) return 1.0;
+    CGFloat m = wv.magnification;
+    if (!isfinite(m) || m < 1.0) return 1.0;
+    return m;
+}
+
+- (void)zoomActivePageByFactor:(CGFloat)factor centeredAtWindowPoint:(NSPoint)winPt useCenter:(BOOL)useCenter {
+    WKWebView *wv = self.activeItem.webView;
+    if (!wv) return;
+    CGFloat cur = wv.magnification;
+    if (!isfinite(cur) || cur < 1.0) cur = 1.0;
+    CGFloat next = cur * factor;
+    if (next < 1.02) next = 1.0;
+    if (next > 4.0) next = 4.0;
+
+    NSPoint ptInWv;
+    if (useCenter) {
+        ptInWv = NSMakePoint(gBaseWidth * 0.5, gBaseHeight * 0.5);
+    } else {
+        ptInWv = [wv convertPoint:winPt fromView:nil];
+        if (ptInWv.x < 0.0) ptInWv.x = 0.0;
+        if (ptInWv.x > gBaseWidth) ptInWv.x = gBaseWidth;
+        if (ptInWv.y < 0.0) ptInWv.y = 0.0;
+        if (ptInWv.y > gBaseHeight) ptInWv.y = gBaseHeight;
+    }
+    [wv setMagnification:next centeredAtPoint:ptInWv];
+    [self refreshAllBars];
+}
+
+- (void)resetActivePageZoom {
+    WKWebView *wv = self.activeItem.webView;
+    if (!wv) return;
+    [wv setMagnification:1.0 centeredAtPoint:NSMakePoint(gBaseWidth * 0.5, gBaseHeight * 0.5)];
+    [self refreshAllBars];
 }
 
 - (void)installTabBarOnWindow:(NSWindow *)win {
@@ -785,6 +1131,7 @@ static const void *kTabBarAssocKey = &kTabBarAssocKey;
     if (![self isManagedBrowserWindow:win]) return nil;
     CloakTabItem *existing = [self itemForWindow:win];
     if (existing) {
+        [self enforceWebViewLogicalBoundsForItem:existing];
         [self installTabBarOnWindow:win];
         return existing;
     }
@@ -795,6 +1142,8 @@ static const void *kTabBarAssocKey = &kTabBarAssocKey;
     if ([wc isKindOfClass:[NSWindowController class]]) {
         [(NSWindowController *)wc setShouldCascadeWindows:NO];
     }
+
+    NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
     if ([wc respondsToSelector:@selector(webView)]) {
         WKWebView *wv = [wc webView];
         item.webView = wv;
@@ -803,49 +1152,53 @@ static const void *kTabBarAssocKey = &kTabBarAssocKey;
             [wv addObserver:item forKeyPath:@"URL" options:NSKeyValueObservingOptionNew context:NULL];
             [wv addObserver:item forKeyPath:@"loading" options:NSKeyValueObservingOptionNew context:NULL];
             item.observing = YES;
+
+            wv.postsFrameChangedNotifications = YES;
+            [nc addObserver:self selector:@selector(onWebViewGeometryChanged:) name:NSViewFrameDidChangeNotification object:wv];
+            if (wv.superview) {
+                wv.superview.postsFrameChangedNotifications = YES;
+                [nc addObserver:self selector:@selector(onWebViewGeometryChanged:) name:NSViewFrameDidChangeNotification object:wv.superview];
+            }
         }
     }
 
     [self.items addObject:item];
-    [self installTabBarOnWindow:win];
+    [self enforceWebViewLogicalBoundsForItem:item];
+
+    CGFloat clampedScale = [self clampDisplayScale:self.displayScale forWindow:win];
+    self.displayScale = clampedScale;
+    NSSize targetSize = [self windowFrameSizeForScale:clampedScale window:win];
 
     if (self.items.count == 1) {
-        if (!self.hasSharedFrame) {
-            self.sharedFrame = win.frame;
-            self.hasSharedFrame = YES;
-        } else {
-            NSRect cur = win.frame;
-            cur.origin = self.sharedFrame.origin;
-            self.sharedFrame = cur;
-            self.switching = YES;
-            if (gOrigSetFrameDisplay) {
-                ((void (*)(id, SEL, NSRect, BOOL))gOrigSetFrameDisplay)(win, @selector(setFrame:display:), cur, NO);
-            } else {
-                [win setFrame:cur display:NO];
-            }
-            self.switching = NO;
+        NSScreen *scr = win.screen ?: [NSScreen mainScreen];
+        CGFloat x = self.hasSharedFrame ? self.sharedFrame.origin.x : win.frame.origin.x;
+        CGFloat y = self.hasSharedFrame ? self.sharedFrame.origin.y : (NSMaxY(win.frame) - targetSize.height);
+        if (scr) {
+            NSRect vis = scr.visibleFrame;
+            if (y < NSMinY(vis)) y = NSMinY(vis);
+            if (y + targetSize.height > NSMaxY(vis)) y = NSMaxY(vis) - targetSize.height;
+            if (x + targetSize.width > NSMaxX(vis)) x = MAX(NSMinX(vis), NSMaxX(vis) - targetSize.width);
+            if (x < NSMinX(vis)) x = NSMinX(vis);
         }
-        __weak CloakTabDeck *weakSelf = self;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            CloakTabDeck *strongSelf = weakSelf;
-            if (!strongSelf) return;
-            if (strongSelf.activeItem.window) {
-                strongSelf.sharedFrame = strongSelf.activeItem.window.frame;
-            }
-            strongSelf.hasSettledSize = YES;
-        });
-    } else {
+        self.sharedFrame = NSMakeRect(round(x), round(y), targetSize.width, targetSize.height);
+        self.hasSharedFrame = YES;
         self.hasSettledSize = YES;
-        self.switching = YES;
-        if (gOrigSetFrameDisplay) {
-            ((void (*)(id, SEL, NSRect, BOOL))gOrigSetFrameDisplay)(win, @selector(setFrame:display:), self.sharedFrame, NO);
-        } else {
-            [win setFrame:self.sharedFrame display:NO];
-        }
-        self.switching = NO;
+    } else {
+        self.sharedFrame = NSMakeRect(self.sharedFrame.origin.x, self.sharedFrame.origin.y, targetSize.width, targetSize.height);
+        self.hasSettledSize = YES;
     }
 
-    NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
+    self.switching = YES;
+    if (gOrigSetFrameDisplay) {
+        ((void (*)(id, SEL, NSRect, BOOL))gOrigSetFrameDisplay)(win, @selector(setFrame:display:), self.sharedFrame, NO);
+    } else {
+        [win setFrame:self.sharedFrame display:NO];
+    }
+    [self enforceWebViewLogicalBoundsForItem:item];
+    self.switching = NO;
+
+    [self installTabBarOnWindow:win];
+
     [nc addObserver:self selector:@selector(onWindowMovedOrResized:) name:NSWindowDidMoveNotification object:win];
     [nc addObserver:self selector:@selector(onWindowMovedOrResized:) name:NSWindowDidResizeNotification object:win];
     [nc addObserver:self selector:@selector(onWindowWillClose:) name:NSWindowWillCloseNotification object:win];
@@ -873,6 +1226,7 @@ static const void *kTabBarAssocKey = &kTabBarAssocKey;
             [win setFrame:self.sharedFrame display:YES];
         }
     }
+    [self enforceWebViewLogicalBoundsForItem:item];
     self.activeItem = item;
     [self installTabBarOnWindow:win];
     ((void (*)(id, SEL, id))gOrigMakeKeyAndOrderFront)(win, @selector(makeKeyAndOrderFront:), nil);
@@ -963,24 +1317,34 @@ static const void *kTabBarAssocKey = &kTabBarAssocKey;
     if (self.switching || gInProgrammaticFrameCall) return;
     NSWindow *win = note.object;
     if (win != self.activeItem.window || !win.isVisible) return;
-    // WindowServer user drags bypass -[NSWindow setFrame:*] and post NSWindowDidMoveNotification directly.
-    // Preserve our settled phone size while recording the user's new screen origin.
+
     NSRect cur = win.frame;
-    if (self.hasSettledSize) {
+    if (win.inLiveResize) {
+        self.sharedFrame = cur;
+    } else if (self.hasSettledSize) {
         self.sharedFrame = NSMakeRect(cur.origin.x, cur.origin.y, self.sharedFrame.size.width, self.sharedFrame.size.height);
     } else {
         self.sharedFrame = cur;
     }
     self.hasSharedFrame = YES;
-    CloakPersistOrigin(self.sharedFrame.origin);
-    [self installTabBarOnWindow:win];
+    [self enforceWebViewLogicalBoundsForWindow:win];
+    CloakPersistGeometry(self.sharedFrame.origin, self.displayScale);
+    [self refreshAllBars];
 }
 
 - (void)onWindowWillClose:(NSNotification *)note {
     NSWindow *win = note.object;
-    [[NSNotificationCenter defaultCenter] removeObserver:self name:nil object:win];
+    NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
+    [nc removeObserver:self name:nil object:win];
     CloakTabItem *item = [self itemForWindow:win];
     if (!item) return;
+
+    if (item.webView) {
+        [nc removeObserver:self name:nil object:item.webView];
+        if (item.webView.superview) {
+            [nc removeObserver:self name:nil object:item.webView.superview];
+        }
+    }
 
     NSUInteger idx = [self.items indexOfObjectIdenticalTo:item];
     BOOL wasActive = (item == self.activeItem);
@@ -1025,9 +1389,9 @@ static const void *kTabBarAssocKey = &kTabBarAssocKey;
          "      const resp = await fetch(href, { signal: ctrl.signal, credentials: 'same-origin' });\n"
          "      clearTimeout(timer);\n"
          "      if (!resp.ok) continue;\n"
-         "      const blob = await resp.blob();\n"
-         "      if (!blob || blob.size === 0 || blob.size > 524288) continue;\n"
-         "      const objUrl = URL.createObjectURL(blob);\n"
+         "      const rawBlob = await resp.blob();\n"
+         "      if (!rawBlob || rawBlob.size === 0 || rawBlob.size > 524288) continue;\n"
+         "      const objUrl = URL.createObjectURL(rawBlob);\n"
          "      try {\n"
          "        const img = new Image();\n"
          "        img.src = objUrl;\n"
@@ -1096,12 +1460,10 @@ static void Swizzled_performClose(NSWindow *self, SEL _cmd, id sender) {
     if ([deck isManagedBrowserWindow:self]) {
         NSButton *redCloseBtn = [self standardWindowButton:NSWindowCloseButton];
         if (sender == redCloseBtn) {
-            // Red traffic-light button closes the entire phone browser (all tabs).
             [deck closeAllTabs];
             return;
         }
         if (deck.items.count > 1) {
-            // Cmd+W closes only the active tab when multiple tabs exist.
             NSUInteger idx = [deck.items indexOfObjectIdenticalTo:[deck itemForWindow:self]];
             if (idx != NSNotFound) {
                 [deck closeTabAtIndex:idx];
@@ -1114,39 +1476,111 @@ static void Swizzled_performClose(NSWindow *self, SEL _cmd, id sender) {
 
 static void Swizzled_sendEvent(NSWindow *self, SEL _cmd, NSEvent *event) {
     CloakTabDeck *deck = [CloakTabDeck shared];
-    if (event.type == NSEventTypeKeyDown && [deck isManagedBrowserWindow:self]) {
+    if ([deck isManagedBrowserWindow:self]) {
+        NSEventType type = event.type;
         NSEventModifierFlags mods = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
-        NSString *chars = [event.charactersIgnoringModifiers lowercaseString];
-        if (mods == NSEventModifierFlagCommand) {
-            if ([chars isEqualToString:@"t"]) {
-                [deck openNewTab];
-                return;
+
+        // 1. Command + Scroll Wheel -> Smooth Page Content Zoom centered at cursor!
+        if (type == NSEventTypeScrollWheel && (mods & NSEventModifierFlagCommand) != 0) {
+            // Ignore post-flick trackpad momentum so pressing Cmd+C/Cmd+T right after scrolling never zooms accidentally.
+            if (event.momentumPhase == NSEventPhaseNone) {
+                CGFloat upDelta = event.isDirectionInvertedFromDevice ? -event.scrollingDeltaY : event.scrollingDeltaY;
+                if (fabs(upDelta) > 0.005) {
+                    CGFloat factor = 1.0;
+                    if (event.hasPreciseScrollingDeltas) {
+                        CGFloat clamped = MAX(-40.0, MIN(40.0, upDelta));
+                        factor = exp(clamped * 0.0085);
+                    } else {
+                        CGFloat step = upDelta;
+                        if (fabs(step) < 0.65) step = copysign(0.65, step);
+                        step = MAX(-2.5, MIN(2.5, step));
+                        factor = pow(1.15, step);
+                    }
+                    [deck zoomActivePageByFactor:factor centeredAtWindowPoint:event.locationInWindow useCenter:NO];
+                }
             }
-            if ([chars isEqualToString:@"w"] && deck.items.count > 1) {
-                NSUInteger idx = [deck.items indexOfObjectIdenticalTo:[deck itemForWindow:self]];
-                if (idx != NSNotFound) {
-                    [deck closeTabAtIndex:idx];
+            return;
+        }
+
+        // 2. Trackpad Two-Finger Pinch Magnification -> clamp >= 1.0 and update pill!
+        if (type == NSEventTypeMagnify) {
+            ((void (*)(id, SEL, NSEvent *))gOrigSendEvent)(self, _cmd, event);
+            WKWebView *wv = deck.activeItem.webView;
+            if (wv && wv.magnification < 1.0) {
+                [wv setMagnification:1.0 centeredAtPoint:NSMakePoint(gBaseWidth * 0.5, gBaseHeight * 0.5)];
+            }
+            [deck refreshAllBars];
+            return;
+        }
+
+        // 3. Keyboard Shortcuts
+        if (type == NSEventTypeKeyDown) {
+            NSString *chars = [event.charactersIgnoringModifiers lowercaseString] ?: @"";
+            unsigned short kc = event.keyCode;
+            NSEventModifierFlags coreMods = mods & (NSEventModifierFlagCommand | NSEventModifierFlagOption | NSEventModifierFlagControl);
+
+            if (coreMods == NSEventModifierFlagCommand) {
+                // Cmd + '=' / '+' -> Zoom Page In
+                if ([chars isEqualToString:@"="] || [chars isEqualToString:@"+"] || kc == 24 || kc == 69) {
+                    [deck zoomActivePageByFactor:1.20 centeredAtWindowPoint:NSZeroPoint useCenter:YES];
+                    return;
+                }
+                // Cmd + '-' / '_' -> Zoom Page Out
+                if ([chars isEqualToString:@"-"] || [chars isEqualToString:@"_"] || kc == 27 || kc == 78) {
+                    [deck zoomActivePageByFactor:(1.0 / 1.20) centeredAtWindowPoint:NSZeroPoint useCenter:YES];
+                    return;
+                }
+                // Cmd + '0' -> Reset Page Zoom to 100%
+                if ([chars isEqualToString:@"0"] || kc == 29 || kc == 82) {
+                    [deck resetActivePageZoom];
+                    return;
+                }
+            } else if (coreMods == (NSEventModifierFlagCommand | NSEventModifierFlagOption)) {
+                // Cmd + Option + '+' / '-' / '0' -> Adjust Phone Window Display Scale
+                if ([chars isEqualToString:@"="] || [chars isEqualToString:@"+"] || kc == 24 || kc == 69) {
+                    [deck setWindowDisplayScale:(deck.displayScale + 0.15)];
+                    return;
+                }
+                if ([chars isEqualToString:@"-"] || [chars isEqualToString:@"_"] || kc == 27 || kc == 78) {
+                    [deck setWindowDisplayScale:(deck.displayScale - 0.15)];
+                    return;
+                }
+                if ([chars isEqualToString:@"0"] || kc == 29 || kc == 82) {
+                    [deck setWindowDisplayScale:1.0];
                     return;
                 }
             }
-            if (chars.length == 1) {
-                unichar c = [chars characterAtIndex:0];
-                if (c >= '1' && c <= '9') {
-                    NSUInteger target = (c == '9') ? (deck.items.count > 0 ? deck.items.count - 1 : 0) : (NSUInteger)(c - '1');
-                    if (target < deck.items.count) {
-                        [deck selectTabAtIndex:target];
+
+            if (mods == NSEventModifierFlagCommand) {
+                if ([chars isEqualToString:@"t"]) {
+                    [deck openNewTab];
+                    return;
+                }
+                if ([chars isEqualToString:@"w"] && deck.items.count > 1) {
+                    NSUInteger idx = [deck.items indexOfObjectIdenticalTo:[deck itemForWindow:self]];
+                    if (idx != NSNotFound) {
+                        [deck closeTabAtIndex:idx];
                         return;
                     }
                 }
-            }
-        } else if ((mods & NSEventModifierFlagControl) && event.keyCode == 48 && deck.items.count > 1) {
-            // Ctrl+Tab / Ctrl+Shift+Tab cycles tabs.
-            NSUInteger cur = [deck.items indexOfObjectIdenticalTo:deck.activeItem];
-            if (cur != NSNotFound) {
-                BOOL rev = (mods & NSEventModifierFlagShift) != 0;
-                NSUInteger next = rev ? ((cur + deck.items.count - 1) % deck.items.count) : ((cur + 1) % deck.items.count);
-                [deck selectTabAtIndex:next];
-                return;
+                if (chars.length == 1) {
+                    unichar c = [chars characterAtIndex:0];
+                    if (c >= '1' && c <= '9') {
+                        NSUInteger target = (c == '9') ? (deck.items.count > 0 ? deck.items.count - 1 : 0) : (NSUInteger)(c - '1');
+                        if (target < deck.items.count) {
+                            [deck selectTabAtIndex:target];
+                            return;
+                        }
+                    }
+                }
+            } else if ((mods & NSEventModifierFlagControl) && kc == 48 && deck.items.count > 1) {
+                NSUInteger cur = [deck.items indexOfObjectIdenticalTo:deck.activeItem];
+                if (cur != NSNotFound) {
+                    BOOL rev = (mods & NSEventModifierFlagShift) != 0;
+                    NSUInteger next = rev ? ((cur + deck.items.count - 1) % deck.items.count) : ((cur + 1) % deck.items.count);
+                    [deck selectTabAtIndex:next];
+                    return;
+                }
             }
         }
     }
@@ -1158,29 +1592,44 @@ static NSRect CloakCoerceWindowFrame(NSWindow *win, NSRect proposed) {
     if (deck.switching || ![deck isManagedBrowserWindow:win]) {
         return proposed;
     }
+
+    // User corner/edge live-resize: scale the phone window proportionally while keeping exact iPhone aspect ratio!
+    if (win.inLiveResize && win == deck.activeItem.window && win.isVisible && deck.hasSharedFrame) {
+        NSRect oldF = deck.sharedFrame;
+        CGFloat chromeH = CloakWindowChromeHeight(win);
+        CGFloat dw = fabs(proposed.size.width - oldF.size.width);
+        CGFloat dh = fabs(proposed.size.height - oldF.size.height);
+        CGFloat rawScale = (dw >= dh * 0.45)
+            ? (proposed.size.width / gBaseWidth)
+            : ((proposed.size.height - chromeH) / gBaseHeight);
+        CGFloat s = [deck clampDisplayScale:rawScale forWindow:win];
+        NSSize newSz = [deck windowFrameSizeForScale:s window:win];
+
+        BOOL draggedLeftEdge = fabs(proposed.origin.x - oldF.origin.x) > 0.5;
+        BOOL topEdgeFixed = fabs(NSMaxY(proposed) - NSMaxY(oldF)) < 1.5;
+        CGFloat newX = draggedLeftEdge ? (NSMaxX(oldF) - newSz.width) : oldF.origin.x;
+        CGFloat newY = topEdgeFixed ? (NSMaxY(oldF) - newSz.height) : oldF.origin.y;
+
+        deck.displayScale = s;
+        deck.sharedFrame = NSMakeRect(round(newX), round(newY), newSz.width, newSz.height);
+        deck.hasSettledSize = YES;
+        CloakPersistGeometry(deck.sharedFrame.origin, s);
+        return deck.sharedFrame;
+    }
+
     BOOL leftMouseDown = ([NSEvent pressedMouseButtons] & 1) != 0;
-    if ((deck.userDragging || leftMouseDown) && win == deck.activeItem.window && win.isVisible) {
-        deck.sharedFrame = proposed;
+    if ((deck.userDragging || leftMouseDown) && win == deck.activeItem.window && win.isVisible && deck.hasSharedFrame) {
+        deck.sharedFrame = NSMakeRect(proposed.origin.x, proposed.origin.y, deck.sharedFrame.size.width, deck.sharedFrame.size.height);
+        return deck.sharedFrame;
+    }
+
+    if (!deck.hasSharedFrame) {
+        CGFloat s = [deck clampDisplayScale:deck.displayScale forWindow:win];
+        NSSize sz = [deck windowFrameSizeForScale:s window:win];
+        deck.sharedFrame = NSMakeRect(proposed.origin.x, NSMaxY(proposed) - sz.height, sz.width, sz.height);
         deck.hasSharedFrame = YES;
         deck.hasSettledSize = YES;
-        return proposed;
-    }
-    if (!deck.hasSharedFrame) {
-        deck.sharedFrame = proposed;
-        deck.hasSharedFrame = YES;
-        return proposed;
-    }
-    if (!deck.hasSettledSize) {
-        // Tab 1 initial viewport sizing: keep top-left corner fixed while height settles to phone screen.
-        CGFloat topY = NSMaxY(deck.sharedFrame);
-        NSRect locked = NSMakeRect(
-            deck.sharedFrame.origin.x,
-            topY - proposed.size.height,
-            proposed.size.width,
-            proposed.size.height
-        );
-        deck.sharedFrame = locked;
-        return locked;
+        return deck.sharedFrame;
     }
     return deck.sharedFrame;
 }
@@ -1190,14 +1639,20 @@ static void Swizzled_setFrameDisplay(NSWindow *self, SEL _cmd, NSRect frameRect,
     BOOL prev = gInProgrammaticFrameCall;
     gInProgrammaticFrameCall = YES;
     ((void (*)(id, SEL, NSRect, BOOL))gOrigSetFrameDisplay)(self, _cmd, locked, flag);
+    [[CloakTabDeck shared] enforceWebViewLogicalBoundsForWindow:self];
     gInProgrammaticFrameCall = prev;
+    if (self.inLiveResize) {
+        [[CloakTabDeck shared] refreshAllBars];
+    }
 }
 
 static void Swizzled_setFrameDisplayAnimate(NSWindow *self, SEL _cmd, NSRect frameRect, BOOL displayFlag, BOOL animateFlag) {
+    (void)animateFlag;
     NSRect locked = CloakCoerceWindowFrame(self, frameRect);
     BOOL prev = gInProgrammaticFrameCall;
     gInProgrammaticFrameCall = YES;
     ((void (*)(id, SEL, NSRect, BOOL, BOOL))gOrigSetFrameDisplayAnimate)(self, _cmd, locked, displayFlag, NO);
+    [[CloakTabDeck shared] enforceWebViewLogicalBoundsForWindow:self];
     gInProgrammaticFrameCall = prev;
 }
 
@@ -1307,6 +1762,22 @@ static void CloakWebKitTabsEntry(void) {
         if (envOriginFile && envOriginFile[0]) {
             gOriginFilePath = [NSString stringWithUTF8String:envOriginFile];
         }
+        const char *envBaseW = getenv("CLOAK_BASE_WIDTH");
+        if (envBaseW && envBaseW[0]) {
+            double bw = atof(envBaseW);
+            if (bw >= 240.0 && bw <= 1600.0) gBaseWidth = (CGFloat)bw;
+        }
+        const char *envBaseH = getenv("CLOAK_BASE_HEIGHT");
+        if (envBaseH && envBaseH[0]) {
+            double bh = atof(envBaseH);
+            if (bh >= 360.0 && bh <= 2600.0) gBaseHeight = (CGFloat)bh;
+        }
+        const char *envScale = getenv("CLOAK_DISPLAY_SCALE");
+        if (envScale && envScale[0]) {
+            double sc = atof(envScale);
+            if (sc >= 0.85 && sc <= 1.80) gInitialScaleEnv = (CGFloat)sc;
+        }
+
         NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
         for (NSString *key in [[ud dictionaryRepresentation] allKeys]) {
             if ([key hasPrefix:@"NSWindow Frame "]) {
