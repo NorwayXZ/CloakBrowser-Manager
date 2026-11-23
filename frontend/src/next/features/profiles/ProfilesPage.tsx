@@ -1,12 +1,13 @@
 import { pinnedFirst, usePinnedProfiles } from "./pins";
-import { ChevronDown, Copy, Inbox, Pencil, Play, RefreshCw, Search, SearchX, Sparkles, Square, Trash2, UserRoundPlus, X } from "lucide-react";
+import { ChevronDown, Copy, Inbox, Laptop, Pencil, Play, RefreshCw, Search, SearchX, Smartphone, Sparkles, Sprout, Square, Trash2, UserRoundPlus, X } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
+import { cn } from "../../shared/lib/cn";
 import { formatShortcut, useHotkeys } from "../../shared/lib/hotkeys";
 import { Button, EmptyState, ErrorState, IconButton, Input, Kbd, Menu, MenuItem, Skeleton } from "../../ui";
 import { useGroups, useProfiles } from "./api";
 import { useProfileActions } from "./actions";
-import { ALL_GROUPS, countByGroup, filterProfiles, isRunning } from "./format";
+import { ALL_GROUPS, countByGroup, filterProfiles, isNurseryGroupName, isNurseryProfile, isRunning } from "./format";
 import { GroupBar } from "./GroupBar";
 import { useLaunch } from "./launch";
 import { ProfileTable, type RowActions } from "./ProfileTable";
@@ -34,11 +35,20 @@ function overlayOpen() {
   return Boolean(document.querySelector('[role="dialog"], [role="menu"], [role="alertdialog"]'));
 }
 
-export function ProfilesPage() {
+type NurseryKind = "all" | "desktop" | "ios";
+
+export function NurseryPage() {
+  return <ProfilesPage scope="nursery" />;
+}
+
+export function ProfilesPage({ scope = "regular" }: { scope?: "regular" | "nursery" }) {
+  const isNursery = scope === "nursery";
+  const basePath = isNursery ? "/nursery" : "/profiles";
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const query = params.get("q") ?? "";
   const group = params.get("g") ?? ALL_GROUPS;
+  const kind = (params.get("k") as NurseryKind | null) ?? "all";
   const activeId = params.get("p");
   const creating = params.get("create");
 
@@ -50,9 +60,24 @@ export function ProfilesPage() {
   const searchRef = useRef<HTMLInputElement>(null);
   const [tableRef, tableWidth] = useWidth<HTMLDivElement>();
 
-  const all = useMemo(() => profiles.data ?? [], [profiles.data]);
+  const all = useMemo(
+    () => (profiles.data ?? []).filter((p) => (isNursery ? isNurseryProfile(p) : !isNurseryProfile(p))),
+    [isNursery, profiles.data],
+  );
+  const regularGroups = useMemo(
+    () => (groups.data ?? []).filter((g) => !isNurseryGroupName(g.name)),
+    [groups.data],
+  );
+  const desktopCount = useMemo(() => all.filter((p) => p.platform !== "ios").length, [all]);
+  const iosCount = useMemo(() => all.filter((p) => p.platform === "ios").length, [all]);
   const { pinned, toggle: togglePin } = usePinnedProfiles();
-  const visible = useMemo(() => pinnedFirst(filterProfiles(all, query, group), pinned), [all, query, group, pinned]);
+  const visible = useMemo(() => {
+    const byGroupAndQuery = filterProfiles(all, query, group);
+    const byKind = !isNursery || kind === "all"
+      ? byGroupAndQuery
+      : byGroupAndQuery.filter((p) => (kind === "ios" ? p.platform === "ios" : p.platform !== "ios"));
+    return pinnedFirst(byKind, pinned);
+  }, [all, group, isNursery, kind, pinned, query]);
   const counts = useMemo(() => countByGroup(all), [all]);
   const chosen = useMemo(() => all.filter((p) => selected.has(p.id)), [all, selected]);
   const runningCount = all.filter(isRunning).length;
@@ -101,8 +126,8 @@ export function ProfilesPage() {
   const actions: RowActions = {
     launch: (profile, mode) => void launch([profile], mode),
     stop: (profile) => void stop([profile]),
-    edit: (profile) => navigate(`/profiles/${profile.id}/edit`),
-    openViewer: (profile) => navigate(`/profiles/${profile.id}/viewer`),
+    edit: (profile) => navigate(`${basePath}/${profile.id}/edit`),
+    openViewer: (profile) => navigate(`${basePath}/${profile.id}/viewer`),
     duplicate: (profile) => void duplicate([profile]),
     trash: (profile) => void trash([profile]),
     burn: (profile) => void burn(profile),
@@ -111,7 +136,7 @@ export function ProfilesPage() {
   useHotkeys([
     { combo: "mod+f", handler: () => searchRef.current?.focus() },
     { combo: "/", handler: () => searchRef.current?.focus() },
-    { combo: "mod+n", handler: () => navigate("/profiles/new") },
+    { combo: "mod+n", handler: () => navigate(`${basePath}/new`) },
     {
       combo: "escape",
       handler: () => {
@@ -125,43 +150,63 @@ export function ProfilesPage() {
   // Columns join as the window widens; 0 is jsdom, which shows everything.
   const showDevice = tableWidth === 0 || tableWidth >= 960;
   const showNotes = tableWidth === 0 || tableWidth >= 1160;
-  const showGroup = group === ALL_GROUPS && (tableWidth === 0 || tableWidth >= 1280);
-  const filtered = query.trim() !== "" || group !== ALL_GROUPS;
+  const showGroup = !isNursery && group === ALL_GROUPS && (tableWidth === 0 || tableWidth >= 1280);
+  const filtered = query.trim() !== "" || group !== ALL_GROUPS || (isNursery && kind !== "all");
 
   return (
     <div className="flex h-full min-h-0 flex-col pt-5">
         <div className="flex shrink-0 flex-col gap-3 pb-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
-              <h1 className="text-xl font-semibold tracking-tight text-fg">环境</h1>
+              <h1 className="text-xl font-semibold tracking-tight text-fg">{isNursery ? "产房" : "环境"}</h1>
               <p className="text-sm text-fg-2">
-                {profiles.isSuccess ? `共 ${all.length} 个 · 运行中 ${runningCount}` : "正在读取…"}
+                {profiles.isSuccess
+                  ? isNursery
+                    ? `共 ${all.length} 个专用注册环境 · 运行中 ${runningCount}（已与正式「环境」隔离）`
+                    : `共 ${all.length} 个 · 运行中 ${runningCount}`
+                  : "正在读取…"}
               </p>
             </div>
             <div className="flex items-center gap-2">
               <IconButton label="刷新" variant="secondary" icon={<RefreshCw className="h-4 w-4" />} loading={profiles.isFetching && !profiles.isPending} onClick={() => void profiles.refetch()} />
-              <Menu
-                trigger={
-                  <Button variant="primary" icon={<UserRoundPlus className="h-4 w-4" />}>
-                    新建
-                    <ChevronDown className="h-3.5 w-3.5" aria-hidden />
-                  </Button>
-                }
-              >
-                <MenuItem icon={<Pencil className="h-4 w-4" />} shortcut={formatShortcut("mod+n")} onSelect={() => navigate("/profiles/new")}>
-                  自定义创建
-                </MenuItem>
-                <MenuItem icon={<Sparkles className="h-4 w-4" />} onSelect={() => setParam("create", "sentence")}>
-                  一句话建号
-                </MenuItem>
-                <MenuItem icon={<UserRoundPlus className="h-4 w-4" />} onSelect={() => setParam("create", "disposable")}>
-                  一次性身份
-                </MenuItem>
-              </Menu>
+              {isNursery ? (
+                <Button variant="primary" icon={<UserRoundPlus className="h-4 w-4" />} onClick={() => navigate("/nursery/new")}>
+                  新建产房环境
+                </Button>
+              ) : (
+                <Menu
+                  trigger={
+                    <Button variant="primary" icon={<UserRoundPlus className="h-4 w-4" />}>
+                      新建
+                      <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+                    </Button>
+                  }
+                >
+                  <MenuItem icon={<Pencil className="h-4 w-4" />} shortcut={formatShortcut("mod+n")} onSelect={() => navigate("/profiles/new")}>
+                    自定义创建
+                  </MenuItem>
+                  <MenuItem icon={<Sparkles className="h-4 w-4" />} onSelect={() => setParam("create", "sentence")}>
+                    一句话建号
+                  </MenuItem>
+                  <MenuItem icon={<UserRoundPlus className="h-4 w-4" />} onSelect={() => setParam("create", "disposable")}>
+                    一次性身份
+                  </MenuItem>
+                </Menu>
+              )}
             </div>
           </div>
 
-          <GroupBar groups={groups.data ?? []} loading={groups.isPending} counts={counts} total={all.length} value={group} onChange={(value) => setParam("g", value === ALL_GROUPS ? null : value)} />
+          {isNursery ? (
+            <NurseryFilterBar
+              total={all.length}
+              desktopCount={desktopCount}
+              iosCount={iosCount}
+              value={kind}
+              onChange={(next) => setParam("k", next === "all" ? null : next)}
+            />
+          ) : (
+            <GroupBar groups={regularGroups} loading={groups.isPending} counts={counts} total={all.length} value={group} onChange={(value) => setParam("g", value === ALL_GROUPS ? null : value)} />
+          )}
 
           {selected.size > 0 ? (
             <div role="toolbar" aria-label="批量操作" className="flex min-h-10 flex-wrap items-center gap-2 rounded-md border border-accent/40 bg-accent-soft px-3 py-1">
@@ -230,21 +275,31 @@ export function ProfilesPage() {
           ) : all.length === 0 ? (
             <div className="rounded-md border border-dashed border-border-strong bg-surface">
               <EmptyState
-                icon={Inbox}
-                title="还没有环境"
-                description="每个环境是一个独立的浏览器身份：设备型号、代理、时区语言和 Cookie 都各自独立。"
+                icon={isNursery ? Sprout : Inbox}
+                title={isNursery ? "产房里还没有专用注册环境" : "还没有环境"}
+                description={
+                  isNursery
+                    ? "专门用来注册新账号的独立环境池，不会混进「环境」主列表。注册好账号后把分组改成“未分组”即可转入正式环境。"
+                    : "每个环境是一个独立的浏览器身份：设备型号、代理、时区语言和 Cookie 都各自独立。"
+                }
                 action={
-                  <>
-                    <Button variant="primary" icon={<Pencil className="h-4 w-4" />} onClick={() => navigate("/profiles/new")}>
-                      自定义创建
+                  isNursery ? (
+                    <Button variant="primary" icon={<Pencil className="h-4 w-4" />} onClick={() => navigate("/nursery/new")}>
+                      新建产房环境
                     </Button>
-                    <Button icon={<Sparkles className="h-4 w-4" />} onClick={() => setParam("create", "sentence")}>
-                      一句话建号
-                    </Button>
-                    <Button icon={<UserRoundPlus className="h-4 w-4" />} onClick={() => setParam("create", "disposable")}>
-                      一次性身份
-                    </Button>
-                  </>
+                  ) : (
+                    <>
+                      <Button variant="primary" icon={<Pencil className="h-4 w-4" />} onClick={() => navigate("/profiles/new")}>
+                        自定义创建
+                      </Button>
+                      <Button icon={<Sparkles className="h-4 w-4" />} onClick={() => setParam("create", "sentence")}>
+                        一句话建号
+                      </Button>
+                      <Button icon={<UserRoundPlus className="h-4 w-4" />} onClick={() => setParam("create", "disposable")}>
+                        一次性身份
+                      </Button>
+                    </>
+                  )
                 }
               />
             </div>
@@ -253,7 +308,7 @@ export function ProfilesPage() {
               <EmptyState
                 icon={SearchX}
                 title="没有匹配的环境"
-                description={query ? `没有名称、代理、备注或 UA 包含“${query}”的环境${group !== ALL_GROUPS ? `（在“${group}”里）` : ""}。` : `“${group}”里还没有环境。`}
+                description={query ? `没有名称、代理、备注或 UA 包含“${query}”的环境${!isNursery && group !== ALL_GROUPS ? `（在“${group}”里）` : ""}。` : isNursery ? "当前类型下还没有产房环境。" : `“${group}”里还没有环境。`}
                 action={
                   filtered && (
                     <Button
@@ -262,6 +317,7 @@ export function ProfilesPage() {
                           const next = new URLSearchParams(current);
                           next.delete("q");
                           next.delete("g");
+                          next.delete("k");
                           return next;
                         }, { replace: true })
                       }
@@ -320,6 +376,53 @@ export function ProfilesPage() {
       )}
       </Suspense>
     </div>
+  );
+}
+
+function NurseryFilterBar({
+  total,
+  desktopCount,
+  iosCount,
+  value,
+  onChange,
+}: {
+  total: number;
+  desktopCount: number;
+  iosCount: number;
+  value: NurseryKind;
+  onChange: (next: NurseryKind) => void;
+}) {
+  const options: { key: NurseryKind; label: string; count: number; icon?: typeof Laptop }[] = [
+    { key: "all", label: "全部", count: total },
+    { key: "desktop", label: "电脑版", count: desktopCount, icon: Laptop },
+    { key: "ios", label: "手机版", count: iosCount, icon: Smartphone },
+  ];
+  return (
+    <nav aria-label="产房分类" className="flex flex-wrap items-center gap-1.5">
+      <ul className="flex flex-wrap items-center gap-1.5">
+        {options.map((opt) => {
+          const Icon = opt.icon;
+          const active = value === opt.key;
+          return (
+            <li key={opt.key}>
+              <button
+                type="button"
+                aria-current={active ? "true" : undefined}
+                onClick={() => onChange(opt.key)}
+                className={cn(
+                  "flex h-7 items-center gap-1.5 rounded border px-2.5 text-sm transition-colors duration-fast",
+                  active ? "border-accent/40 bg-accent-soft font-medium text-accent" : "border-border bg-surface text-fg-2 hover:bg-surface-2 hover:text-fg",
+                )}
+              >
+                {Icon && <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />}
+                <span>{opt.label}</span>
+                <span className="tabular text-xs opacity-70">{opt.count}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
   );
 }
 

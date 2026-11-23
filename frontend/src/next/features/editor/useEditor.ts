@@ -33,33 +33,38 @@ interface StoredDraft {
  * restarted). sessionStorage, not localStorage: the draft can hold proxy
  * passwords and cookies, and must not outlive the window on disk.
  */
-function draftKey(profileId: string | null) {
-  return `${DRAFT_PREFIX}${profileId ?? "new"}`;
+function draftKey(scope: string) {
+  return `${DRAFT_PREFIX}${scope}`;
 }
 
-export function readDraft(profileId: string | null): StoredDraft | null {
+export function readDraft(profileId: string | null, defaultGroup?: string): StoredDraft | null {
+  const scope = profileId ?? (defaultGroup ? `new:${defaultGroup}` : "new");
   try {
-    const raw = window.sessionStorage.getItem(draftKey(profileId));
+    const raw = window.sessionStorage.getItem(draftKey(scope));
     return raw ? (JSON.parse(raw) as StoredDraft) : null;
   } catch {
     return null;
   }
 }
 
-function writeDraft(profileId: string | null, state: EditorState | null) {
+function writeDraft(scope: string, state: EditorState | null) {
   try {
-    if (state) window.sessionStorage.setItem(draftKey(profileId), JSON.stringify({ at: new Date().toISOString(), state }));
-    else window.sessionStorage.removeItem(draftKey(profileId));
+    if (state) window.sessionStorage.setItem(draftKey(scope), JSON.stringify({ at: new Date().toISOString(), state }));
+    else window.sessionStorage.removeItem(draftKey(scope));
   } catch {
     // Storage blocked: the draft is simply not kept.
   }
 }
 
 /** Editor state and every field rule, mirroring the current panel's editor. */
-export function useEditor(profile: Profile | null, hostOS: HostOS | null) {
+export function useEditor(profile: Profile | null, hostOS: HostOS | null, defaultGroup?: string) {
   const profileId = profile?.id ?? null;
+  const draftScope = profileId ?? (defaultGroup ? `new:${defaultGroup}` : "new");
   // Computed once: the page remounts the editor (key) for another profile.
-  const [initial] = useState(() => initialState(profile, hostOS));
+  const [initial] = useState(() => {
+    const base = initialState(profile, hostOS);
+    return !profile && defaultGroup ? { ...base, form: { ...base.form, group_name: defaultGroup } } : base;
+  });
   const [state, setState] = useState<EditorState>(initial);
   const [proxyTest, setProxyTest] = useState<ProxyTestResult | null>(null);
   const [proxyTestError, setProxyTestError] = useState<string | null>(null);
@@ -72,11 +77,11 @@ export function useEditor(profile: Profile | null, hostOS: HostOS | null) {
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (draftTimer.current) clearTimeout(draftTimer.current);
-    draftTimer.current = setTimeout(() => writeDraft(profileId, dirty ? state : null), 400);
+    draftTimer.current = setTimeout(() => writeDraft(draftScope, dirty ? state : null), 400);
     return () => {
       if (draftTimer.current) clearTimeout(draftTimer.current);
     };
-  }, [dirty, profileId, state]);
+  }, [dirty, draftScope, state]);
 
   const setForm = useCallback((update: (form: EditorForm) => EditorForm) => setState((s) => ({ ...s, form: update(s.form) })), []);
 
@@ -114,7 +119,7 @@ export function useEditor(profile: Profile | null, hostOS: HostOS | null) {
     setRelay: (id: string | null) => { set("relay_id", id); clearProxyTest(); },
     setForm,
     restore: (draft: EditorState) => setState(draft),
-    discardDraft: () => writeDraft(profileId, null),
+    discardDraft: () => writeDraft(draftScope, null),
     payload: () => buildPayload(form, hostOS),
     changeEngine: (engine: EditableEngine) => setForm((f) => changeEngine(f, engine, hostOS)),
     changePlatform: (platform: DevicePlatform) => setForm((f) => changePlatform(f, platform, hostOS)),

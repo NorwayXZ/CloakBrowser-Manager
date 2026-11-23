@@ -27,7 +27,7 @@ interface Rfb {
  * The remote screen of a browser running in the Docker deployment (KasmVNC),
  * with two-way clipboard sync. Leaves for the list when the browser stops.
  */
-export function ViewerPage() {
+export function ViewerPage({ returnTo = "/profiles" }: { returnTo?: string }) {
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const toast = useToast();
@@ -38,7 +38,7 @@ export function ViewerPage() {
   const [selfCheck, setSelfCheck] = useState(false);
   const stoppedHere = useRef(false);
 
-  const back = useCallback(() => navigate(`/profiles?p=${encodeURIComponent(id)}`), [id, navigate]);
+  const back = useCallback(() => navigate(`${returnTo}?p=${encodeURIComponent(id)}`), [id, navigate, returnTo]);
 
   // The browser went away (closed, crashed, or deleted): go back to the list.
   useEffect(() => {

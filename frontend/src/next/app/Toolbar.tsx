@@ -170,6 +170,7 @@ function ThemeMenu() {
 
 export const SHORTCUTS = [
   { combo: "mod+1", label: "环境" },
+  { combo: "mod+4", label: "产房（专用注册环境）" },
   { combo: "mod+2", label: "资源（代理、邮箱）" },
   { combo: "mod+3", label: "设置" },
   { combo: "?", label: "显示快捷键" },

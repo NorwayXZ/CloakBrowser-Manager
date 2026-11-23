@@ -135,7 +135,7 @@ describe("app shell", () => {
     renderApp("/settings");
     expect(screen.getByText("CloakBrowser")).toBeInTheDocument();
     const nav = screen.getByRole("navigation", { name: "页面" });
-    expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual(["环境", "资源", "设置"]);
+    expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual(["环境", "产房", "资源", "设置"]);
   });
 
   it("asks for a restart when the running Manager is older than the panel", async () => {

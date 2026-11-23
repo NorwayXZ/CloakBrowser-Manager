@@ -14,7 +14,7 @@ import { useProxyPresets } from "./api";
 import { SECTIONS, type EditorState } from "./model";
 import { AdvancedSection } from "./sections/AdvancedSection";
 import { BasicSection } from "./sections/BasicSection";
-import { seedDeviceLabel } from "../profiles/format";
+import { isNurseryProfile, seedDeviceLabel } from "../profiles/format";
 import { FingerprintSection, MoreFingerprintSection } from "./sections/FingerprintSections";
 import { ProxySection } from "./sections/ProxySection";
 import { SummaryPanel } from "./SummaryPanel";
@@ -23,8 +23,16 @@ import { readDraft, useEditor } from "./useEditor";
 
 const ResetProfileDialog = lazy(() => import("../profiles/ResetProfileDialog").then((m) => ({ default: m.ResetProfileDialog })));
 
-/** /profiles/new and /profiles/:id/edit: waits for what the form needs, then mounts it. */
-export function EditorPage({ mode }: { mode: "new" | "edit" }) {
+/** /profiles/new, /profiles/:id/edit, /nursery/new and /nursery/:id/edit. */
+export function EditorPage({
+  mode,
+  returnTo = "/profiles",
+  defaultGroup,
+}: {
+  mode: "new" | "edit";
+  returnTo?: string;
+  defaultGroup?: string;
+}) {
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const status = useManagerStatus();
@@ -38,17 +46,24 @@ export function EditorPage({ mode }: { mode: "new" | "edit" }) {
   if (mode === "edit" && profiles.isError && profiles.data === undefined) return <ErrorState message={profiles.error.message} onRetry={() => void profiles.refetch()} />;
   const profile = mode === "edit" ? profiles.data?.find((p) => p.id === id) ?? null : null;
   if (mode === "edit" && !profile) {
-    return <EmptyState title="没有这个环境" description="它可能已经被删除，或者移到了回收站。" action={<Button onClick={() => navigate("/profiles")}>回到环境列表</Button>} />;
+    return <EmptyState title="没有这个环境" description="它可能已经被删除，或者移到了回收站。" action={<Button onClick={() => navigate(returnTo)}>回到列表</Button>} />;
   }
+  const backTo = returnTo !== "/profiles" ? returnTo : profile && isNurseryProfile(profile) ? "/nursery" : "/profiles";
+  const allGroups = groups.data ?? [];
+  const mergedGroups = defaultGroup && !allGroups.some((g) => g.name === defaultGroup)
+    ? [...allGroups, { id: defaultGroup, name: defaultGroup, color: "#10b981", created_at: "", updated_at: "" }]
+    : allGroups;
 
   return (
     <Editor
-      key={profile?.id ?? "new"}
+      key={profile?.id ?? (defaultGroup ? `new:${defaultGroup}` : "new")}
       profile={profile}
       hostOS={(status.data?.host_os as HostOS | undefined) ?? null}
       hostScreen={status.data?.host_screen ?? null}
-      groups={groups.data ?? []}
+      groups={mergedGroups}
       presets={presets.data ?? []}
+      returnTo={backTo}
+      defaultGroup={defaultGroup}
     />
   );
 }
@@ -69,24 +84,28 @@ function Editor({
   hostScreen,
   groups,
   presets,
+  returnTo,
+  defaultGroup,
 }: {
   profile: Profile | null;
   hostOS: HostOS | null;
   hostScreen: number[] | null;
   groups: Parameters<typeof BasicSection>[0]["groups"];
   presets: Parameters<typeof ProxySection>[0]["presets"];
+  returnTo: string;
+  defaultGroup?: string;
 }) {
   const isEdit = profile !== null;
   const navigate = useNavigate();
   const toast = useToast();
   const queryClient = useQueryClient();
   const { trash } = useProfileActions();
-  const editor = useEditor(profile, hostOS);
+  const editor = useEditor(profile, hostOS, defaultGroup);
   const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
-  const [draft, setDraft] = useState(() => readDraft(profile?.id ?? null));
+  const [draft, setDraft] = useState(() => readDraft(profile?.id ?? null, defaultGroup));
   const [active, setActive] = useState<string>(SECTIONS[0].id);
   const leaving = useRef(false);
   const nameRef = useRef<HTMLInputElement>(null);
@@ -125,7 +144,8 @@ function Editor({
       );
       void queryClient.invalidateQueries({ queryKey: profileKeys.list });
       toast.show({ tone: "success", title: isEdit ? `已保存「${saved.name}」` : `已创建「${saved.name}」`, description: isEdit ? "已经打开的浏览器要重新打开才会用上新配置。" : undefined });
-      leave(`/profiles?p=${encodeURIComponent(saved.id)}`);
+      const savedHome = isNurseryProfile(saved) ? "/nursery" : "/profiles";
+      leave(`${savedHome}?p=${encodeURIComponent(saved.id)}`);
     } catch (error) {
       const text = error instanceof Error && error.message ? error.message : "保存失败，请检查输入后重试";
       log.warn("保存环境失败", { action: isEdit ? "profile.update" : "profile.create", detail: error });
@@ -187,7 +207,7 @@ function Editor({
       }}
     >
       <div className="flex shrink-0 items-center gap-3 py-2.5">
-        <IconButton label="回到环境列表" icon={<ArrowLeft className="h-4 w-4" />} onClick={() => navigate("/profiles")} />
+        <IconButton label="回到环境列表" icon={<ArrowLeft className="h-4 w-4" />} onClick={() => navigate(returnTo)} />
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-md font-semibold tracking-tight text-fg">{title}</h1>
           <p className="truncate text-sm text-fg-3">{editor.form.name || "未命名"}</p>
@@ -203,7 +223,7 @@ function Editor({
             icon={<Trash2 className="h-3.5 w-3.5" />}
             onClick={() =>
               void trash([profile]).then((done) => {
-                if (done) leave("/profiles");
+                if (done) leave(returnTo);
               })
             }
           >

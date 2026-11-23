@@ -1,4 +1,4 @@
-import { Boxes, LayoutGrid, Settings, type LucideIcon } from "lucide-react";
+import { Boxes, LayoutGrid, Settings, Sprout, type LucideIcon } from "lucide-react";
 
 export interface NavItem {
   path: string;
@@ -10,6 +10,7 @@ export interface NavItem {
 
 export const NAV_ITEMS: NavItem[] = [
   { path: "/profiles", label: "环境", icon: LayoutGrid, key: "1" },
+  { path: "/nursery", label: "产房", icon: Sprout, key: "4" },
   { path: "/resources", label: "资源", icon: Boxes, key: "2" },
   { path: "/settings", label: "设置", icon: Settings, key: "3" },
 ];

@@ -6,6 +6,17 @@ import { DEVICE_PROFILES } from "../editor/deviceProfiles";
 import type { AgentLease, Profile, ProfileCreate } from "./types";
 
 export const UNGROUPED = "未分组";
+export const DEFAULT_NURSERY_GROUP = "Gmail 专用产房";
+
+/** Dedicated registration nursery groups live on /nursery instead of /profiles. */
+export function isNurseryGroupName(name: string | null | undefined): boolean {
+  const trimmed = (name ?? "").trim();
+  return trimmed === DEFAULT_NURSERY_GROUP || trimmed.includes("产房");
+}
+
+export function isNurseryProfile(profile: Pick<Profile, "group_name">): boolean {
+  return isNurseryGroupName(profile.group_name);
+}
 
 /** proxy_geo is a free-form dict on the backend; these are the keys the panel reads. */
 export interface ProxyGeo {

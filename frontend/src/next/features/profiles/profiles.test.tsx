@@ -708,3 +708,46 @@ describe("one-click creation", () => {
     await waitFor(() => expect(router.state.location.search).toBe("?p=d9"));
   });
 });
+
+describe("nursery isolation", () => {
+  it("excludes nursery profiles and groups from /profiles and shows them on /nursery with desktop/ios filters", async () => {
+    profiles = [
+      AMAZON,
+      ETSY,
+      makeProfile({ id: "n-mac", name: "Gmail电脑产房-1", group_name: "Gmail 专用产房", platform: "macos" }),
+      makeProfile({ id: "n-ios", name: "Gmail产房-1", group_name: "Gmail 专用产房", platform: "ios", browser_engine: "webkit" }),
+    ];
+    const extraGroups: MockRoute = {
+      path: "/api/groups",
+      respond: [
+        { id: "g1", name: "美国账号", color: "#3b82f6" },
+        { id: "g2", name: "Gmail 专用产房", color: "#10b981" },
+      ],
+    };
+
+    const { router } = await renderList([extraGroups], "/profiles");
+    expect(await screen.findByText("Amazon Seller #1")).toBeInTheDocument();
+    expect(screen.getByText("Etsy UK")).toBeInTheDocument();
+    expect(screen.queryByText("Gmail电脑产房-1")).not.toBeInTheDocument();
+    expect(screen.queryByText("Gmail产房-1")).not.toBeInTheDocument();
+    const groupNav = screen.getByRole("navigation", { name: "分组" });
+    expect(within(groupNav).queryByText("Gmail 专用产房")).not.toBeInTheDocument();
+
+    const pageNav = screen.getByRole("navigation", { name: "页面" });
+    fireEvent.click(within(pageNav).getByRole("link", { name: "产房" }));
+    expect(router.state.location.pathname).toBe("/nursery");
+    expect(await screen.findByRole("heading", { name: "产房" })).toBeInTheDocument();
+    expect(await screen.findByText("Gmail电脑产房-1")).toBeInTheDocument();
+    expect(screen.getByText("Gmail产房-1")).toBeInTheDocument();
+    expect(screen.queryByText("Amazon Seller #1")).not.toBeInTheDocument();
+
+    const kindNav = screen.getByRole("navigation", { name: "产房分类" });
+    fireEvent.click(within(kindNav).getByRole("button", { name: /电脑版/ }));
+    expect(screen.getByText("Gmail电脑产房-1")).toBeInTheDocument();
+    expect(screen.queryByText("Gmail产房-1")).not.toBeInTheDocument();
+
+    fireEvent.click(within(kindNav).getByRole("button", { name: /手机版/ }));
+    expect(screen.getByText("Gmail产房-1")).toBeInTheDocument();
+    expect(screen.queryByText("Gmail电脑产房-1")).not.toBeInTheDocument();
+  });
+});

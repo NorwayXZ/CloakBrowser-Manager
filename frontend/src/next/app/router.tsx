@@ -1,7 +1,8 @@
 import { lazy, Suspense, type ReactNode } from "react";
 import { createBrowserRouter, Navigate, useLocation, type RouteObject } from "react-router";
+import { DEFAULT_NURSERY_GROUP } from "../features/profiles/format";
 import { ProfilesLayout } from "../features/profiles/ProfilesLayout";
-import { ProfilesPage } from "../features/profiles/ProfilesPage";
+import { NurseryPage, ProfilesPage } from "../features/profiles/ProfilesPage";
 import { NotFound } from "../pages/NotFound";
 import { Skeleton } from "../ui";
 import { AppShell } from "./AppShell";
@@ -51,6 +52,16 @@ export const routes: RouteObject[] = [
           { path: "new", element: page(<EditorPage mode="new" />) },
           { path: ":id/edit", element: page(<EditorPage mode="edit" />) },
           { path: ":id/viewer", element: page(<ViewerPage />) },
+        ],
+      },
+      {
+        path: "nursery",
+        element: <ProfilesLayout />,
+        children: [
+          { index: true, element: <NurseryPage /> },
+          { path: "new", element: page(<EditorPage mode="new" returnTo="/nursery" defaultGroup={DEFAULT_NURSERY_GROUP} />) },
+          { path: ":id/edit", element: page(<EditorPage mode="edit" returnTo="/nursery" />) },
+          { path: ":id/viewer", element: page(<ViewerPage returnTo="/nursery" />) },
         ],
       },
       {
