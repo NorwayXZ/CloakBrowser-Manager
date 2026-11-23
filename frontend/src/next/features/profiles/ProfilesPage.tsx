@@ -1,16 +1,20 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { pinnedFirst, usePinnedProfiles } from "./pins";
-import { ChevronDown, Copy, Inbox, Laptop, Pencil, Play, RefreshCw, Search, SearchX, Smartphone, Sparkles, Sprout, Square, Trash2, UserRoundPlus, X } from "lucide-react";
+import { CheckCircle2, ChevronDown, Copy, Inbox, Laptop, Pencil, Play, RefreshCw, Search, SearchX, Smartphone, Sparkles, Sprout, Square, Trash2, UserRoundPlus, X } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
+import { request } from "../../shared/api/client";
 import { cn } from "../../shared/lib/cn";
 import { formatShortcut, useHotkeys } from "../../shared/lib/hotkeys";
-import { Button, EmptyState, ErrorState, IconButton, Input, Kbd, Menu, MenuItem, Skeleton } from "../../ui";
+import { Button, EmptyState, ErrorState, IconButton, Input, Kbd, Menu, MenuItem, Skeleton, useToast } from "../../ui";
 import { useGroups, useProfiles } from "./api";
 import { useProfileActions } from "./actions";
 import { ALL_GROUPS, countByGroup, filterProfiles, isNurseryGroupName, isNurseryProfile, isRunning } from "./format";
 import { GroupBar } from "./GroupBar";
 import { useLaunch } from "./launch";
+import { computeNurseryBadge, useNurseryWarmupMap, type NurseryBadgeInfo } from "./nurseryStatus";
 import { ProfileTable, type RowActions } from "./ProfileTable";
+import type { Profile } from "./types";
 
 // Only needed after a click: kept out of the first load.
 const SentenceDialog = lazy(() => import("./CreateDialogs").then((m) => ({ default: m.SentenceDialog })));
@@ -54,15 +58,47 @@ export function ProfilesPage({ scope = "regular" }: { scope?: "regular" | "nurse
 
   const profiles = useProfiles();
   const groups = useGroups();
+  const queryClient = useQueryClient();
+  const toast = useToast();
   const { launch, stop, busy } = useLaunch();
   const { duplicate, trash, burn } = useProfileActions();
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [warmingBusyId, setWarmingBusyId] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const [tableRef, tableWidth] = useWidth<HTMLDivElement>();
 
   const all = useMemo(
     () => (profiles.data ?? []).filter((p) => (isNursery ? isNurseryProfile(p) : !isNurseryProfile(p))),
     [isNursery, profiles.data],
+  );
+  const nurseryWarmupMap = useNurseryWarmupMap(all, isNursery);
+  const nurseryBadges = useMemo(() => {
+    if (!isNursery) return undefined;
+    const map = new Map<string, NurseryBadgeInfo>();
+    for (const p of all) map.set(p.id, computeNurseryBadge(p, nurseryWarmupMap.get(p.id)));
+    return map;
+  }, [all, isNursery, nurseryWarmupMap]);
+  const readyCount = useMemo(
+    () => (nurseryBadges ? [...nurseryBadges.values()].filter((b) => b.ready).length : 0),
+    [nurseryBadges],
+  );
+  const warmOnce = useCallback(
+    async (profile: Profile) => {
+      setWarmingBusyId(profile.id);
+      try {
+        await request(`/api/profiles/${encodeURIComponent(profile.id)}/warmup/run`, { method: "POST", body: {} });
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["nursery", "warmup", profile.id] }),
+          queryClient.invalidateQueries({ queryKey: ["manager", "status"] }),
+        ]);
+        toast.show({ tone: "success", title: `已开始暖床「${profile.name}」`, description: "后台无窗口静默浏览约 4～6 分钟后会自动停下。" });
+      } catch (err) {
+        toast.show({ tone: "error", title: "没能启动暖床", description: err instanceof Error ? err.message : String(err) });
+      } finally {
+        setWarmingBusyId(null);
+      }
+    },
+    [queryClient, toast],
   );
   const regularGroups = useMemo(
     () => (groups.data ?? []).filter((g) => !isNurseryGroupName(g.name)),
@@ -162,7 +198,7 @@ export function ProfilesPage({ scope = "regular" }: { scope?: "regular" | "nurse
               <p className="text-sm text-fg-2">
                 {profiles.isSuccess
                   ? isNursery
-                    ? `共 ${all.length} 个专用注册环境 · 运行中 ${runningCount}（已与正式「环境」隔离）`
+                    ? `共 ${all.length} 个专用注册环境 · 已达标可注册 ${readyCount} 个 · 运行中 ${runningCount}`
                     : `共 ${all.length} 个 · 运行中 ${runningCount}`
                   : "正在读取…"}
               </p>
@@ -197,13 +233,28 @@ export function ProfilesPage({ scope = "regular" }: { scope?: "regular" | "nurse
           </div>
 
           {isNursery ? (
-            <NurseryFilterBar
-              total={all.length}
-              desktopCount={desktopCount}
-              iosCount={iosCount}
-              value={kind}
-              onChange={(next) => setParam("k", next === "all" ? null : next)}
-            />
+            <>
+              <NurseryFilterBar
+                total={all.length}
+                desktopCount={desktopCount}
+                iosCount={iosCount}
+                value={kind}
+                onChange={(next) => setParam("k", next === "all" ? null : next)}
+              />
+              <div role="note" aria-label="产房养号计划表" className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border bg-surface px-3 py-2 text-xs text-fg-2">
+                <span className="font-semibold text-fg">养号与循环计划表：</span>
+                <span>① 第 1 天点「暖一轮」跑 1 次</span>
+                <span aria-hidden className="text-fg-3">→</span>
+                <span>② 第 2～3 天再跑满共 3 轮（跨 2 天）</span>
+                <span aria-hidden className="text-fg-3">→</span>
+                <span className="inline-flex items-center gap-1 font-medium text-success">
+                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  亮绿标「可注册 Gmail」后点打开去联动入口建号
+                </span>
+                <span aria-hidden className="text-fg-3">→</span>
+                <span>④ 建好号转走后点「新一轮」清空换新机，从 0/3 重新开始</span>
+              </div>
+            </>
           ) : (
             <GroupBar groups={regularGroups} loading={groups.isPending} counts={counts} total={all.length} value={group} onChange={(value) => setParam("g", value === ALL_GROUPS ? null : value)} />
           )}
@@ -342,6 +393,9 @@ export function ProfilesPage({ scope = "regular" }: { scope?: "regular" | "nurse
               actions={actions}
               pinned={pinned}
               onTogglePin={togglePin}
+              nurseryBadges={nurseryBadges}
+              onWarmOnce={isNursery ? (p) => void warmOnce(p) : undefined}
+              warmingBusyId={warmingBusyId}
             />
           )}
         </div>

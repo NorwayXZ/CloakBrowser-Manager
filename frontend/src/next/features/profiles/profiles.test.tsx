@@ -714,8 +714,8 @@ describe("nursery isolation", () => {
     profiles = [
       AMAZON,
       ETSY,
-      makeProfile({ id: "n-mac", name: "Gmail电脑产房-1", group_name: "Gmail 专用产房", platform: "macos" }),
-      makeProfile({ id: "n-ios", name: "Gmail产房-1", group_name: "Gmail 专用产房", platform: "ios", browser_engine: "webkit" }),
+      makeProfile({ id: "n-mac", name: "Gmail电脑产房-1", group_name: "Gmail 专用产房", platform: "macos", created_at: "2026-11-20T01:00:00Z" }),
+      makeProfile({ id: "n-ios", name: "Gmail产房-1", group_name: "Gmail 专用产房", platform: "ios", browser_engine: "webkit", created_at: "2026-11-20T01:00:00Z" }),
     ];
     const extraGroups: MockRoute = {
       path: "/api/groups",
@@ -724,8 +724,22 @@ describe("nursery isolation", () => {
         { id: "g2", name: "Gmail 专用产房", color: "#10b981" },
       ],
     };
+    const warmupRoute: MockRoute = {
+      path: "/api/profiles/n-mac/warmup",
+      respond: {
+        enabled: false,
+        daily_max: 1,
+        targets: ["youtube"],
+        warming: false,
+        runs: [
+          { id: "r1", started_at: "2026-11-21T10:00:00+08:00", pages_visited: 5, status: "ok" },
+          { id: "r2", started_at: "2026-11-22T10:00:00+08:00", pages_visited: 4, status: "ok" },
+          { id: "r3", started_at: "2026-11-22T18:00:00+08:00", pages_visited: 6, status: "ok" },
+        ],
+      },
+    };
 
-    const { router } = await renderList([extraGroups], "/profiles");
+    const { router } = await renderList([extraGroups, warmupRoute], "/profiles");
     expect(await screen.findByText("Amazon Seller #1")).toBeInTheDocument();
     expect(screen.getByText("Etsy UK")).toBeInTheDocument();
     expect(screen.queryByText("Gmail电脑产房-1")).not.toBeInTheDocument();
@@ -738,6 +752,9 @@ describe("nursery isolation", () => {
     expect(router.state.location.pathname).toBe("/nursery");
     expect(await screen.findByRole("heading", { name: "产房" })).toBeInTheDocument();
     expect(await screen.findByText("Gmail电脑产房-1")).toBeInTheDocument();
+    expect(await screen.findByText("可注册 Gmail")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "暖一轮「Gmail电脑产房-1」" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "新一轮重置「Gmail电脑产房-1」" })).toBeInTheDocument();
     expect(screen.getByText("Gmail产房-1")).toBeInTheDocument();
     expect(screen.queryByText("Amazon Seller #1")).not.toBeInTheDocument();
 

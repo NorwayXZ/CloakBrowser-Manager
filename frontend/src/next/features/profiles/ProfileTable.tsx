@@ -1,10 +1,11 @@
-import { Activity, Bug, Copy, Eraser, Flame, Link2, MapPin, MonitorPlay, MoreHorizontal, Pencil, Pin, Play, RefreshCw, Square, Trash2 } from "lucide-react";
+import { Activity, Bug, CheckCircle2, Copy, Eraser, Flame, Link2, MapPin, MonitorPlay, MoreHorizontal, Pencil, Pin, Play, RefreshCw, RotateCcw, Sparkles, Square, Trash2 } from "lucide-react";
 import { lazy, Suspense, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { cn } from "../../shared/lib/cn";
 import { matchesCombo } from "../../shared/lib/hotkeys";
-import { Badge, Button, Checkbox, Dialog, IconButton, Menu, MenuItem, MenuSeparator, StatusDot, Table, TD, TH, THead, TR, useToast } from "../../ui";
+import { Badge, Button, Checkbox, Dialog, IconButton, Menu, MenuItem, MenuSeparator, Spinner, StatusDot, Table, TD, TH, THead, TR, useToast } from "../../ui";
 import { ProxyIpActions } from "../proxies/ProxyIpActions";
 import { AgentLeaseBadge } from "./AgentLeaseBadge";
+import type { NurseryBadgeInfo } from "./nurseryStatus";
 import {
   deviceText,
   engineLabel,
@@ -59,6 +60,9 @@ export function ProfileTable({
   actions,
   pinned,
   onTogglePin,
+  nurseryBadges,
+  onWarmOnce,
+  warmingBusyId,
 }: {
   profiles: Profile[];
   selected: ReadonlySet<string>;
@@ -72,6 +76,9 @@ export function ProfileTable({
   actions: RowActions;
   pinned?: ReadonlySet<string>;
   onTogglePin?: (id: string) => void;
+  nurseryBadges?: ReadonlyMap<string, NurseryBadgeInfo>;
+  onWarmOnce?: (profile: Profile) => void;
+  warmingBusyId?: string | null;
 }) {
   const toast = useToast();
   const [selfCheck, setSelfCheck] = useState<Profile | null>(null);
@@ -139,7 +146,7 @@ export function ProfileTable({
         {showDevice && <col className="w-60" />}
         <col className="w-36" />
         {showNotes && <col className="w-48" />}
-        <col className="w-32" />
+        <col className={nurseryBadges ? "w-60" : "w-32"} />
       </colgroup>
       <THead>
         <tr>
@@ -167,6 +174,7 @@ export function ProfileTable({
           const isBusy = busy.has(profile.id);
           const isSelected = selected.has(profile.id);
           const lease = running ? leaseOf(profile) : null;
+          const nurseryBadge = nurseryBadges?.get(profile.id);
           return (
             <TR
               key={profile.id}
@@ -190,6 +198,15 @@ export function ProfileTable({
                   <span className="truncate font-medium" title={profile.name}>
                     {profile.name}
                   </span>
+                  {nurseryBadge && (
+                    <span className="shrink-0" title={nurseryBadge.detail}>
+                      <Badge tone={nurseryBadge.tone}>
+                        {nurseryBadge.ready && <CheckCircle2 className="h-3 w-3 shrink-0" aria-hidden />}
+                        {nurseryBadge.warming && <Spinner className="h-3 w-3 shrink-0" />}
+                        {nurseryBadge.label}
+                      </Badge>
+                    </span>
+                  )}
                   {pinned?.has(profile.id) && <Pin aria-label="已置顶" className="h-3 w-3 shrink-0 text-accent" />}
                   {profile.disposable && <Badge tone="warning">一次性</Badge>}
                 </div>
@@ -258,13 +275,47 @@ export function ProfileTable({
               )}
               <TD className="text-right">
                 <div className="flex items-center justify-end gap-1">
+                  {!running && onWarmOnce && profile.platform !== "ios" && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      icon={<Sparkles className="h-3 w-3" />}
+                      loading={warmingBusyId === profile.id || Boolean(nurseryBadge?.warming)}
+                      disabled={isBusy || Boolean(nurseryBadge?.warming)}
+                      onClick={() => onWarmOnce(profile)}
+                      title="后台无窗口静默逛网页一轮（约 4～6 分钟自动结束）"
+                      aria-label={`暖一轮「${profile.name}」`}
+                    >
+                      {nurseryBadge?.warming ? "暖床中" : "暖一轮"}
+                    </Button>
+                  )}
                   {running ? (
                     <Button size="sm" icon={<Square className="h-3 w-3" />} loading={isBusy} onClick={() => actions.stop(profile)} aria-label={`关闭「${profile.name}」`}>
                       关闭
                     </Button>
                   ) : (
-                    <Button size="sm" icon={<Play className="h-3 w-3" />} loading={isBusy} onClick={() => actions.launch(profile, "manual")} aria-label={`打开「${profile.name}」`}>
+                    <Button
+                      size="sm"
+                      variant={nurseryBadge?.ready ? "primary" : "secondary"}
+                      icon={<Play className="h-3 w-3" />}
+                      loading={isBusy}
+                      onClick={() => actions.launch(profile, "manual")}
+                      aria-label={`打开「${profile.name}」`}
+                    >
                       打开
+                    </Button>
+                  )}
+                  {!running && nurseryBadges && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      icon={<RotateCcw className="h-3 w-3" />}
+                      disabled={isBusy || Boolean(nurseryBadge?.warming)}
+                      onClick={() => setResetting(profile)}
+                      title="注册完这个号后，点此清空旧痕迹、换新设备指纹，重新从 0/3 开始下一轮养号"
+                      aria-label={`新一轮重置「${profile.name}」`}
+                    >
+                      新一轮
                     </Button>
                   )}
                   <Menu trigger={<IconButton size="sm" label={`「${profile.name}」的更多操作`} icon={<MoreHorizontal className="h-4 w-4" />} />}>
