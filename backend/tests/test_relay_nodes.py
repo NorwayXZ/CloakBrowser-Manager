@@ -135,9 +135,11 @@ async def test_browser_launch_uses_the_saved_chain_and_closes_its_runtime(tmp_db
     manager._wait_for_cdp = AsyncMock()
     profile = {**_launch_profile(tmp_path), "proxy": SOCKS, "proxy_connection_mode": "relay", "relay_id": relay["id"]}
     try:
-        await manager.launch(profile, launch_mode="debug")
+        running = await manager.launch(profile, launch_mode="debug")
         assert start.call_args.kwargs["relay_link"] == RELAY
-        assert launch.call_args.kwargs["proxy"] == process.browser_proxy
+        assert running.proxy_switch is not None
+        assert running.proxy_switch.upstream_url == process.browser_proxy
+        assert launch.call_args.kwargs["proxy"] == running.proxy_switch.browser_proxy
         assert "--disable-quic" in launch.call_args.kwargs["args"]
     finally:
         await manager.stop(profile["id"])

@@ -311,6 +311,21 @@ class LaunchRequest(BaseModel):
     launch_mode: LaunchMode = "manual"
 
 
+class SwitchProxyRequest(BaseModel):
+    proxy: str | None = None
+    proxy_id: str | None = None
+    proxy_connection_mode: Literal["direct", "relay"] = "direct"
+    relay_id: str | None = None
+
+
+class SwitchProxyResponse(BaseModel):
+    ok: bool = True
+    applied_live: bool = False
+    requires_restart: bool = False
+    proxy_geo: dict | None = None
+    profile: ProfileResponse
+
+
 class StatusResponse(BaseModel):
     running_count: int
     app_version: str | None = None  # None when running from a source checkout

@@ -46,7 +46,7 @@ from .cloak_runtime import get_effective_chromium_version
 from .proxy_geo import fetch_proxy_geo
 from .proxy_probe import probe_proxy
 from .database import validate_profile_route
-from .proxy_bridge import HttpProxyBridge
+from .proxy_bridge import HttpProxyBridge, Socks5ProxySwitch
 from .runtime import RuntimeConfig, resolve_runtime, server_port
 from .session_keeper import (
     profile_files_open,
@@ -2330,6 +2330,7 @@ class RunningProfile:
     browser_engine: str = "cloakbrowser"
     launch_mode: str = "debug"
     proxy_bridge: HttpProxyBridge | None = None
+    proxy_switch: Socks5ProxySwitch | None = None
     xray_process: XrayProcess | None = None
     monitor_task: asyncio.Task | None = None
     fingerprint_report: dict[str, Any] | None = None
@@ -2700,6 +2701,7 @@ class BrowserManager:
         context: Any | None = None
         browser_process: subprocess.Popen[Any] | None = None
         proxy_bridge: HttpProxyBridge | None = None
+        proxy_switch: Socks5ProxySwitch | None = None
         xray_process: XrayProcess | None = None
         try:
             profile = self.follow_real_screen(profile)
@@ -2810,48 +2812,42 @@ class BrowserManager:
                     _append_unpacked_extension_arg(user_launch_args, keeper)
                 else:
                     remove_session_keeper_extension(user_data_dir)
-            browser_proxy = proxy
+            upstream_proxy = proxy
             if relay:
                 xray_process = await start_xray_proxy(
                     proxy, user_data_dir=user_data_dir, data_dir=self.runtime.data_dir,
                     relay_link=relay["proxy"],
                 )
-                browser_proxy = xray_process.browser_proxy
+                upstream_proxy = xray_process.browser_proxy
             elif proxy and is_xray_link(proxy):
                 xray_process = await start_xray_proxy(
                     proxy,
                     user_data_dir=user_data_dir,
                     data_dir=self.runtime.data_dir,
                 )
-                browser_proxy = xray_process.browser_proxy
+                upstream_proxy = xray_process.browser_proxy
                 logger.info(
                     "Using Xray local SOCKS5 for profile %s: %s",
                     profile_id,
-                    browser_proxy,
+                    upstream_proxy,
                 )
-            elif proxy:
-                parsed_proxy = urlparse(proxy)
-                needs_auth_bridge = bool(parsed_proxy.username or parsed_proxy.password)
-                if needs_auth_bridge and (
-                    parsed_proxy.scheme == "socks5"
-                    or browser_engine in {"system_chrome", "webkit"}
-                ):
-                    proxy_bridge = HttpProxyBridge(proxy)
-                    browser_proxy = await proxy_bridge.start()
-                    logger.info(
-                        "Using local proxy bridge for authenticated proxy profile %s",
-                        profile_id,
-                    )
 
-            if browser_proxy:
+            if upstream_proxy:
                 # A dead proxy used to launch anyway: no page loaded, a Pro
                 # kernel could not verify its license, and nothing said why.
                 # Check it first and stop with the step that failed.
                 probe = await asyncio.to_thread(
-                    probe_proxy, browser_proxy if xray_process is not None else proxy,
+                    probe_proxy, upstream_proxy if xray_process is not None else proxy,
                 )
                 if not probe.ok:
                     raise BrowserLaunchError(f"启动失败：代理不可用，{probe.message}")
+
+            browser_proxy = upstream_proxy
+            if upstream_proxy and not _has_chrome_arg(user_launch_args, "--proxy-server"):
+                proxy_switch = Socks5ProxySwitch(upstream_proxy)
+                browser_proxy = await proxy_switch.start()
+                if browser_engine != "webkit" and "--disable-quic" not in user_launch_args:
+                    user_launch_args.append("--disable-quic")
             resolved_timezone = profile.get("timezone") or None
             resolved_locale = profile.get("locale") or None
             proxy_geo: dict[str, Any] | None = None
@@ -3190,6 +3186,7 @@ class BrowserManager:
                 browser_engine=browser_engine,
                 launch_mode=effective_launch_mode,
                 proxy_bridge=proxy_bridge,
+                proxy_switch=proxy_switch,
                 xray_process=xray_process,
                 browser_process=browser_process,
                 screen=(int(profile.get("screen_width") or 0), int(profile.get("screen_height") or 0)),
@@ -3260,6 +3257,8 @@ class BrowserManager:
                 await _terminate_process_async(browser_process)
             if proxy_bridge is not None:
                 await proxy_bridge.close()
+            if proxy_switch is not None:
+                await proxy_switch.close()
             if xray_process is not None:
                 await xray_process.close()
             if cdp_port is not None:
@@ -3511,6 +3510,8 @@ class BrowserManager:
         await _terminate_process_async(running.browser_process)
         if running.proxy_bridge is not None:
             await running.proxy_bridge.close()
+        if running.proxy_switch is not None:
+            await running.proxy_switch.close()
         if running.xray_process is not None:
             await running.xray_process.close()
         if running.display is not None:
@@ -3552,6 +3553,102 @@ class BrowserManager:
             db.mark_profile_exit(profile_id, reason)
         except Exception as exc:
             logger.debug("Could not persist stop status for %s: %s", profile_id, exc)
+
+    async def switch_running_proxy(
+        self,
+        profile_id: str,
+        updated_profile: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Hot-swap the upstream proxy of an already-running browser without closing it.
+
+        Validates and probes the new proxy before mutating the active tunnel; if the
+        new proxy is unreachable, raises ``BrowserLaunchError`` while leaving the
+        current upstream intact. On success, drops pooled keep-alive tunnels so the
+        next browser page refresh immediately uses the new exit IP.
+        """
+        running = self.running.get(profile_id)
+        if running is None:
+            return {"applied_live": False, "requires_restart": False, "proxy_geo": None}
+        if running.proxy_switch is None:
+            return {"applied_live": False, "requires_restart": True, "proxy_geo": running.proxy_geo}
+
+        raw_proxy = updated_profile.get("proxy") or None
+        proxy = _normalize_proxy(raw_proxy) if raw_proxy else None
+        if proxy:
+            _validate_proxy(proxy)
+
+        relay = validate_profile_route(
+            proxy,
+            updated_profile.get("proxy_connection_mode", "direct"),
+            updated_profile.get("relay_id"),
+        )
+        user_data_dir = Path(updated_profile["user_data_dir"])
+        new_xray: XrayProcess | None = None
+        new_upstream: str | None = proxy
+        try:
+            if relay:
+                new_xray = await start_xray_proxy(
+                    proxy,
+                    user_data_dir=user_data_dir,
+                    data_dir=self.runtime.data_dir,
+                    relay_link=relay["proxy"],
+                )
+                new_upstream = new_xray.browser_proxy
+            elif proxy and is_xray_link(proxy):
+                new_xray = await start_xray_proxy(
+                    proxy,
+                    user_data_dir=user_data_dir,
+                    data_dir=self.runtime.data_dir,
+                )
+                new_upstream = new_xray.browser_proxy
+
+            if new_upstream:
+                probe = await asyncio.to_thread(
+                    probe_proxy,
+                    new_upstream if new_xray is not None else proxy,
+                )
+                if not probe.ok:
+                    raise BrowserLaunchError(f"切换代理失败：新代理不可用，{probe.message}")
+        except BaseException:
+            if new_xray is not None:
+                await new_xray.close()
+            raise
+
+        old_xray = running.xray_process
+        running.proxy_switch.switch_upstream(new_upstream)
+        running.xray_process = new_xray
+        if old_xray is not None:
+            with suppress(Exception):
+                await old_xray.close()
+
+        connection_mode = "proxy" if new_upstream else "direct"
+        new_geo: dict[str, Any] = {"connection_mode": connection_mode}
+        try:
+            geo = await asyncio.wait_for(
+                fetch_proxy_geo(running.proxy_switch.browser_proxy if new_upstream else None),
+                timeout=10,
+            )
+            new_geo = {**geo, "connection_mode": connection_mode}
+        except Exception as exc:
+            logger.warning("GeoIP lookup after live proxy switch failed for %s: %s", profile_id, exc)
+
+        running.proxy_geo = new_geo
+        if running.context is not None and running.browser_engine in {"cloakbrowser", "webkit"}:
+            _, geo_coords = geolocation_plan(updated_profile, new_geo, can_override=True)
+            if geo_coords:
+                with suppress(Exception):
+                    await running.context.set_geolocation(geo_coords)
+        try:
+            from . import database as db
+            db.mark_profile_opened(profile_id, new_geo)
+        except Exception as exc:
+            logger.debug("Could not persist proxy_geo after live switch for %s: %s", profile_id, exc)
+
+        return {
+            "applied_live": True,
+            "requires_restart": False,
+            "proxy_geo": new_geo,
+        }
 
     def get_status(self, profile_id: str, profile: dict[str, Any] | None = None) -> dict[str, Any]:
         """Get running status and viewer capabilities for a profile."""

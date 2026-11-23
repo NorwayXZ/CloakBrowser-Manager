@@ -435,3 +435,185 @@ class HttpProxyBridge:
                 await writer.wait_closed()
                 raise ProxyBridgeError(f"Upstream HTTP CONNECT failed: {status_line}")
         return reader, writer
+
+
+class Socks5ProxySwitch:
+    """Loopback SOCKS5 gateway whose upstream proxy can be hot-swapped while the browser stays open.
+
+    All browser engines (CloakBrowser manual/debug, System Chrome, Apple WebKit) connect to
+    ``socks5://127.0.0.1:<port>`` without credentials. Calling :meth:`switch_upstream` atomically
+    points subsequent connections at the new upstream (SOCKS5, HTTP/HTTPS, Xray local SOCKS5, or
+    ``None`` for direct) and closes all existing pooled/keep-alive TCP tunnels so a single page
+    refresh in the browser immediately exits through the new proxy.
+    """
+
+    def __init__(self, upstream_url: str | None):
+        self.upstream_url: str | None = upstream_url
+        self.upstream: _UpstreamProxy | None = _UpstreamProxy.parse(upstream_url) if upstream_url else None
+        self._server: asyncio.AbstractServer | None = None
+        self._client_writers: set[asyncio.StreamWriter] = set()
+        self._upstream_writers: set[asyncio.StreamWriter] = set()
+        self._tasks: set[asyncio.Task[object]] = set()
+
+    @property
+    def port(self) -> int:
+        if not self._server or not self._server.sockets:
+            raise ProxyBridgeError("SOCKS5 proxy switch has not started")
+        return int(self._server.sockets[0].getsockname()[1])
+
+    @property
+    def browser_proxy(self) -> str:
+        return f"socks5://127.0.0.1:{self.port}"
+
+    async def start(self) -> str:
+        self._server = await asyncio.start_server(self._handle_client, "127.0.0.1", 0)
+        logger.info(
+            "Started hot-swappable SOCKS5 proxy switch on %s (upstream=%s)",
+            self.browser_proxy,
+            f"{self.upstream.scheme}://{self.upstream.host}:{self.upstream.port}" if self.upstream else "direct",
+        )
+        return self.browser_proxy
+
+    def drop_connections(self) -> None:
+        """Close all open client/upstream sockets so pooled keep-alive tunnels reconnect on next request."""
+        for writer in list(self._upstream_writers):
+            writer.close()
+        for writer in list(self._client_writers):
+            writer.close()
+
+    def switch_upstream(self, upstream_url: str | None) -> None:
+        """Atomically switch to a new upstream proxy (or None for direct) and drop pooled tunnels."""
+        new_upstream = _UpstreamProxy.parse(upstream_url) if upstream_url else None
+        self.upstream_url = upstream_url
+        self.upstream = new_upstream
+        self.drop_connections()
+        logger.info(
+            "Switched SOCKS5 proxy switch %s -> %s",
+            self.browser_proxy if self._server and self._server.sockets else "pending",
+            f"{new_upstream.scheme}://{new_upstream.host}:{new_upstream.port}" if new_upstream else "direct",
+        )
+
+    async def close(self) -> None:
+        if self._server is None:
+            return
+        self._server.close()
+        await self._server.wait_closed()
+        self._server = None
+        self.drop_connections()
+        current = asyncio.current_task()
+        tasks = [task for task in self._tasks if task is not current and not task.done()]
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        self._client_writers.clear()
+        self._upstream_writers.clear()
+        self._tasks.clear()
+
+    async def _handle_client(
+        self,
+        client_reader: asyncio.StreamReader,
+        client_writer: asyncio.StreamWriter,
+    ) -> None:
+        task = asyncio.current_task()
+        if task is not None:
+            self._tasks.add(task)
+        self._client_writers.add(client_writer)
+        upstream_writer: asyncio.StreamWriter | None = None
+        replied = False
+        try:
+            greeting = await client_reader.readexactly(2)
+            if greeting[0] != 5:
+                return
+            methods = await client_reader.readexactly(greeting[1])
+            if 0x00 not in methods:
+                client_writer.write(b"\x05\xff")
+                await client_writer.drain()
+                return
+            client_writer.write(b"\x05\x00")
+            await client_writer.drain()
+
+            req = await client_reader.readexactly(4)
+            ver, cmd, _rsv, atyp = req
+            if ver != 5 or cmd != 1:
+                client_writer.write(b"\x05\x07\x00\x01\x00\x00\x00\x00\x00\x00")
+                await client_writer.drain()
+                return
+
+            if atyp == 1:
+                target_host = str(ipaddress.IPv4Address(await client_reader.readexactly(4)))
+            elif atyp == 3:
+                ln = (await client_reader.readexactly(1))[0]
+                target_host = (await client_reader.readexactly(ln)).decode("idna")
+            elif atyp == 4:
+                target_host = str(ipaddress.IPv6Address(await client_reader.readexactly(16)))
+            else:
+                client_writer.write(b"\x05\x08\x00\x01\x00\x00\x00\x00\x00\x00")
+                await client_writer.drain()
+                return
+
+            target_port = int.from_bytes(await client_reader.readexactly(2), "big")
+            upstream_reader, upstream_writer = await self._open_upstream(target_host, target_port)
+            self._upstream_writers.add(upstream_writer)
+
+            client_writer.write(b"\x05\x00\x00\x01\x7f\x00\x00\x01\x00\x00")
+            await client_writer.drain()
+            replied = True
+
+            await _tunnel(client_reader, client_writer, upstream_reader, upstream_writer)
+        except (OSError, ValueError, asyncio.IncompleteReadError, ProxyBridgeError) as exc:
+            logger.debug("SOCKS5 proxy switch request failed: %s", exc)
+            if not replied and not client_writer.is_closing():
+                try:
+                    client_writer.write(b"\x05\x05\x00\x01\x00\x00\x00\x00\x00\x00")
+                    await client_writer.drain()
+                except OSError:
+                    pass
+        finally:
+            if upstream_writer is not None:
+                self._upstream_writers.discard(upstream_writer)
+                upstream_writer.close()
+                try:
+                    await upstream_writer.wait_closed()
+                except OSError:
+                    pass
+            self._client_writers.discard(client_writer)
+            client_writer.close()
+            try:
+                await client_writer.wait_closed()
+            except OSError:
+                pass
+            if task is not None:
+                self._tasks.discard(task)
+
+    async def _open_upstream(
+        self,
+        target_host: str,
+        target_port: int,
+    ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+        upstream = self.upstream
+        if upstream is None:
+            return await asyncio.open_connection(target_host, target_port)
+        if upstream.scheme == "socks5":
+            return await _open_socks5_connection(upstream, target_host, target_port)
+
+        if upstream.scheme == "https":
+            reader, writer = await _open_tls_connection(upstream.host, upstream.port)
+        else:
+            reader, writer = await asyncio.open_connection(upstream.host, upstream.port)
+
+        host_header = f"[{target_host}]" if ":" in target_host and not target_host.startswith("[") else target_host
+        connect_headers = [
+            f"CONNECT {host_header}:{target_port} HTTP/1.1",
+            f"Host: {host_header}:{target_port}",
+        ]
+        if upstream.authorization:
+            connect_headers.append(f"Proxy-Authorization: {upstream.authorization}")
+        writer.write(("\r\n".join(connect_headers) + "\r\n\r\n").encode("latin-1"))
+        await writer.drain()
+        response = await _read_headers(reader)
+        status_line = response.split(b"\r\n", 1)[0].decode("latin-1")
+        if len(status_line.split(" ", 2)) < 2 or not status_line.split(" ", 2)[1].startswith("2"):
+            writer.close()
+            await writer.wait_closed()
+            raise ProxyBridgeError(f"Upstream HTTP CONNECT failed: {status_line}")
+        return reader, writer

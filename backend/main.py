@@ -132,6 +132,8 @@ from .models import (
     ProxyTestResponse,
     ProfileUpdate,
     StatusResponse,
+    SwitchProxyRequest,
+    SwitchProxyResponse,
     TagResponse,
 )
 
@@ -809,19 +811,114 @@ async def get_profile(profile_id: str):
 
 @app.put("/api/profiles/{profile_id}", response_model=ProfileResponse)
 async def update_profile(profile_id: str, req: ProfileUpdate):
+    existing = db.get_profile(profile_id)
+    if not existing or existing.get("deleted_at"):
+        raise HTTPException(status_code=404, detail="Profile not found")
+
     # Only pass fields that were explicitly set
     data = req.model_dump(exclude_unset=True)
     _normalize_profile_cookies(data)
     tags = data.pop("tags", None)
     if tags is not None:
         data["tags"] = [t.model_dump() if hasattr(t, "model_dump") else t for t in tags]
+
+    proxy_changed = any(
+        key in data and data[key] != existing.get(key)
+        for key in ("proxy", "proxy_id", "proxy_connection_mode", "relay_id")
+    )
+    switch_res: dict | None = None
+    if proxy_changed and profile_id in browser_mgr.running:
+        candidate = {**existing, **data}
+        try:
+            switch_res = await browser_mgr.switch_running_proxy(profile_id, candidate)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except BrowserLaunchError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     try:
         profile = db.update_profile(profile_id, **data)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not profile or profile.get("deleted_at"):
         raise HTTPException(status_code=404, detail="Profile not found")
+
+    if switch_res and switch_res.get("applied_live") and switch_res.get("proxy_geo"):
+        db.mark_profile_opened(profile_id, switch_res["proxy_geo"])
+        profile = db.get_profile(profile_id) or profile
+
     return _profile_response(profile)
+
+
+@app.post("/api/profiles/{profile_id}/switch-proxy", response_model=SwitchProxyResponse)
+async def switch_profile_proxy(profile_id: str, req: SwitchProxyRequest):
+    """Switch a profile's proxy — hot-swapping live without closing the browser when running."""
+    existing = db.get_profile(profile_id)
+    if not existing or existing.get("deleted_at"):
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    raw_proxy = (req.proxy or "").strip() or None
+    proxy_id = (req.proxy_id or "").strip() or None
+    if proxy_id:
+        preset = db.get_proxy_preset(proxy_id)
+        if not preset:
+            raise HTTPException(status_code=404, detail="未找到所选的已保存代理")
+        if raw_proxy is None or _normalize_proxy(raw_proxy) == _normalize_proxy(preset["proxy"]):
+            raw_proxy = preset["proxy"]
+
+    if raw_proxy:
+        normalized_check = _normalize_proxy(raw_proxy)
+        try:
+            _validate_proxy(normalized_check)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        stored_proxy = raw_proxy if proxy_id else normalized_check
+    else:
+        stored_proxy = None
+
+    mode = req.proxy_connection_mode or "direct"
+    relay_id = (req.relay_id or "").strip() or None if mode == "relay" else None
+    try:
+        db.validate_profile_route(stored_proxy, mode, relay_id)
+        resolved_proxy_id = db.resolve_proxy_binding(stored_proxy, proxy_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    update_fields = {
+        "proxy": stored_proxy,
+        "proxy_id": resolved_proxy_id,
+        "proxy_connection_mode": mode,
+        "relay_id": relay_id,
+    }
+
+    switch_res = {"applied_live": False, "requires_restart": False, "proxy_geo": None}
+    if profile_id in browser_mgr.running:
+        candidate = {**existing, **update_fields}
+        try:
+            switch_res = await browser_mgr.switch_running_proxy(profile_id, candidate)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except BrowserLaunchError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        profile = db.update_profile(profile_id, **update_fields)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not profile or profile.get("deleted_at"):
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    if switch_res.get("applied_live") and switch_res.get("proxy_geo"):
+        db.mark_profile_opened(profile_id, switch_res["proxy_geo"])
+        profile = db.get_profile(profile_id) or profile
+
+    return SwitchProxyResponse(
+        ok=True,
+        applied_live=bool(switch_res.get("applied_live")),
+        requires_restart=bool(switch_res.get("requires_restart")),
+        proxy_geo=switch_res.get("proxy_geo"),
+        profile=_profile_response(profile),
+    )
 
 
 @app.delete("/api/profiles/{profile_id}")

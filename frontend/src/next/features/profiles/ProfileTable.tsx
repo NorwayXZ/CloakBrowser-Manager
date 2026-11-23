@@ -1,4 +1,4 @@
-import { Activity, Bug, CheckCircle2, Copy, Eraser, Flame, Link2, MapPin, MonitorPlay, MoreHorizontal, Pencil, Pin, Play, RefreshCw, RotateCcw, Sparkles, Square, Trash2 } from "lucide-react";
+import { Activity, ArrowLeftRight, Bug, CheckCircle2, Copy, Eraser, Flame, Link2, MapPin, MonitorPlay, MoreHorizontal, Pencil, Pin, Play, RefreshCw, RotateCcw, Sparkles, Square, Trash2 } from "lucide-react";
 import { lazy, Suspense, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { cn } from "../../shared/lib/cn";
 import { matchesCombo } from "../../shared/lib/hotkeys";
@@ -40,6 +40,7 @@ const INTERACTIVE = "button, a, input, textarea, select, [role=checkbox], [role=
 
 const FingerprintReportDialog = lazy(() => import("./FingerprintReportDialog").then((m) => ({ default: m.FingerprintReportDialog })));
 const ResetProfileDialog = lazy(() => import("./ResetProfileDialog").then((m) => ({ default: m.ResetProfileDialog })));
+const SwitchProxyDialog = lazy(() => import("./SwitchProxyDialog").then((m) => ({ default: m.SwitchProxyDialog })));
 
 /**
  * The environment table: each row says everything needed at a glance, and
@@ -84,6 +85,7 @@ export function ProfileTable({
   const [selfCheck, setSelfCheck] = useState<Profile | null>(null);
   const [rotating, setRotating] = useState<Profile | null>(null);
   const [resetting, setResetting] = useState<Profile | null>(null);
+  const [switchingProxy, setSwitchingProxy] = useState<Profile | null>(null);
   const bodyRef = useRef<HTMLTableSectionElement>(null);
   const allSelected = profiles.length > 0 && profiles.every((p) => selected.has(p.id));
   const someSelected = !allSelected && profiles.some((p) => selected.has(p.id));
@@ -230,8 +232,21 @@ export function ProfileTable({
                 </TD>
               )}
               <TD className="py-2">
-                <div className="truncate font-mono text-xs text-fg" title={proxyHost(profile)}>
-                  {proxyHost(profile)}
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <span className="truncate font-mono text-xs text-fg" title={proxyHost(profile)}>
+                    {proxyHost(profile)}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={isBusy}
+                    onClick={() => setSwitchingProxy(profile)}
+                    title={running ? "免关窗实时切换代理（切完刷新网页即刻生效）" : "快速切换该环境的代理"}
+                    aria-label={`切换「${profile.name}」的代理`}
+                    className="inline-flex h-5 shrink-0 items-center gap-0.5 rounded border border-border bg-surface-2 px-1.5 text-[11px] font-medium text-fg-2 transition-colors hover:border-accent/50 hover:text-accent disabled:opacity-50"
+                  >
+                    <ArrowLeftRight className="h-2.5 w-2.5" aria-hidden />
+                    换代理
+                  </button>
                 </div>
                 <div className="flex min-w-0 items-center gap-1.5 text-xs text-fg-3">
                   <Badge className="h-4 px-1 text-[11px]">{proxyType(profile)}</Badge>
@@ -342,6 +357,9 @@ export function ProfileTable({
                     <MenuItem icon={<Pencil className="h-4 w-4" />} onSelect={() => actions.edit(profile)}>
                       编辑
                     </MenuItem>
+                    <MenuItem icon={<ArrowLeftRight className="h-4 w-4" />} onSelect={() => setSwitchingProxy(profile)} disabled={isBusy}>
+                      切换代理
+                    </MenuItem>
                     {profile.proxy?.toLowerCase().startsWith("socks5://") && (
                       <MenuItem icon={<RefreshCw className="h-4 w-4" />} onSelect={() => setRotating(profile)}>
                         一键切换 IP
@@ -383,6 +401,11 @@ export function ProfileTable({
     {resetting && (
       <Suspense fallback={null}>
         <ResetProfileDialog profile={resetting} onClose={() => setResetting(null)} />
+      </Suspense>
+    )}
+    {switchingProxy && (
+      <Suspense fallback={null}>
+        <SwitchProxyDialog profile={switchingProxy} onClose={() => setSwitchingProxy(null)} />
       </Suspense>
     )}
     {rotating && (

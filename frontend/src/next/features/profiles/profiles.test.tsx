@@ -767,4 +767,58 @@ describe("nursery isolation", () => {
     expect(screen.getByText("Gmail产房-1")).toBeInTheDocument();
     expect(screen.queryByText("Gmail电脑产房-1")).not.toBeInTheDocument();
   });
+
+  it("hot-swaps a running profile's SOCKS5 proxy straight from the row without closing it", async () => {
+    const runningAmazon = makeProfile({
+      ...AMAZON,
+      status: "running",
+      launch_mode: "manual",
+      proxy: "socks5://hk:pass@198.51.100.10:1080",
+      proxy_geo: { ip: "198.51.100.10", country: "Hong Kong", country_code: "HK" },
+    });
+    profiles = [runningAmazon];
+    const switchedProfile = makeProfile({
+      ...runningAmazon,
+      proxy: "socks5://sg:pass@203.0.113.88:1080",
+      proxy_geo: { ip: "203.0.113.88", country: "Singapore", country_code: "SG" },
+    });
+    const { fetchMock } = await renderList([
+      { path: "/api/proxy-presets", respond: [] },
+      { path: "/api/relay-nodes", respond: [] },
+      {
+        method: "POST",
+        path: "/api/profiles/a/switch-proxy",
+        respond: () => {
+          profiles = [switchedProfile];
+          return {
+            ok: true,
+            applied_live: true,
+            requires_restart: false,
+            proxy_geo: { ip: "203.0.113.88", country: "Singapore", country_code: "SG" },
+            profile: switchedProfile,
+          };
+        },
+      },
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "切换「Amazon Seller #1」的代理" }));
+    const dialog = await screen.findByRole("dialog", { name: /切换代理 · Amazon Seller #1/ });
+    expect(dialog).toHaveTextContent("免关窗实时切换");
+
+    // Paste full Singapore SOCKS5 URL directly into Host input -> auto-splits host/port/auth
+    const hostInput = within(dialog).getByPlaceholderText("例如 sg.proxy.example.com");
+    fireEvent.change(hostInput, { target: { value: "socks5://sg:pass@203.0.113.88:1080" } });
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "立即热切" }));
+
+    await waitFor(() => {
+      const postCalls = calls(fetchMock, "POST", /\/api\/profiles\/a\/switch-proxy$/);
+      expect(postCalls).toHaveLength(1);
+      expect(bodyOf(postCalls[0])).toMatchObject({
+        proxy: "socks5://sg:pass@203.0.113.88:1080",
+        proxy_connection_mode: "direct",
+      });
+    });
+    expect(await within(row("Amazon Seller #1")).findByText("203.0.113.88")).toBeInTheDocument();
+  });
 });

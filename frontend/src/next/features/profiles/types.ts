@@ -107,3 +107,26 @@ export interface SentenceOptions {
 }
 
 export type SentenceCreated = Profile & { warnings: string[] };
+
+export interface SwitchProxyInput {
+  proxy: string | null;
+  proxy_id?: string | null;
+  proxy_connection_mode?: "direct" | "relay";
+  relay_id?: string | null;
+}
+
+export interface SwitchProxyResult {
+  ok: boolean;
+  applied_live: boolean;
+  requires_restart: boolean;
+  proxy_geo: {
+    ip?: string | null;
+    country?: string | null;
+    country_code?: string | null;
+    region?: string | null;
+    city?: string | null;
+    timezone?: string | null;
+    connection_mode?: string | null;
+  } | null;
+  profile: Profile;
+}

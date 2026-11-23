@@ -17,6 +17,8 @@ import type {
   SentenceCreated,
   SentenceDraft,
   SentenceOptions,
+  SwitchProxyInput,
+  SwitchProxyResult,
 } from "./types";
 
 export const profileKeys = {
@@ -33,6 +35,8 @@ export const profilesApi = {
   list: () => request<Profile[]>("/api/profiles"),
   create: (data: ProfileCreate) => request<Profile>("/api/profiles", { method: "POST", body: data }),
   update: (id: string, data: Partial<ProfileCreate>) => request<Profile>(`/api/profiles/${enc(id)}`, { method: "PUT", body: data }),
+  switchProxy: (id: string, data: SwitchProxyInput) =>
+    request<SwitchProxyResult>(`/api/profiles/${enc(id)}/switch-proxy`, { method: "POST", body: data, timeoutMs: 45_000 }),
   remove: (id: string) => request<{ ok: boolean }>(`/api/profiles/${enc(id)}`, { method: "DELETE" }),
   restore: (id: string) => request<Profile>(`/api/profiles/${enc(id)}/restore`, { method: "POST" }),
   burn: (id: string) => request<BurnResult>(`/api/profiles/${enc(id)}/burn`, { method: "POST", body: { confirm: true } }),

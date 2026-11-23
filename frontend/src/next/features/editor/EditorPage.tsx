@@ -143,7 +143,17 @@ function Editor({
         list ? (isEdit ? list.map((p) => (p.id === saved.id ? saved : p)) : [saved, ...list]) : list,
       );
       void queryClient.invalidateQueries({ queryKey: profileKeys.list });
-      toast.show({ tone: "success", title: isEdit ? `已保存「${saved.name}」` : `已创建「${saved.name}」`, description: isEdit ? "已经打开的浏览器要重新打开才会用上新配置。" : undefined });
+      const proxyChanged =
+        isEdit &&
+        ((payload.proxy ?? null) !== (profile.proxy ?? null) ||
+          (payload.proxy_connection_mode ?? "direct") !== (profile.proxy_connection_mode ?? "direct") ||
+          (payload.relay_id ?? null) !== (profile.relay_id ?? null));
+      const editHint = !isEdit
+        ? undefined
+        : proxyChanged && profile.status === "running" && Boolean(profile.proxy)
+          ? "代理已实时热切换，回浏览器刷新网页即刻走新代理；其余指纹参数需重开后生效。"
+          : "已经打开的浏览器若修改了指纹参数，重新打开后会生效。";
+      toast.show({ tone: "success", title: isEdit ? `已保存「${saved.name}」` : `已创建「${saved.name}」`, description: editHint });
       const savedHome = isNurseryProfile(saved) ? "/nursery" : "/profiles";
       leave(`${savedHome}?p=${encodeURIComponent(saved.id)}`);
     } catch (error) {
